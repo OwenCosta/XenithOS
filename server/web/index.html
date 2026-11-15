@@ -212,7 +212,7 @@
         <tr><td>Sound in games, app start times</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">0.5.1 keeps the picture up between programs and lines the sound chip up after a game</td></tr>
         <tr><td>Profiles, Cloud, avatars</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">needs the Ethernet cable on the Xbox; no Wi-Fi driver</td></tr>
         <tr><td>VOLT, DOOM, Tube</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">DOOM comes with Freedoom and has sound effects; no music yet</td></tr>
-        <tr><td>PCs and Raspberry Pis</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">new in 0.5.0, tested on Linux</td></tr>
+        <tr><td>PCs and Raspberry Pis</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">0.5.2 runs apps inside XenithOS's window: no black screen between them</td></tr>
         <tr><td>XenithOS Cloud and this site</td><td class="yes" data-k="Builds">yes</td><td class="live" data-k="On the Xbox">live</td><td class="note">you're on it</td></tr>
       </tbody>
     </table>
@@ -257,6 +257,8 @@
   <div class="wrap">
     <h2>Build log</h2>
     <ul class="log">
+      <li><b>0.5.2</b><time datetime="2026-11-15">Nov 15, 2026</time>
+        <p>On PCs and Raspberry Pis, apps now run inside XenithOS's own window, so starting or leaving one never blanks the screen, the "Starting" screen stays up until the app is ready, and XenithOS's sound still works after you leave an app. Holding Guide for two seconds, or Ctrl+Alt+Backspace, closes an app that stops responding. Everywhere, a button still held when you switch (the A that starts an app, or BACK held to leave DOOM) no longer counts as a press in the next program, and quick key taps on a PC are no longer missed.</p></li>
       <li><b>0.5.1</b><time datetime="2026-11-15">Nov 15, 2026</time>
         <p>Switching between XenithOS and apps keeps the picture on the TV instead of going black: each program hands the next one what it needs, and the next one keeps the video mode that's already running. XenithOS shows a progress bar while it reads an app, and leaving an app goes straight back to the home screen with that app selected. The sound chip is lined up with where the last program left it, the likely cause of broken sound after a game. DOOM installs together with Freedoom: Phase 1 and 2, and asks which one to play.</p></li>
       <li><b>Tube 1.1</b><time datetime="2026-11-15">Nov 15, 2026</time>

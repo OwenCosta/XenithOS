@@ -34,11 +34,32 @@ uint64_t ui_ms(void)
     return plat_time_us() / 1000;
 }
 
+/* Key repeat for ui_nav_x/ui_nav_y. */
+static int held_x, held_y;
+static uint64_t next_x, next_y;
+
+/* Set for a program's first frame and when XenithOS gets the controller back from an app:
+ * whatever is held then was pressed for the other program (the A that started an app, the
+ * BACK held to leave DOOM), so it only counts once it has been let go and pressed again. */
+static int settle = 1;
+
+void ui_settle_input(void)
+{
+    settle = 1;
+}
+
 void ui_poll(void)
 {
     audio_update();
     prev = cur;
     plat_poll(&cur);
+    if (settle) {
+        settle = 0;
+        prev = cur;
+        held_y = cur.up || cur.ly > STICK_TH ? -1 : cur.down || cur.ly < -STICK_TH ? 1 : 0;
+        held_x = cur.left || cur.lx < -STICK_TH ? -1 : cur.right || cur.lx > STICK_TH ? 1 : 0;
+        next_x = next_y = ui_ms() + 380;
+    }
 }
 
 static uint64_t frame_start;
@@ -61,16 +82,12 @@ static int nav(int neg, int pos, int *held, uint64_t *next)
 
 int ui_nav_y(void)
 {
-    static int held;
-    static uint64_t next;
-    return nav(cur.up || cur.ly > STICK_TH, cur.down || cur.ly < -STICK_TH, &held, &next);
+    return nav(cur.up || cur.ly > STICK_TH, cur.down || cur.ly < -STICK_TH, &held_y, &next_y);
 }
 
 int ui_nav_x(void)
 {
-    static int held;
-    static uint64_t next;
-    return nav(cur.left || cur.lx < -STICK_TH, cur.right || cur.lx > STICK_TH, &held, &next);
+    return nav(cur.left || cur.lx < -STICK_TH, cur.right || cur.lx > STICK_TH, &held_x, &next_x);
 }
 
 /* How long the last frame really was, in 60 Hz frames. Easing uses it so animations take the
@@ -284,6 +301,7 @@ int ui_launch(const char *path, const char *title, const char *detail)
     plat_set_launch_progress(launch_frame);
     started = plat_launch(path);
     plat_set_launch_progress(NULL);
+    ui_settle_input();             /* on a PC the app has just quit: its last presses aren't ours */
     return started;
 }
 

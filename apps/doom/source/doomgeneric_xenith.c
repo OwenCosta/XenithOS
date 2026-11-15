@@ -94,7 +94,8 @@ static void poll_pad(void)
     for (i = 0; i < B_COUNT; i++)
         if (want[i] != held[i]) {
             held[i] = want[i];
-            push_key(want[i], bind_key[i]);
+            /* Held on the first poll means pressed to start DOOM, not for DOOM. */
+            if (polls > 1 || !want[i]) push_key(want[i], bind_key[i]);
         }
 
     /* Weapon cycling: hold the number key for a few polls so a game tic sees it. */

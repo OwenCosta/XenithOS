@@ -18,6 +18,7 @@ extern int HEADER_H;       /* space the screen header takes */
 
 void ui_init(void);
 void ui_poll(void);
+void ui_settle_input(void); /* buttons held right now don't count until let go (after another program) */
 int  ui_nav_x(void);       /* -1 / +1 with key repeat; call once per frame */
 int  ui_nav_y(void);
 void ui_end_frame(void);   /* toasts, fade, present, sound, 60 fps */

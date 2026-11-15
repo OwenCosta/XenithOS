@@ -1,15 +1,15 @@
 [
- {"id": "volt", "kind": "app", "name": "VOLT", "version": "1.5", "file": "volt.elf32",
+ {"id": "volt", "kind": "app", "name": "VOLT", "version": "1.6", "file": "volt.elf32",
   "description": "Steer a streak of light, grab sparks and climb the global leaderboard."},
- {"id": "doom", "kind": "app", "name": "DOOM", "version": "1.4", "file": "doom.elf32",
+ {"id": "doom", "kind": "app", "name": "DOOM", "version": "1.5", "file": "doom.elf32",
   "description": "The 1993 classic on your 360, with sound. Plays the free Freedoom games, or your own DOOM files.",
   "needs": ["freedoom1", "freedoom2"]},
- {"id": "tube", "kind": "app", "name": "Tube", "version": "1.2", "file": "tube.elf32",
+ {"id": "tube", "kind": "app", "name": "Tube", "version": "1.3", "file": "tube.elf32",
   "description": "Search and watch YouTube videos. Needs a XenithOS profile."},
  {"id": "freedoom1", "kind": "data", "name": "Freedoom: Phase 1", "version": "0.13.0", "file": "freedoom1.wad",
   "description": "Free game data for DOOM, laid out like the original episodes. BSD license."},
  {"id": "freedoom2", "kind": "data", "name": "Freedoom: Phase 2", "version": "0.13.0", "file": "freedoom2.wad",
   "description": "Free DOOM II style game data with 32 levels. BSD license."},
- {"id": "xenith", "kind": "system", "name": "XenithOS update", "version": "0.5.1", "file": "xenith.elf32",
+ {"id": "xenith", "kind": "system", "name": "XenithOS update", "version": "0.5.2", "file": "xenith.elf32",
   "description": "Updates XenithOS itself on your USB stick."}
 ]
