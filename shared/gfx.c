@@ -419,6 +419,73 @@ void gfx_tri(float x0, float y0, float x1, float y1, float x2, float y2, uint32_
     }
 }
 
+/* The signed distance to a polygon (any shape) gives each pixel its cover, so a shape made of
+ * one polygon has no inner seams the way triangles side by side would. */
+void gfx_poly(const float *xy, int n, float ox, float oy, float s, uint32_t c, int a)
+{
+    float px[16], py[16], x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+    int i, j, ix0, iy0, ix1, iy1, X, Y;
+    if (n < 3 || n > 16 || a <= 0) return;
+    for (i = 0; i < n; i++) {
+        px[i] = ox + xy[2 * i] * s;
+        py[i] = oy + xy[2 * i + 1] * s;
+        x0 = fminf(x0, px[i]); x1 = fmaxf(x1, px[i]);
+        y0 = fminf(y0, py[i]); y1 = fmaxf(y1, py[i]);
+    }
+    if (!bbox(x0 - 1, y0 - 1, x1 + 1, y1 + 1, &ix0, &iy0, &ix1, &iy1)) return;
+    for (Y = iy0; Y < iy1; Y++) {
+        uint32_t *row = gfx_bb + (size_t)Y * SCR_W;
+        float qy = Y + 0.5f;
+        for (X = ix0; X < ix1; X++) {
+            float qx = X + 0.5f, dd = 1e30f, sign = 1;
+            int k;
+            for (i = 0, j = n - 1; i < n; j = i++) {
+                float ex = px[j] - px[i], ey = py[j] - py[i], wx = qx - px[i], wy = qy - py[i];
+                float h = clampf((wx * ex + wy * ey) / (ex * ex + ey * ey), 0, 1);
+                float bx = wx - ex * h, by = wy - ey * h, d2 = bx * bx + by * by;
+                int up = qy >= py[i], below = qy < py[j], left = ex * wy > ey * wx;
+                if (d2 < dd) dd = d2;
+                if ((up && below && left) || (!up && !below && !left)) sign = -sign;
+            }
+            k = cover(sign * sqrtf(dd), a);         /* sign is -1 inside: an odd number of crossings */
+            if (k) blend(&row[X], c, k);
+        }
+    }
+}
+
+void gfx_sector(float cx, float cy, float r, float t, float a0, float a1, uint32_t c, int a)
+{
+    const float Q = 1.5707963f;
+    float ro = r + t * 0.5f, ri = r - t * 0.5f, x0, y0, x1, y1, n0x, n0y, n1x, n1y;
+    int ix0, iy0, ix1, iy1, X, Y, q;
+    if (a1 <= a0 || a <= 0) return;
+    /* its box: both ends, and the edge wherever it passes 3, 6, 9 or 12 o'clock */
+    x0 = x1 = cx + cosf(a0) * ri;
+    y0 = y1 = cy + sinf(a0) * ri;
+#define GROW(gx, gy) do { float gx_ = (gx), gy_ = (gy); \
+        x0 = fminf(x0, gx_); x1 = fmaxf(x1, gx_); y0 = fminf(y0, gy_); y1 = fmaxf(y1, gy_); } while (0)
+    GROW(cx + cosf(a0) * ro, cy + sinf(a0) * ro);
+    GROW(cx + cosf(a1) * ri, cy + sinf(a1) * ri);
+    GROW(cx + cosf(a1) * ro, cy + sinf(a1) * ro);
+    for (q = (int)ceilf(a0 / Q); q * Q <= a1; q++) GROW(cx + cosf(q * Q) * ro, cy + sinf(q * Q) * ro);
+#undef GROW
+    if (!bbox(x0 - 1, y0 - 1, x1 + 1, y1 + 1, &ix0, &iy0, &ix1, &iy1)) return;
+    /* each end is a line through the centre; these point away from the piece across it */
+    n0x = sinf(a0); n0y = -cosf(a0);
+    n1x = -sinf(a1); n1y = cosf(a1);
+    for (Y = iy0; Y < iy1; Y++) {
+        uint32_t *row = gfx_bb + (size_t)Y * SCR_W;
+        float dy = Y + 0.5f - cy;
+        for (X = ix0; X < ix1; X++) {
+            float dx = X + 0.5f - cx;
+            float band = fabsf(sqrtf(dx * dx + dy * dy) - r) - t * 0.5f;
+            float ends = fmaxf(dx * n0x + dy * n0y, dx * n1x + dy * n1y);
+            int k = cover(fmaxf(band, ends), a);
+            if (k) blend(&row[X], c, k);
+        }
+    }
+}
+
 /* ----------------------------------------------------------------------- text */
 
 static const struct font *F(int font)

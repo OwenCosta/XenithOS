@@ -31,6 +31,12 @@ void gfx_ring(float cx, float cy, float r, float t, uint32_t c, int a);
 void gfx_arc(float cx, float cy, float r, float t, float a0, float a1, uint32_t c, int a);  /* radians, round caps */
 void gfx_line(float x0, float y0, float x1, float y1, float t, uint32_t c, int a);           /* round caps */
 void gfx_tri(float x0, float y0, float x1, float y1, float x2, float y2, uint32_t c, int a);
+/* A filled polygon of any shape, 3 to 16 corners given as x, y pairs, drawn at (ox, oy) + corner * s,
+ * with smooth edges and no seams. */
+void gfx_poly(const float *xy, int n, float ox, float oy, float s, uint32_t c, int a);
+/* A piece of a ring with square ends: band of width t around radius r, from angle a0 to a1
+ * (radians, clockwise from 3 o'clock, a0 < a1, less than half a turn). */
+void gfx_sector(float cx, float cy, float r, float t, float a0, float a1, uint32_t c, int a);
 
 /* Text. y is the top of the line box; gfx_line_h() is the box height. */
 int  gfx_str(int font, int x, int y, uint32_t c, const char *s);          /* returns width */

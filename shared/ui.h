@@ -38,9 +38,15 @@ void ui_toast_icon(int icon);                   /* icon for the next toast (ICON
 void ui_panel(int x, int y, int w, int h);      /* a card */
 void ui_select_box(float x, float y, float w, float h, float r);   /* a selected row or card */
 int  ui_brand(int x, int y, int font, int measure_only);   /* the mark and "XenithOS" */
-/* The XenithOS mark: an X split into two chevrons, with a red point where they'd cross.
- * size is its height; arms (0..1) draws the strokes out from the middle; dot scales the point. */
-void ui_logo(float cx, float cy, float size, float arms, float dot, int alpha);
+/* The XenithOS insignia: a grey chevron and two red arms make an X with a red slash through it,
+ * inside a broken double ring with four ticks (its shapes are in logo_shape.h, from
+ * tools/mkart.py). size is its whole height, tick to tick. build (0..1) brings the X's pieces in
+ * from outside and sweeps the rings round from the ticks; slash (0..1) grows the slash out of its
+ * point and brings the ticks in. */
+void ui_logo(float cx, float cy, float size, float build, float slash, int alpha);
+/* The X on its own, size high, for small sizes where the rings would blur: its grey is lifted
+ * so it shows on dark panels. */
+void ui_mark(float cx, float cy, float size, int alpha);
 
 /* Full-screen loading and progress */
 void ui_loading_frame(const char *title, const char *detail);

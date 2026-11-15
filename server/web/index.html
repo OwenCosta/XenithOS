@@ -6,7 +6,7 @@
 <title>XenithOS for Xbox 360</title>
 <meta name="description" content="XenithOS is a homebrew shell for the Xbox 360 S, built on libxenon. It has profiles with avatars, an app store, a small cloud server, and a DOOM port.">
 <link rel="canonical" href="https://owencosta.diy/xenithos/">
-<link rel="icon" href="static/logo.svg" type="image/svg+xml">
+<link rel="icon" href="static/logo.svg?v=2" type="image/svg+xml">
 <style>
   :root {
     /* XenithOS's look: near-black, quiet edges, white text, one red */
@@ -280,6 +280,8 @@
   <div class="wrap">
     <h2>Build log</h2>
     <ul class="log">
+      <li><b>0.6.3</b><time datetime="2026-11-15">Nov 15, 2026</time>
+        <p>A new logo: a grey chevron and two red arms make an X with a red slash through it, inside a broken red and grey ring with four ticks. The start-up builds it. Four streaks spiral in and settle on the ring, the ring sweeps round from the ticks, the X comes together, and the slash cuts across with the chime. Next to the name, at small sizes, the X stands on its own. The Store's XenithOS update and this site have it too.</p></li>
       <li><b>0.6.2</b><time datetime="2026-11-15">Nov 15, 2026</time>
         <p>HostMC, a new app on PCs, hosts a Minecraft: Java Edition server. It gets the server from Mojang, or Paper from PaperMC, along with the Java it needs. It tells you what it's about to download first and checks every download. Its pages start and stop the server, show its console with a keyboard for commands, look after players (op, kick, ban and the whitelist), change the server's settings and memory, pick a version, and back up, restore or start a world. New servers use a whitelist, so add your friends in Players. The server keeps running when you leave HostMC, and HostMC finds it again when you come back. To play with friends over the internet, turn on playit.gg in the Internet page and approve it with the link or QR code. The on-screen keyboard has a row of symbols for commands.</p></li>
       <li><b>0.6.1</b><time datetime="2026-11-15">Nov 15, 2026</time>
@@ -335,8 +337,9 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 
-/* The XenithOS logo: two chevrons that make an X which doesn't quite meet, a red point where it
-   would, then the name. Same numbers as the console's ui_logo. */
+/* The XenithOS logo, then the name: the whole insignia when it's big, the X alone when it's
+   small. static/insignia.svg and static/mark.svg are drawn by tools/mkart.py from the same
+   numbers as the console's. */
 function logo(svg, big) {
   const ns = "http://www.w3.org/2000/svg", add = (tag, attrs, text) => {
     const el = document.createElementNS(ns, tag);
@@ -344,16 +347,14 @@ function logo(svg, big) {
     if (text) el.textContent = text;
     svg.appendChild(el);
   };
-  const w = big ? 330 : 118, h = big ? 100 : 30, m = big ? 92 : 24, cx = m * 0.42, cy = h / 2;
+  const w = big ? 368 : 136, h = big ? 120 : 30, cy = h / 2;
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
   const ht = svg.getAttribute("height");
   if (ht) svg.setAttribute("width", Math.round(w / h * ht));
-  [[0, -0.15, -0.36, -0.42], [0, -0.15, 0.36, -0.42], [0, 0.15, -0.36, 0.42], [0, 0.15, 0.36, 0.42]].forEach(([ix, iy, ox, oy]) =>
-    add("line", { x1: cx + ix * m, y1: cy + iy * m, x2: cx + ox * m, y2: cy + oy * m, stroke: "#f1f3f6",
-                  "stroke-width": m * 0.12, "stroke-linecap": "round" }));
-  add("circle", { cx, cy, r: m * 0.055, fill: "#e50914" });
+  if (big) add("image", { href: "static/insignia.svg", x: 0, y: 0, width: 120, height: 120 });
+  else add("image", { href: "static/mark.svg", x: 0, y: 5, width: 30, height: 20 });
   const font = "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
-  add("text", { x: m * 0.95, y: big ? cy + 16.5 : cy + 7.5, fill: "#f1f3f6", "font-family": font, "font-weight": 700,
+  add("text", { x: big ? 138 : 38, y: big ? cy + 16.5 : cy + 7.5, fill: "#f1f3f6", "font-family": font, "font-weight": 700,
                 "font-size": big ? 46 : 20, "letter-spacing": "-0.02em" }, "XenithOS");
 }
 logo($("logo"), true);

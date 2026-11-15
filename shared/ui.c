@@ -14,6 +14,7 @@
 #include "platform.h"
 #include "theme.h"
 #include "ui.h"
+#include "logo_shape.h"
 
 struct pad cur, prev;
 int M, HEADER_H;
@@ -209,32 +210,69 @@ void ui_select_box(float x, float y, float w, float h, float r)
 /* The XenithOS mark. Two chevrons, one pointing down onto the middle and one pointing up at it,
  * make an X that doesn't quite meet: the red point is where it would (the zenith). Drawn from
  * round-capped strokes, so it's crisp at any size. */
-void ui_logo(float cx, float cy, float size, float arms, float dot, int alpha)
+/* How far angle a is from the nearest of 3, 6, 9 and 12 o'clock, where the ticks are. */
+static float off_tick(float a)
 {
-    static const float arm[4][4] = {               /* inner end, outer end, in units of size */
-        {0.0f, -0.15f, -0.36f, -0.42f}, {0.0f, -0.15f, 0.36f, -0.42f},
-        {0.0f, 0.15f, -0.36f, 0.42f}, {0.0f, 0.15f, 0.36f, 0.42f},
-    };
-    float stroke = size * 0.12f;
-    int i;
-    if (arms > 1) arms = 1;
-    for (i = 0; arms > 0 && i < 4; i++) {
-        float x0 = cx + arm[i][0] * size, y0 = cy + arm[i][1] * size;
-        float x1 = x0 + (arm[i][2] - arm[i][0]) * size * arms, y1 = y0 + (arm[i][3] - arm[i][1]) * size * arms;
-        gfx_line(x0, y0, x1, y1, stroke, C_TEXT, alpha);
-    }
-    if (dot > 0) gfx_circle(cx, cy, size * 0.055f * dot, C_ACCENT, alpha);
+    const float Q = 1.5707963f;
+    return fabsf(a - Q * floorf(a / Q + 0.5f));
 }
 
-/* The wordmark: the mark, then the name in bold. Returns its width; measure_only draws nothing. */
+void ui_logo(float cx, float cy, float size, float build, float slash, int alpha)
+{
+    /* where the X's solid pieces come in from: the chevron from the left, the arms the way they point */
+    static const float from[3][2] = {{-1, 0}, {0.7071f, -0.7071f}, {0.7071f, 0.7071f}};
+    float R = size / (2 * LOGO_TICK_OUT);
+    int i;
+    if (build > 1) build = 1;
+    if (slash > 1) slash = 1;
+    if (build > 0) {
+        /* the rings: each piece sweeps round from its end by a tick */
+        for (i = 0; i < (int)(sizeof logo_arcs / sizeof logo_arcs[0]); i++) {
+            const struct logo_arc *k = &logo_arcs[i];
+            float len = (k->a1 - k->a0) * build;
+            uint32_t c = k->red ? C_ACCENT : LOGO_GREY;
+            if (off_tick(k->a0) <= off_tick(k->a1)) gfx_sector(cx, cy, k->r * R, k->w * R, k->a0, k->a0 + len, c, alpha);
+            else gfx_sector(cx, cy, k->r * R, k->w * R, k->a1 - len, k->a1, c, alpha);
+        }
+        for (i = 0; i < 3; i++) {
+            float o = (1 - build) * 0.7f * R;
+            gfx_poly(logo_x[i].xy, logo_x[i].n, cx + from[i][0] * o, cy + from[i][1] * o, R,
+                     logo_x[i].red ? C_ACCENT : LOGO_GREY, (int)(alpha * build));
+        }
+    }
+    if (slash > 0) {
+        /* the slash grows out of its point (its first corner) */
+        const struct logo_poly *p = &logo_x[3];
+        float s = R * slash;
+        gfx_poly(p->xy, p->n, cx + p->xy[0] * (R - s), cy + p->xy[1] * (R - s), s, C_ACCENT, alpha);
+        /* and the ticks come in from outside */
+        for (i = 0; i < 4; i++) {
+            const struct logo_poly *t = &logo_ticks[i];
+            float len = sqrtf(t->xy[0] * t->xy[0] + t->xy[1] * t->xy[1]), o = (1 - slash) * 0.3f * R / len;
+            gfx_poly(t->xy, t->n, cx + t->xy[0] * o, cy + t->xy[1] * o, R, C_ACCENT, (int)(alpha * slash));
+        }
+    }
+}
+
+void ui_mark(float cx, float cy, float size, int alpha)
+{
+    float R = size / (LOGO_X_BOTTOM - LOGO_X_TOP);
+    float ox = cx - (LOGO_X_LEFT + LOGO_X_RIGHT) / 2 * R, oy = cy - (LOGO_X_TOP + LOGO_X_BOTTOM) / 2 * R;
+    int i;
+    for (i = 0; i < 4; i++)
+        gfx_poly(logo_x[i].xy, logo_x[i].n, ox, oy, R, logo_x[i].red ? C_ACCENT : LOGO_GREY_SMALL, alpha);
+}
+
+/* The wordmark: the X, then the name in bold. Returns its width; measure_only draws nothing. */
 int ui_brand(int x, int y, int font, int measure_only)
 {
-    int lh = gfx_cap_h(font), mark = lh * 3 / 2, gap = lh / 2;
+    int lh = gfx_cap_h(font), gap = lh / 2;
+    float mh = lh * 1.4f, mw = mh * (LOGO_X_RIGHT - LOGO_X_LEFT) / (LOGO_X_BOTTOM - LOGO_X_TOP);
     if (!measure_only) {
-        ui_logo(x + mark * 0.42f, y + font_table[font].ascent - lh / 2.0f, (float)mark, 1, 1, 255);
-        gfx_str(font, x + mark + gap, y, C_TEXT, "XenithOS");
+        ui_mark(x + mw / 2, y + font_table[font].ascent - lh / 2.0f, mh, 255);
+        gfx_str(font, x + (int)mw + gap, y, C_TEXT, "XenithOS");
     }
-    return mark + gap + gfx_str_w(font, "XenithOS");
+    return (int)mw + gap + gfx_str_w(font, "XenithOS");
 }
 
 void ui_profile_chip(int right_x, int cy)
