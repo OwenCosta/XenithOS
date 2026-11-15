@@ -32,6 +32,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/input.h>
+#include <math.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -833,6 +834,30 @@ int plat_kind(void)
 extern char **environ;
 static struct guest_shm *host_shm;           /* the app running inside XenithOS, if any */
 
+/* The guide (platform.h): what draws it, what Switch game chose, and the screen's picture. */
+static int (*guide_fn)(struct plat_guide *g);
+static char next_launch[128];
+static uint32_t guide_shot[SCREEN_W * SCREEN_H];
+
+void plat_set_guide(int (*fn)(struct plat_guide *g))
+{
+    guide_fn = fn;
+}
+
+int plat_has_guide(void)
+{
+    return guide_fn && in_kiosk && kiosk_wm_running();
+}
+
+const char *plat_next_launch(void)
+{
+    static char taken[128];
+    if (!next_launch[0]) return NULL;
+    snprintf(taken, sizeof taken, "%s", next_launch);
+    next_launch[0] = 0;
+    return taken;
+}
+
 static void show_texture(void)
 {
     SDL_RenderClear(ren);
@@ -893,6 +918,20 @@ static char **guest_env(int fd, char *fdvar, size_t fdvar_len)
     return env;
 }
 
+/* The guide over an app inside XenithOS: its last frame behind the panel. */
+static int inside_guide(struct guest_shm *g, const char *path, uint32_t shown)
+{
+    struct plat_guide gd;
+    int choice;
+    memset(&gd, 0, sizeof gd);
+    memcpy(guide_shot, g->pixels[shown % GUEST_FRAMES], sizeof guide_shot);
+    gd.backdrop = guide_shot;
+    gd.path = path;                              /* the guide looks its name up */
+    choice = guide_fn(&gd);
+    if (choice == GUIDE_SWITCH) snprintf(next_launch, sizeof next_launch, "%s", gd.switch_to);
+    return choice;
+}
+
 /* Run an app inside XenithOS's window until it quits. Returns 0 if that couldn't be set up,
  * 1 once the app has run (its exit status in *status). */
 static int run_inside(const char *path, int *status)
@@ -901,8 +940,8 @@ static int run_inside(const char *path, int *status)
     struct guest_shm *g;
     struct pad acc;
     uint32_t shown = 0, rumble_seen = 0, flush_seen = 0, read_seen = 0;
-    int fd, took_sound = 0, text_on = 0, closing = 0;
-    uint64_t start, guide_since = 0, asked_at = 0, closing_at = 0;
+    int fd, took_sound = 0, text_on = 0, closing = 0, esc_used = 0, hold_off = 0;
+    uint64_t start, guide_since = 0, asked_at = 0, closing_at = 0, tap_since = 0, esc_since = 0;
     pid_t pid;
 
     fd = memfd_create("xenithos-app", 0);
@@ -930,7 +969,7 @@ static int run_inside(const char *path, int *status)
         struct pad p;
         uint32_t seq;
         uint64_t now;
-        int want = LOAD(g->text_on);
+        int want = LOAD(g->text_on), open = 0, guide_down;
 
         if (want != text_on) {                  /* the app's on-screen keyboard opened or closed */
             text_on = typing = want;
@@ -953,6 +992,37 @@ static int run_inside(const char *path, int *status)
         }
         open_first_pad();
         read_pad(&p);
+        now = plat_time_us();
+        guide_down = p.guide;
+        p.guide = 0;                              /* the guide's button, not the app's */
+        /* The guide: the Xbox button tapped (held for two seconds it still closes an app that
+         * has stopped responding), or Esc held for half a second. */
+        if (guide_down && !tap_since) tap_since = now;
+        else if (!guide_down && tap_since) { open = now - tap_since < 1000000; tap_since = 0; }
+        if (!keys_now[SDL_SCANCODE_ESCAPE]) esc_since = 0, esc_used = 0;
+        else if (!esc_since) esc_since = now;
+        if (esc_since && now - esc_since >= 500000 && !esc_used) open = esc_used = 1;
+        if (open && guide_fn && shown && !asked_at) {
+            if (inside_guide(g, path, shown) == GUIDE_RESUME) {
+                SDL_UpdateTexture(tex, NULL, g->pixels[LOAD(g->frame_seq) % GUEST_FRAMES], SCREEN_W * 4);
+                show_texture();
+                hold_off = 1;
+            } else {
+                kill(pid, SIGTERM);              /* home, another app, or closed: this one quits */
+                asked_at = plat_time_us();
+            }
+            memset(&p, 0, sizeof p);
+            p.connected = 1;
+            guide_down = 0;
+        }
+        if (hold_off) {          /* what was pressed in the guide isn't the app's until let go */
+            if (p.a || p.b || p.x || p.y || p.start || p.back || p.lb || p.rb || p.up || p.down || p.left || p.right) {
+                memset(&p, 0, sizeof p);
+                p.connected = 1;
+            } else {
+                hold_off = 0;
+            }
+        }
         seq = LOAD(g->pad_read);
         merge_pad(&acc, &p, seq != read_seen || !g->pad_seq);
         read_seen = seq;
@@ -983,7 +1053,7 @@ static int run_inside(const char *path, int *status)
 
         /* An app that stopped responding: Guide held for two seconds, Ctrl+Alt+Backspace, or
          * the window closed and the app not quitting by itself. */
-        guide_since = p.guide ? (guide_since ? guide_since : now) : 0;
+        guide_since = guide_down ? (guide_since ? guide_since : now) : 0;
         if (!asked_at && ((guide_since && now - guide_since > 2000000) || (closing_at && now - closing_at > 2000000))) {
             kill(pid, SIGTERM);
             asked_at = now;
@@ -1029,15 +1099,18 @@ const char *plat_launch_error(void)
     return launch_why;
 }
 
-/* Keyboards, read directly for Ctrl+Alt+Backspace: with the screen handed over, SDL sees none. */
+/* Keyboards, read directly for Ctrl+Alt+Backspace and for Esc held down (the guide): with the
+ * screen handed over, SDL sees none. Reading doesn't take the keys from the program. */
 #define MAX_KBD 16
 static int kbd_fd[MAX_KBD], nkbd, kbd_ctrl, kbd_alt;
+static uint64_t kbd_esc_since;                 /* when Esc went down, 0 while it's up */
 
 static void kbd_open(void)
 {
     DIR *d = opendir("/dev/input");
     struct dirent *de;
     nkbd = kbd_ctrl = kbd_alt = 0;
+    kbd_esc_since = 0;
     if (!d) return;
     while ((de = readdir(d)) && nkbd < MAX_KBD) {
         unsigned long bits[KEY_MAX / (8 * sizeof(long)) + 1];
@@ -1068,9 +1141,19 @@ static int kbd_combo(void)
                 if (ev[k].code == KEY_LEFTCTRL || ev[k].code == KEY_RIGHTCTRL) kbd_ctrl = ev[k].value != 0;
                 else if (ev[k].code == KEY_LEFTALT || ev[k].code == KEY_RIGHTALT) kbd_alt = ev[k].value != 0;
                 else if (ev[k].code == KEY_BACKSPACE && ev[k].value == 1 && kbd_ctrl && kbd_alt) hit = 1;
+                else if (ev[k].code == KEY_ESC && ev[k].value != 2)       /* 2: auto-repeat */
+                    kbd_esc_since = ev[k].value ? plat_time_us() : 0;
             }
     }
     return hit;
+}
+
+/* Forget what was pressed while XenithOS had the keyboard (in the guide). */
+static void kbd_drain(void)
+{
+    kbd_combo();
+    kbd_ctrl = kbd_alt = 0;
+    kbd_esc_since = 0;
 }
 
 static void kbd_close(void)
@@ -1145,17 +1228,378 @@ static void ask_to_close(pid_t root)
     }
 }
 
-/* Runs a program with the screen to itself until it closes. 1 once it has run, 0 (with
- * launch_why) if it couldn't start or stopped straight away. */
-static int run_other(struct linux_app *app)
+/* ------------------------------------------ the controller as a mouse or keyboard (console mode)
+ *
+ * For programs that don't take a controller, XenithOS turns it into what they do take, through
+ * the XTEST extension (kiosk.c). It reads the controller as SDL sees it (so the buttons are
+ * where the labels say on any controller), and the keyboard and a real mouse keep working.
+ *   PAD_MOUSE  launchers and menus (Prism Launcher, Sober's first start): the left stick moves
+ *              the pointer, A or RT clicks, B or LT right clicks, X middle clicks, the right
+ *              stick scrolls, the d-pad sends the arrow keys, Y Enter, Start Esc, Back Tab.
+ *   PAD_KEYS   a game played with a keyboard and mouse (Minecraft): the left stick is W A S D,
+ *              the right stick looks around, RT clicks, LT right clicks, A Space, B Shift,
+ *              X Q, Y E, LB and RB scroll, the left stick pressed Ctrl, the right stick pressed
+ *              middle clicks, d-pad up F5, down F, left and right scroll, Start Esc, Back Tab.
+ * The guide switches between them and the game reading the controller itself. */
+enum { EK_W, EK_A, EK_S, EK_D, EK_SPACE, EK_SHIFT, EK_CTRL, EK_Q, EK_E, EK_F, EK_F5, EK_ESC, EK_TAB,
+       EK_RETURN, EK_UP, EK_DOWN, EK_LEFT, EK_RIGHT, EK_COUNT };
+static const unsigned long ek_sym[EK_COUNT] = {
+    0x77, 0x61, 0x73, 0x64, 0x20, 0xffe1, 0xffe3, 0x71, 0x65, 0x66, 0xffc2, 0xff1b, 0xff09,   /* X keysyms */
+    0xff0d, 0xff52, 0xff54, 0xff51, 0xff53};
+static int emu_mode;                           /* PAD_MOUSE or PAD_KEYS while it's on, else 0 */
+static int emu_key[EK_COUNT], emu_button[4];   /* what's held down now */
+static int emu_was[SDL_CONTROLLER_BUTTON_MAX];  /* buttons last time, for presses that step */
+static float emu_fx, emu_fy, emu_sx, emu_sy;
+static uint64_t emu_last;
+
+static int emu_ready(void)
 {
-    char cage[256], log[700], reason[160], *argv[32], **env;
+    return in_kiosk && kiosk_wm_can_point();
+}
+
+static int emu_on(void)
+{
+    return emu_mode != 0;
+}
+
+/* Sends what changed: keys and buttons go down and up as wanted. */
+static void emu_send(const int *key, const int *button)
+{
+    int i;
+    for (i = 0; i < EK_COUNT; i++)
+        if (key[i] != emu_key[i]) kiosk_wm_key(ek_sym[i], emu_key[i] = key[i]);
+    for (i = 1; i <= 3; i++)
+        if (button[i] != emu_button[i]) kiosk_wm_pointer_button(i, emu_button[i] = button[i]);
+}
+
+static void emu_click(int button)
+{
+    kiosk_wm_pointer_button(button, 1);
+    kiosk_wm_pointer_button(button, 0);
+}
+
+static void emu_start(int mode)
+{
+    if (!emu_ready() || (mode != PAD_MOUSE && mode != PAD_KEYS)) return;
+    emu_mode = mode;
+    memset(emu_key, 0, sizeof emu_key);
+    memset(emu_button, 0, sizeof emu_button);
+    memset(emu_was, 0, sizeof emu_was);
+    emu_fx = emu_fy = emu_sx = emu_sy = 0;
+    emu_last = 0;
+}
+
+/* Lets go of everything it's holding down. */
+static void emu_stop(void)
+{
+    int none[EK_COUNT], up[4];
+    if (!emu_mode) return;
+    memset(none, 0, sizeof none);
+    memset(up, 0, sizeof up);
+    emu_send(none, up);
+    emu_mode = 0;
+}
+
+/* Tests have no controller: XENITHOS_TEST_STICK="x,y" (-100..100) holds the left stick there. */
+static int test_stick(float *x, float *y)
+{
+    const char *s = getenv("XENITHOS_TEST_STICK");
+    int tx = 0, ty = 0;
+    if (!s || sscanf(s, "%d,%d", &tx, &ty) != 2) return 0;
+    *x = tx / 100.0f;
+    *y = ty / 100.0f;
+    return 1;
+}
+
+static float stick(SDL_GameControllerAxis a)
+{
+    float v = axis(a) / 32767.0f;
+    return v < -1 ? -1 : v;
+}
+
+/* A stick as a speed: nothing in the middle, faster the further it's pushed. */
+static void stick_speed(float x, float y, float slow, float fast, float dt, float *ax, float *ay)
+{
+    float mag = sqrtf(x * x + y * y), k;
+    if (mag <= 0.15f) return;
+    k = (mag - 0.15f) / 0.85f;
+    if (k > 1) k = 1;
+    *ax += x / mag * (slow + fast * k * k) * dt;
+    *ay += y / mag * (slow + fast * k * k) * dt;
+}
+
+static void emu_step(uint64_t now)
+{
+    int key[EK_COUNT], button[4], b, pressed[SDL_CONTROLLER_BUTTON_MAX], dx, dy;
+    float dt, lx, ly, rx, ry, lt, rt, tx, ty;
+    int test = test_stick(&tx, &ty);
+    if (!emu_mode || (!pad_dev && !test)) return;
+    dt = emu_last ? (float)(now - emu_last) / 1e6f : 0;
+    if (dt > 0.05f) dt = 0.05f;
+    emu_last = now;
+    for (b = 0; b < SDL_CONTROLLER_BUTTON_MAX; b++) {
+        int down = SDL_GameControllerGetButton(pad_dev, (SDL_GameControllerButton)b);
+        pressed[b] = down && !emu_was[b];
+        emu_was[b] = down;
+    }
+    lx = test ? tx : stick(SDL_CONTROLLER_AXIS_LEFTX);
+    ly = test ? ty : stick(SDL_CONTROLLER_AXIS_LEFTY);
+    rx = stick(SDL_CONTROLLER_AXIS_RIGHTX);
+    ry = stick(SDL_CONTROLLER_AXIS_RIGHTY);
+    lt = axis(SDL_CONTROLLER_AXIS_TRIGGERLEFT) / 32767.0f;
+    rt = axis(SDL_CONTROLLER_AXIS_TRIGGERRIGHT) / 32767.0f;
+    memset(key, 0, sizeof key);
+    memset(button, 0, sizeof button);
+#define DOWN(x) SDL_GameControllerGetButton(pad_dev, SDL_CONTROLLER_BUTTON_##x)
+    key[EK_ESC] = DOWN(START);
+    key[EK_TAB] = DOWN(BACK);
+    if (emu_mode == PAD_MOUSE) {
+        stick_speed(lx, ly, 70, 1700, dt, &emu_fx, &emu_fy);        /* pixels a second */
+        button[1] = DOWN(A) || rt > 0.5f;
+        button[2] = DOWN(X);
+        button[3] = DOWN(B) || lt > 0.5f;
+        key[EK_RETURN] = DOWN(Y);
+        key[EK_UP] = DOWN(DPAD_UP);
+        key[EK_DOWN] = DOWN(DPAD_DOWN);
+        key[EK_LEFT] = DOWN(DPAD_LEFT);
+        key[EK_RIGHT] = DOWN(DPAD_RIGHT);
+        /* The right stick scrolls, up to 14 steps a second. */
+        if (fabsf(ry) > 0.25f) emu_sy -= ry * 14 * dt; else emu_sy = 0;
+        if (fabsf(rx) > 0.25f) emu_sx += rx * 14 * dt; else emu_sx = 0;
+    } else {
+        stick_speed(rx, ry, 40, 1400, dt, &emu_fx, &emu_fy);        /* looking around */
+        key[EK_W] = ly < -0.35f;
+        key[EK_S] = ly > 0.35f;
+        key[EK_A] = lx < -0.35f;
+        key[EK_D] = lx > 0.35f;
+        key[EK_SPACE] = DOWN(A);
+        key[EK_SHIFT] = DOWN(B);
+        key[EK_Q] = DOWN(X);
+        key[EK_E] = DOWN(Y);
+        key[EK_CTRL] = DOWN(LEFTSTICK);
+        key[EK_F5] = DOWN(DPAD_UP);
+        key[EK_F] = DOWN(DPAD_DOWN);
+        button[1] = rt > 0.5f;
+        button[2] = DOWN(RIGHTSTICK);
+        button[3] = lt > 0.5f;
+        if (pressed[SDL_CONTROLLER_BUTTON_LEFTSHOULDER] || pressed[SDL_CONTROLLER_BUTTON_DPAD_LEFT]) emu_sy += 1;
+        if (pressed[SDL_CONTROLLER_BUTTON_RIGHTSHOULDER] || pressed[SDL_CONTROLLER_BUTTON_DPAD_RIGHT]) emu_sy -= 1;
+    }
+#undef DOWN
+    dx = (int)emu_fx;
+    dy = (int)emu_fy;
+    emu_fx -= (float)dx;
+    emu_fy -= (float)dy;
+    kiosk_wm_pointer_move(dx, dy);
+    while (emu_sy >= 1) { emu_click(4); emu_sy -= 1; }
+    while (emu_sy <= -1) { emu_click(5); emu_sy += 1; }
+    while (emu_sx >= 1) { emu_click(7); emu_sx -= 1; }
+    while (emu_sx <= -1) { emu_click(6); emu_sx += 1; }
+    emu_send(key, button);
+}
+
+/* --------------------------------------------------------- the program XenithOS started
+ *
+ * One at a time: on screen (run_other, resume_other), or left running behind the home screen
+ * by the guide's Return home, until it's chosen again or closed (plat_close_running). */
+static struct {
+    pid_t pid;
+    struct linux_app app;                     /* for its name and Steam game; argv isn't kept */
+    char path[128];                           /* the .app it came from ("": Steam from the Store) */
+    char log[700];
+    uint64_t start, close_at, checked;
+    int status, forced, seen_running, idle;
+    int manual;                               /* the controller mode was chosen in the guide */
+} other;
+static int pad_mode = PAD_GAME;
+
+static void other_close(uint64_t now)
+{
+    if (other.close_at || other.pid <= 0) return;
+    ask_to_close(other.pid);
+    other.close_at = now;
+}
+
+/* A Steam game from XenithOS: once Steam says it has ended, Steam closes too. */
+static void other_check_steam(uint64_t now)
+{
+    int running;
+    if (!other.app.steam_appid || other.close_at || now - other.checked < 1000000) return;
+    other.checked = now;
+    running = linux_steam_game_running(other.app.steam_appid);
+    if (running == 1) {
+        other.seen_running = 1;
+        other.idle = 0;
+    } else if (running == 0 && other.seen_running && ++other.idle >= 3) {
+        other_close(now);
+    }
+}
+
+/* Asked to close and still there: everything it started is told to go, then made to. */
+static void other_hurry(uint64_t now)
+{
+    if (!other.close_at || other.pid <= 0) return;
+    if (now - other.close_at > 6000000 && other.forced == 0) { kill(-other.pid, SIGTERM); other.forced = 1; }
+    if (now - other.close_at > 10000000 && other.forced == 1) { kill(-other.pid, SIGKILL); other.forced = 2; }
+}
+
+/* The guide over the program: XenithOS's window in front, the screen's picture behind it. */
+static int other_guide(void)
+{
+    struct plat_guide g;
+    int choice;
+    memset(&g, 0, sizeof g);
+    g.backdrop = kiosk_wm_capture(guide_shot, SCREEN_W, SCREEN_H) ? guide_shot : NULL;
+    g.name = other.app.name;
+    g.path = other.path[0] ? other.path : NULL;
+    g.keeps_running = other.path[0] != 0;
+    g.pad_modes = emu_ready() ? PAD_GAME | PAD_MOUSE | PAD_KEYS : 0;
+    g.pad_mode = pad_mode;
+    emu_stop();                                /* nothing held down while the panel is up */
+    kiosk_wm_hold(1);
+    choice = guide_fn(&g);
+    if (g.pad_mode != pad_mode) other.manual = 1;
+    pad_mode = g.pad_mode;
+    kbd_drain();
+    memset(tapped_btn, 0, sizeof tapped_btn);
+    memset(tapped_key, 0, sizeof tapped_key);
+    if (choice == GUIDE_SWITCH) snprintf(next_launch, sizeof next_launch, "%s", g.switch_to);
+    if (choice == GUIDE_RESUME) {
+        kiosk_wm_hold(0);
+        emu_start(pad_mode);
+    }
+    return choice;
+}
+
+/* While the program is on screen: the guide, the way out, the controller as the pointer.
+ * 1 when the guide's Return home left it running, 0 once it has closed. */
+static int other_watch(int console)
+{
+    uint64_t now, guide_since = 0, test_close, test_guide, titled = 0;
+    int esc_used = 0;
+    pid_t r;
+    kbd_open();
+    /* Tests can't use a controller in a virtual display: XENITHOS_TEST_CLOSE=<seconds> acts like
+     * holding the Xbox button, XENITHOS_TEST_GUIDE=<seconds> like tapping it. */
+    test_close = getenv("XENITHOS_TEST_CLOSE") ? (uint64_t)atoi(getenv("XENITHOS_TEST_CLOSE")) * 1000000 : 0;
+    test_guide = getenv("XENITHOS_TEST_GUIDE") ? (uint64_t)atoi(getenv("XENITHOS_TEST_GUIDE")) * 1000000 : 0;
+    if (!console) emu_start(pad_mode);
+    while (other.pid > 0) {
+        SDL_Event e;
+        int open = 0, tap = 0, down, combo;
+        kiosk_wm_poll();
+        while (SDL_PollEvent(&e)) {
+            handle_event(&e, type_char);            /* controllers coming and going */
+            if (in_kiosk && e.type == SDL_WINDOWEVENT) show_texture();   /* uncovered: our last frame again */
+        }
+        open_first_pad();
+        now = plat_time_us();
+        /* The Xbox button: tapped, the guide; held for three seconds, the way out (the only one
+         * where there's no guide). */
+        down = btn(SDL_CONTROLLER_BUTTON_GUIDE);
+        if (down && !guide_since) guide_since = now;
+        else if (!down && guide_since) { tap = now - guide_since < 1000000; guide_since = 0; }
+        memset(tapped_btn, 0, sizeof tapped_btn);
+        memset(tapped_key, 0, sizeof tapped_key);
+        combo = kbd_combo();
+        if ((guide_since && now - guide_since > 3000000) || combo || (test_close && now - other.start > test_close))
+            other_close(now);
+        if (!console && plat_has_guide() && !other.close_at) {
+            if (tap) open = 1;
+            if (kbd_esc_since && now - kbd_esc_since >= 500000 && !esc_used) open = esc_used = 1;
+            if (test_guide && now - other.start > test_guide) { open = 1; test_guide = 0; }
+        }
+        if (!kbd_esc_since) esc_used = 0;
+        if (open) {
+            int c = other_guide();
+            if (c == GUIDE_HOME && other.path[0]) return 1;
+            if (c != GUIDE_RESUME) other_close(plat_time_us());
+            guide_since = 0;
+            continue;
+        }
+        /* A launcher with a game in it (Prism Launcher and Minecraft): the pointer for the
+         * launcher, the keyboard and mouse once the game's window is in front. */
+        if (other.app.game_title[0] && !other.manual && in_kiosk && now - titled > 500000) {
+            char title[96];
+            int want;
+            titled = now;
+            kiosk_wm_top_title(title, sizeof title);
+            want = strncmp(title, other.app.game_title, strlen(other.app.game_title)) ? PAD_MOUSE : PAD_KEYS;
+            if (want != pad_mode) {
+                emu_stop();
+                pad_mode = want;
+                emu_start(pad_mode);
+                fprintf(stderr, "xenithos: the controller %s\n", want == PAD_KEYS ? "plays it as a keyboard and mouse" : "moves the pointer");
+            }
+        }
+        emu_step(now);
+        other_check_steam(now);
+        other_hurry(now);
+        r = waitpid(other.pid, &other.status, WNOHANG);
+        if (r == other.pid || (r < 0 && errno != EINTR)) break;
+        /* Console mode: until the app's window is up (or between its windows, or while it
+         * closes from the guide), XenithOS is what's on screen, so its loading screen moves. */
+        if (in_kiosk && (!kiosk_wm_windows() || other.close_at) && launch_progress) launch_progress(0, 0);
+        else SDL_Delay(emu_on() ? 8 : 20);
+    }
+    return 0;
+}
+
+/* XenithOS again, after the program closed or with it left running behind. 1 once it has run,
+ * 0 (with launch_why) if it couldn't start or stopped straight away. */
+static int other_finish(int console, int left_running)
+{
+    char reason[160];
+    int said, status = other.status;
+    emu_stop();
+    kbd_close();
+    if (!left_running && other.pid > 0) kill(-other.pid, SIGTERM);   /* anything it left behind */
+    if (console) {
+        video_open();
+    } else {
+        if (in_kiosk) {
+            if (left_running) kiosk_wm_hold(1);
+            else kiosk_wm_show_self();
+        } else {
+            SDL_RestoreWindow(win);
+        }
+        SDL_RaiseWindow(win);
+        SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "0");
+    }
+    plat_audio_init();
+    open_first_pad();
+    if (hook_failed) hook_failed();                /* XenithOS's sounds start again */
+    if (left_running) return 1;
+    if (other.pid <= 0) {
+        snprintf(launch_why, sizeof launch_why, "%s didn't start.", other.app.name);
+        other.pid = 0;
+        return 0;
+    }
+    other.pid = 0;
+    /* Gone again within a few seconds without being asked: say what it printed. */
+    said = linux_log_reason(other.log, reason, sizeof reason);
+    if (!other.close_at && plat_time_us() - other.start < 5000000 &&
+        (!WIFEXITED(status) || WEXITSTATUS(status) != 0 || said == 2)) {
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 127 && !said)
+            snprintf(launch_why, sizeof launch_why, "%s couldn't be started.", other.app.name);
+        else if (strstr(reason, "not installed"))
+            snprintf(launch_why, sizeof launch_why, "%s isn't installed any more. Get it again from the Store.", other.app.name);
+        else
+            snprintf(launch_why, sizeof launch_why, "%s stopped straight away%s%s", other.app.name, reason[0] ? ": " : ".", reason);
+        return 0;
+    }
+    return 1;
+}
+
+/* Runs a program with the screen to itself until it closes (or the guide leaves it running). */
+static int run_other(struct linux_app *app, const char *path)
+{
+    char cage[256], *argv[32], **env;
     /* XENITHOS_BARE=1: act as if on the bare console (tests, in a virtual display) */
     int console = !in_kiosk && ((!getenv("DISPLAY") && !getenv("WAYLAND_DISPLAY")) || getenv("XENITHOS_BARE"));
-    int n = 0, i, status = 0, seen_running = 0, idle = 0, said, forced = 0;
-    uint64_t start, now, guide_since = 0, close_at = 0, checked = 0, test_close;
-    pid_t pid, r;
+    int n = 0, i;
 
+    if (other.pid > 0) plat_close_running(NULL);   /* one at a time (the home screen asks first) */
     if (console) {
         if (!linux_find_program("cage", cage, sizeof cage)) {
             snprintf(launch_why, sizeof launch_why, "XenithOS needs cage to show %s on this screen. Run the XenithOS install command once more, then try again.", app->name);
@@ -1168,9 +1612,13 @@ static int run_other(struct linux_app *app)
     }
     for (i = 0; app->argv[i] && n < 31; i++) argv[n++] = app->argv[i];
     argv[n] = NULL;
-    snprintf(log, sizeof log, "%s/uda:/xenith/app.log", data_dir);
-    remove(log);
+    memset(&other, 0, sizeof other);
+    other.app = *app;
+    snprintf(other.path, sizeof other.path, "%s", path ? path : "");
+    snprintf(other.log, sizeof other.log, "%s/uda:/xenith/app.log", data_dir);
+    remove(other.log);
     if (!(env = other_env())) return 0;
+    pad_mode = app->pointer ? PAD_MOUSE : PAD_GAME;
 
     if (hook_before) hook_before();                /* XenithOS's sounds stop */
     plat_rumble(0, 0);
@@ -1180,82 +1628,60 @@ static int run_other(struct linux_app *app)
     } else {
         SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");    /* Guide still counts */
         if (!in_kiosk) SDL_MinimizeWindow(win);    /* in console mode the app's window covers ours */
+        kiosk_wm_hold(0);
     }
-    pid = linux_spawn(argv, env, log, 1);
+    other.pid = linux_spawn(argv, env, other.log, 1);
     free(env);
-    kbd_open();
-    start = plat_time_us();
-    /* Tests can't hold Guide in a virtual display: XENITHOS_TEST_CLOSE=<seconds> does the same. */
-    test_close = getenv("XENITHOS_TEST_CLOSE") ? (uint64_t)atoi(getenv("XENITHOS_TEST_CLOSE")) * 1000000 : 0;
-    while (pid > 0) {
-        SDL_Event e;
+    other.start = plat_time_us();
+    return other_finish(console, other.pid > 0 && other_watch(console));
+}
+
+/* Back to the program the guide's Return home left running. */
+static int resume_other(void)
+{
+    if (hook_before) hook_before();
+    plat_rumble(0, 0);
+    audio_close();
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    kiosk_wm_hold(0);                              /* its windows in front again */
+    return other_finish(0, other_watch(0));
+}
+
+const char *plat_running(void)
+{
+    uint64_t now;
+    int status;
+    pid_t r;
+    if (other.pid <= 0) return NULL;
+    r = waitpid(other.pid, &status, WNOHANG);
+    if (r == other.pid || (r < 0 && errno != EINTR)) {     /* it ended behind the home screen */
+        kill(-other.pid, SIGTERM);
+        other.pid = 0;
+        kiosk_wm_show_self();
+        return NULL;
+    }
+    now = plat_time_us();
+    other_check_steam(now);
+    other_hurry(now);
+    return other.path;
+}
+
+int plat_close_running(void (*step)(void))
+{
+    if (!plat_running()) return 1;
+    other_close(plat_time_us());
+    while (other.pid > 0) {
+        int status;
+        pid_t r = waitpid(other.pid, &status, WNOHANG);
+        if (r == other.pid || (r < 0 && errno != EINTR)) break;
+        other_hurry(plat_time_us());
         kiosk_wm_poll();
-        while (SDL_PollEvent(&e)) {
-            handle_event(&e, type_char);            /* controllers coming and going */
-            if (in_kiosk && e.type == SDL_WINDOWEVENT) show_texture();   /* uncovered: our last frame again */
-        }
-        open_first_pad();
-        now = plat_time_us();
-        guide_since = btn(SDL_CONTROLLER_BUTTON_GUIDE) ? (guide_since ? guide_since : now) : 0;
-        memset(tapped_btn, 0, sizeof tapped_btn);
-        memset(tapped_key, 0, sizeof tapped_key);
-        if (!close_at && ((guide_since && now - guide_since > 3000000) || kbd_combo() || (test_close && now - start > test_close))) {
-            ask_to_close(pid);
-            close_at = now;
-        }
-        /* A Steam game from XenithOS: once Steam says it has ended, Steam closes too. */
-        if (app->steam_appid && !close_at && now - checked > 1000000) {
-            int running = linux_steam_game_running(app->steam_appid);
-            checked = now;
-            if (running == 1) {
-                seen_running = 1;
-                idle = 0;
-            } else if (running == 0 && seen_running && ++idle >= 3) {
-                ask_to_close(pid);
-                close_at = now;
-            }
-        }
-        /* Still there: everything it started is told to go, then made to. */
-        if (close_at && now - close_at > 6000000 && forced == 0) { kill(-pid, SIGTERM); forced = 1; }
-        if (close_at && now - close_at > 10000000 && forced == 1) { kill(-pid, SIGKILL); forced = 2; }
-        r = waitpid(pid, &status, WNOHANG);
-        if (r == pid || (r < 0 && errno != EINTR)) break;
-        /* Console mode: until the app's window is up (or between its windows), XenithOS is
-         * what's on screen, so its "Starting" screen keeps moving. */
-        if (in_kiosk && !kiosk_wm_windows() && launch_progress) launch_progress(0, 0);
+        if (step) step();
         else SDL_Delay(20);
     }
-    kbd_close();
-    if (pid > 0) kill(-pid, SIGTERM);             /* anything it left behind */
-
-    if (console) {
-        video_open();
-    } else {
-        if (in_kiosk) kiosk_wm_show_self();
-        else SDL_RestoreWindow(win);
-        SDL_RaiseWindow(win);
-        SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "0");
-    }
-    plat_audio_init();
-    open_first_pad();
-    if (hook_failed) hook_failed();                /* XenithOS's sounds start again */
-
-    if (pid <= 0) {
-        snprintf(launch_why, sizeof launch_why, "%s didn't start.", app->name);
-        return 0;
-    }
-    /* Gone again within a few seconds without being asked: say what it printed. */
-    said = linux_log_reason(log, reason, sizeof reason);
-    if (!close_at && plat_time_us() - start < 5000000 &&
-        (!WIFEXITED(status) || WEXITSTATUS(status) != 0 || said == 2)) {
-        if (WIFEXITED(status) && WEXITSTATUS(status) == 127 && !said)
-            snprintf(launch_why, sizeof launch_why, "%s couldn't be started.", app->name);
-        else if (strstr(reason, "not installed"))
-            snprintf(launch_why, sizeof launch_why, "%s isn't installed any more. Get it again from the Store.", app->name);
-        else
-            snprintf(launch_why, sizeof launch_why, "%s stopped straight away%s%s", app->name, reason[0] ? ": " : ".", reason);
-        return 0;
-    }
+    if (other.pid > 0) kill(-other.pid, SIGTERM);  /* anything it left behind */
+    other.pid = 0;
+    kiosk_wm_show_self();
     return 1;
 }
 
@@ -1268,7 +1694,7 @@ int plat_steam_open(const char *url)
         snprintf(launch_why, sizeof launch_why, "Steam isn't installed yet. Get it from the Store first.");
         return 0;
     }
-    return run_other(&a);
+    return run_other(&a, NULL);
 }
 
 /* Apps are programs in uda:/apps, shown inside XenithOS's window (run_inside). Only if that
@@ -1292,6 +1718,7 @@ int plat_launch(const char *path)
     int status = 0, ok;
     const char *slash = strrchr(path, '/');
     if (slash && !strcmp(slash + 1, "xenon.elf")) {       /* an app: back to XenithOS; XenithOS: restart */
+        if (!guest && other.pid > 0) plat_close_running(NULL);   /* nothing left running behind */
         if (hook_before) hook_before();
         if (!guest && self_path[0]) restart_self();
         quit_now(0);
@@ -1300,8 +1727,9 @@ int plat_launch(const char *path)
     launch_why[0] = 0;
     if (strlen(path) > 4 && !strcmp(path + strlen(path) - 4, ".app")) {   /* Flathub, Steam, your own */
         struct linux_app a;
+        if (other.pid > 0 && !strcmp(other.path, path) && plat_running()) return resume_other();
         if (!linux_app_read(path, &a, launch_why, sizeof launch_why)) return 0;
-        return run_other(&a);
+        return run_other(&a, path);
     }
     if (access(path, X_OK) != 0) chmod(path, 0755);
     if (access(path, X_OK) != 0) return 0;

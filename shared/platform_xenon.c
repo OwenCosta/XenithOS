@@ -419,6 +419,13 @@ int plat_steam_open(const char *url) { (void)url; return 0; }
 void plat_sync_apps(void) { }
 const char *plat_launch_error(void) { return ""; }
 
+/* The guide is for PCs: on the Xbox an app replaces XenithOS, and leaves through its own menu. */
+void plat_set_guide(int (*fn)(struct plat_guide *g)) { (void)fn; }
+int plat_has_guide(void) { return 0; }
+const char *plat_running(void) { return NULL; }
+int plat_close_running(void (*step)(void)) { (void)step; return 1; }
+const char *plat_next_launch(void) { return NULL; }
+
 void plat_text_input(int on) { (void)on; }
 int plat_text_take(char *out, int n) { (void)out; (void)n; return 0; }
 

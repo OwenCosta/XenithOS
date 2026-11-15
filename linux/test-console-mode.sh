@@ -86,13 +86,16 @@ echo "  startx was run as: $(cat "$T/startx.log" 2>/dev/null)"
 echo "  kiosk-starting gone: $([ -e "$HOME/.config/xenithos/kiosk-starting" ] && echo NO || echo yes)"
 echo "  keyboard focus: $(DISPLAY=:84 xdotool getwindowfocus getwindowname 2>/dev/null)"
 press Down; sleep 0.5
+# The row puts the one played last first, then the rest by name: Clock, Fixed, Slow to start with.
+n=0
 for app in clock fixed slow; do
     echo "== 2. $app"
+    for _ in $(seq 1 $n); do press Right; sleep 0.3; done
     press Return
     sleep 2; shot "${app}_2s"
     sleep 3; shot "${app}_5s"
     sleep 5; shot "${app}_back"
-    press Right; sleep 0.5
+    n=$((n + 1))
 done
 cleanup
 sleep 1.5

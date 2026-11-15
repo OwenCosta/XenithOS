@@ -17,6 +17,7 @@
 #include <string.h>
 #include <strings.h>
 #include <ctype.h>
+#include <math.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -470,6 +471,47 @@ int plat_install_update(const char *tarball, void (*step)(const char *what, int 
     return 1;
 }
 
+/* The guide, acted out (PCs). XSIM_GUIDE=1: launching an app opens the guide over a made-up game
+ * picture, as if the Xbox button had been pressed in it; what's chosen there happens as on a
+ * PC (Return home leaves a ".app" running, Switch game starts the one chosen). */
+static int (*guide_fn)(struct plat_guide *g);
+static char sim_running[128], sim_next[128];
+
+void plat_set_guide(int (*fn)(struct plat_guide *g)) { guide_fn = fn; }
+int plat_has_guide(void) { return sim_is_pc() && guide_fn != NULL; }
+const char *plat_running(void) { return sim_running[0] ? sim_running : NULL; }
+
+int plat_close_running(void (*step)(void))
+{
+    int i;
+    for (i = 0; step && i < 30; i++) step();
+    fprintf(stderr, "sim: closed %s\n", sim_running);
+    sim_running[0] = 0;
+    return 1;
+}
+
+const char *plat_next_launch(void)
+{
+    static char taken[128];
+    if (!sim_next[0]) return NULL;
+    snprintf(taken, sizeof taken, "%s", sim_next);
+    sim_next[0] = 0;
+    return taken;
+}
+
+/* A game picture: sky, hills and blocks, so the darkened backdrop has something in it. */
+static void sim_game_picture(uint32_t *px)
+{
+    int x, y;
+    for (y = 0; y < 720; y++)
+        for (x = 0; x < 1280; x++) {
+            int ground = 470 + (int)(40 * sin(x / 140.0)), c;
+            if (y < ground) c = (int)(90 + 100 * y / 720.0);
+            px[y * 1280 + x] = y < ground ? (uint32_t)((c / 3) << 16 | (c * 2 / 3) << 8 | (c + 60 > 255 ? 255 : c + 60))
+                             : ((x / 48 + y / 48) % 2 ? 0x4c8a3cu : 0x5a9a46u);
+        }
+}
+
 int plat_launch(const char *path)
 {
     struct stat s;
@@ -479,6 +521,23 @@ int plat_launch(const char *path)
     save_png("launch");                         /* what's left on screen for the next program */
     if (hook_before) hook_before();
     fprintf(stderr, "sim: launch %s (not possible in the simulator)\n", path);
+    if (sim_is_pc() && guide_fn && getenv("XSIM_GUIDE")) {
+        static uint32_t picture[1280 * 720];
+        struct plat_guide g;
+        int other = strlen(path) > 4 && !strcmp(path + strlen(path) - 4, ".app"), c;
+        sim_game_picture(picture);
+        memset(&g, 0, sizeof g);
+        g.backdrop = picture;
+        g.path = path;
+        g.keeps_running = other;
+        g.pad_modes = other ? PAD_GAME | PAD_MOUSE | PAD_KEYS : 0;
+        g.pad_mode = PAD_GAME;
+        c = guide_fn(&g);
+        fprintf(stderr, "sim: guide chose %d, controller %d, switch to %s\n", c, g.pad_mode, g.switch_to);
+        if (c == GUIDE_HOME && other) snprintf(sim_running, sizeof sim_running, "%s", path);
+        else if (!strcmp(sim_running, path)) sim_running[0] = 0;
+        if (c == GUIDE_SWITCH) snprintf(sim_next, sizeof sim_next, "%s", g.switch_to);
+    }
     if (hook_failed) hook_failed();
     return sim_is_pc();        /* as on a PC: the "app" ran and came back */
 }

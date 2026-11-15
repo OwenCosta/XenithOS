@@ -1,6 +1,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
@@ -84,6 +85,15 @@ static void scan_dir(const char *dir)
     closedir(d);
 }
 
+/* The one played last first ("Jump back in"), then by name. */
+static int app_order(const void *pa, const void *pb)
+{
+    const struct app *a = pa, *b = pb;
+    int la = !strcmp(a->path, st.last_app), lb = !strcmp(b->path, st.last_app);
+    if (la != lb) return lb - la;
+    return strcasecmp(a->name, b->name);
+}
+
 void apps_scan(void)
 {
     const char *name;
@@ -98,6 +108,7 @@ void apps_scan(void)
         scan_dir(sub);
         scan_dir(root);
     }
+    qsort(apps, (size_t)napps, sizeof apps[0], app_order);
 }
 
 /* The card itself never changes size (so its scaled thumbnail stays cached); only the
@@ -120,21 +131,58 @@ int app_is_other(const struct app *a)
     return has_ext(a->path, ".app");
 }
 
+static const struct app *app_by_path(const char *path)
+{
+    int i;
+    for (i = 0; path && i < napps; i++)
+        if (!strcmp(apps[i].path, path)) return &apps[i];
+    return NULL;
+}
+
+static char closing_title[64];
+
+static void closing_frame(void)
+{
+    ui_loading_frame(closing_title, NULL);
+}
+
 void app_launch(const struct app *a)
 {
-    const char *why;
-    char title[64];
-    snprintf(st.last_app, sizeof st.last_app, "%s", a->path);
-    settings_save();
-    sfx(SFX_LAUNCH);
-    startlog_launching(a->name);
-    /* The apps open with a loading screen laid out like this one, and on the Xbox the screen
-     * is kept across the switch, so going into an app doesn't show. Other programs (PCs)
-     * take the whole screen, and holding Guide is the way back from them. */
-    if (ui_launch(a->path, a->name, app_is_other(a) ? "Starting. Hold Guide for 3 seconds to come back to XenithOS." : "Starting"))
-        return;                                       /* on a PC it ran as its own program and has quit */
-    sfx(SFX_ERROR);
-    why = plat_launch_error();
-    snprintf(title, sizeof title, "Couldn't start %s", a->name);
-    ui_message(title, why && *why ? why : "The file may be damaged. Try installing it again from the Store.");
+    const char *why, *running, *next;
+    char title[64], body[160];
+    while (a) {
+        /* One game at a time: one the guide left running closes first (PCs). */
+        running = plat_running();
+        if (running && strcmp(running, a->path)) {
+            const struct app *r = app_by_path(running);
+            snprintf(title, sizeof title, "%s is still running", r ? r->name : "A game");
+            snprintf(body, sizeof body, "Close it and start %s? Anything it hasn't saved is lost.", a->name);
+            if (!ui_confirm(title, body, "Close it and start", "Cancel")) return;
+            snprintf(closing_title, sizeof closing_title, "Closing %s", r ? r->name : "the game");
+            plat_close_running(closing_frame);
+            running = NULL;
+        }
+        snprintf(st.last_app, sizeof st.last_app, "%s", a->path);
+        settings_save();
+        sfx(SFX_LAUNCH);
+        startlog_launching(a->name);
+        /* The apps open with a loading screen laid out like this one, and on the Xbox the screen
+         * is kept across the switch, so going into an app doesn't show. Other programs (PCs)
+         * take the whole screen: the guide (the Xbox button, or Esc held) is the way back,
+         * or, where there's no guide, holding the Xbox button. */
+        if (!ui_launch(a->path, a->name, running ? "Going back" :
+                       !app_is_other(a) ? "Starting" :
+                       plat_has_guide() ? "Starting. Press the Xbox button or hold Esc for the guide." :
+                       "Starting. Hold the Xbox button for 3 seconds to come back to XenithOS.")) {
+            sfx(SFX_ERROR);
+            why = plat_launch_error();
+            snprintf(title, sizeof title, "Couldn't start %s", a->name);
+            ui_message(title, why && *why ? why : "The file may be damaged. Try installing it again from the Store.");
+            return;
+        }
+        /* On a PC it ran as its own program and has quit, or was left running. Switch game in
+         * the guide chose what's next. */
+        next = plat_next_launch();
+        a = next ? app_by_path(next) : NULL;
+    }
 }

@@ -31,6 +31,16 @@ if [ -n "$XSIM_APPS" ]; then
         printf 'name=Game %s\nversion=1.0\n' "$i" > "$work/uda:/apps/game$i.txt"
     done
 fi
+# XSIM_OTHER: Flathub apps installed, by Store id ("roblox minecraft"): uda:/apps/<id>.app with
+# the name and thumbnail the Store would give them (XSIM_KIND=pc)
+if [ -n "$XSIM_OTHER" ]; then
+    for id in $XSIM_OTHER; do
+        app_name=$(python3 -c "import json,sys; print(next((a['name'] for a in json.load(open(sys.argv[1])) if a['id']==sys.argv[2]), sys.argv[2]))" \
+                   "$here/../server/flathub.example.json" "$id")
+        printf 'name=%s\nflatpak=org.example.%s\n' "$app_name" "$id" > "$work/uda:/apps/$id.app"
+        [ -f "$here/../art/thumbs/$id.ximg" ] && cp "$here/../art/thumbs/$id.ximg" "$work/uda:/apps/$id.ximg"
+    done
+fi
 # XSIM_PHOTOS: a folder of pictures for Photos (copied to uda:/photos)
 if [ -n "$XSIM_PHOTOS" ]; then
     mkdir -p "$work/uda:/photos"

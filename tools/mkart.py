@@ -167,7 +167,7 @@ def xenith():
 BG = {"game": (17, 27, 52), "media": (34, 20, 48), "social": (12, 38, 44), "emulator": (46, 20, 24),
       "steam": (20, 32, 48), "stream": (14, 34, 30)}
 ABOUT = {
-    "roblox": ("game", "Through Sober"), "minecraft": ("game", "Minecraft: Java Edition"),
+    "roblox": ("game", "Through Sober"), "minecraft": ("game", "Java Edition"),
     "kodi": ("media", "Media center"), "firefox": ("social", "Web browser"), "spotify": ("media", "Music and podcasts"),
     "discord": ("social", "Chat and voice"), "moonlight": ("stream", "Game streaming"),
     "chiaki": ("stream", "PlayStation Remote Play"), "heroic": ("game", "Epic, GOG and Amazon games"),

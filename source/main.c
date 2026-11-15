@@ -203,6 +203,7 @@ static void draw_home(void)
      * card is like the streaming site's posters: the picture, then the name and kind inside it. */
     if (napps) {
         int fit = (SCR_W - 2 * M + cgap) / (cw + cgap), clip[4];
+        const char *running = plat_running();
         if (fit < 1) fit = 1;
         if (card < card_first) card_first = card;
         if (card >= card_first + fit) card_first = card - fit + 1;
@@ -220,7 +221,12 @@ static void draw_home(void)
             gfx_stroke_rrect((float)x, (float)ly, (float)cw, ch + 58.0f, 10, 1 + l, gfx_mix(C_LINE, 0xFFFFFF, (int)(235 * l)), 255);
             app_card(&apps[i], x, ly, cw, ch, 0, 0);
             gfx_str_fit(FONT_BODY_SB, x + 12, ly + ch + 8, C_TEXT, apps[i].name, cw - 24);
-            gfx_str(FONT_SMALL, x + 12, ly + ch + 32, C_SUB, apps[i].version[0] ? apps[i].version : "App");
+            if (running && !strcmp(running, apps[i].path)) {     /* left running from the guide */
+                gfx_circle(x + 16.0f, ly + ch + 41.0f, 4, C_OK, 255);
+                gfx_str(FONT_SMALL, x + 26, ly + ch + 32, C_TEXT, "Running");
+            } else {
+                gfx_str(FONT_SMALL, x + 12, ly + ch + 32, C_SUB, apps[i].version[0] ? apps[i].version : "App");
+            }
         }
         gfx_set_clip(clip[0], clip[1], clip[2], clip[3]);
         if (napps > fit) {               /* where in the row you are */
@@ -307,6 +313,7 @@ int main(int argc, char **argv)
     startlog_mark("video");
     gfx_init();
     ui_init();
+    plat_set_guide(guide_run);
     boot();
 
     apps_scan();
@@ -341,7 +348,7 @@ int main(int argc, char **argv)
             else if (napps) {
                 app_launch(&apps[card]);
                 apps_scan();             /* a PC's app may have changed what's installed (Steam games) */
-                if (card >= napps) card = napps ? napps - 1 : 0;
+                card = 0;                /* what was just played is first now */
             } else open_tile(T_STORE);
         } else if (PRESSED(y)) {
             sfx(SFX_SELECT);

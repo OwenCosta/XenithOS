@@ -332,6 +332,13 @@ static void launch_frame(int done, int total)
     ui_loading_progress(launch_title, launch_detail, done, total);
 }
 
+void ui_launch_text(const char *title, const char *detail)
+{
+    launch_title = title;
+    launch_detail = detail;
+    launch_drawn = 0;
+}
+
 int ui_launch(const char *path, const char *title, const char *detail)
 {
     int started;

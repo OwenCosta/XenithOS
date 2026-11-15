@@ -403,6 +403,8 @@ static int load_separately(void)
     return 1;
 }
 
+static void refresh_app_files(void);
+
 static int load_store(void)
 {
     struct http_resp r;
@@ -423,6 +425,7 @@ static int load_store(void)
     if (!ok && !load_separately()) return 0;
     for (i = 0; i < nitems; i++) items[i].tab = has_tabs ? item_tab(&items[i]) : 0;
     update_states();
+    refresh_app_files();
     ui_busy_end();
 
     /* Start in Apps, or in XenithOS when there's an update for it. */
@@ -629,6 +632,27 @@ static void write_app_file(const struct item *it)
     if (it->icon_raw) {
         snprintf(path, sizeof path, "uda:/apps/%s.ximg", it->id);
         write_file(path, it->icon_raw, it->icon_len);
+    }
+}
+
+/* Installed apps take the Store's name and picture as they are now (Prism Launcher's became
+ * Minecraft), so the home screen shows them the same. */
+static void refresh_app_files(void)
+{
+    int i;
+    for (i = 0; i < nitems; i++) {
+        const struct item *it = &items[i];
+        char want[300], have[300];
+        size_t got = 0;
+        FILE *f;
+        if (!is_flathub(it) || it->state != ST_INSTALLED || file_size(it->dest) < 0) continue;
+        snprintf(want, sizeof want, "name=%s\nflatpak=%s\nargs=%s\n", it->name, it->ref, it->args);
+        if ((f = fopen(it->dest, "r"))) {
+            got = fread(have, 1, sizeof have - 1, f);
+            fclose(f);
+        }
+        have[got] = 0;
+        if (strcmp(have, want)) write_app_file(it);
     }
 }
 

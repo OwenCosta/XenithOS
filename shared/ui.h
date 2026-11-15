@@ -54,6 +54,9 @@ void ui_progress_frame(const char *title, const char *detail, int done, int tota
  * with a bar while it's read. Programs start with a frame laid out the same way, so on the
  * Xbox the switch doesn't show. Returns what plat_launch returns. */
 int  ui_launch(const char *path, const char *title, const char *detail);
+/* What that loading screen says from now on (the guide's "Closing" while a game closes).
+ * The strings have to last. */
+void ui_launch_text(const char *title, const char *detail);
 /* Leave an app for XenithOS, which comes back on the home screen with the app selected. */
 void ui_back_to_xenithos(const char *app_id);
 

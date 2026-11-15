@@ -114,6 +114,37 @@ void plat_reboot(void);
 void plat_power_off(void);
 int  plat_can_exit_to_loader(void);          /* Xbox: back to XeLL by returning from main */
 
+/* The guide (PCs): pressing the Xbox button, or holding Esc for half a second, while an app or
+ * game is on screen brings up XenithOS's side panel over it. The platform takes a picture of
+ * the screen, puts XenithOS's window in front and calls fn, which runs the panel until a
+ * choice is made and returns it:
+ *   GUIDE_RESUME   back to the game
+ *   GUIDE_HOME     XenithOS's home screen; with keeps_running the game is left running
+ *                  (plat_running() names it, and plat_launch() of it goes back to it),
+ *                  otherwise it's closed
+ *   GUIDE_SWITCH   the game is closed and switch_to started instead (plat_next_launch())
+ *   GUIDE_CLOSE    the game is closed
+ * Before returning GUIDE_SWITCH or GUIDE_CLOSE, fn leaves a "Closing" screen up: the
+ * platform keeps calling the launch progress hook while the game closes. pad_modes says
+ * which controller modes the game can switch between (0: no choice), pad_mode which is on:
+ *   PAD_GAME   the game reads the controller itself
+ *   PAD_MOUSE  the controller moves the pointer (launchers and menus)
+ *   PAD_KEYS   the controller plays it like a keyboard and mouse (Minecraft) */
+enum { GUIDE_RESUME, GUIDE_HOME, GUIDE_SWITCH, GUIDE_CLOSE };
+enum { PAD_GAME = 1, PAD_MOUSE = 2, PAD_KEYS = 4 };
+struct plat_guide {
+    const uint32_t *backdrop;            /* the screen when it was opened (w*h), or NULL */
+    const char *name, *path;             /* the game or app */
+    int keeps_running;
+    int pad_modes, pad_mode;
+    char switch_to[128];
+};
+void plat_set_guide(int (*fn)(struct plat_guide *g));
+int  plat_has_guide(void);               /* 1 where other programs (Flathub, Steam) get the guide */
+const char *plat_running(void);          /* the program Return home left running, or NULL */
+int  plat_close_running(void (*step)(void));   /* asks it to close and waits (step: a frame) */
+const char *plat_next_launch(void);      /* what Switch game chose, once; NULL when nothing */
+
 /* PCs and Pis have two modes: console mode (XenithOS full screen) and desktop mode (a normal
  * Linux desktop). plat_has_desktop() says whether one is installed; plat_switch_to_desktop()
  * returns only if switching failed. */

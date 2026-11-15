@@ -42,6 +42,7 @@
 
 #define FLATHUB_URL "https://dl.flathub.org/repo/flathub.flatpakrepo"
 #define STEAM_REF   "com.valvesoftware.Steam"
+#define PRISM_REF   "org.prismlauncher.PrismLauncher"
 
 /* ---------------------------------------------------------------- helpers */
 
@@ -321,6 +322,39 @@ int plat_steam_ready(void)
 }
 
 /* Adds s to a's arguments, copied into a->buf. 0 if it doesn't fit. */
+/* Prism Launcher's instance played most recently (its folder name), from the instance.cfg
+ * files in its Flatpak data folder. 0 when there's none yet. */
+static int prism_last_instance(char *out, int n)
+{
+    const char *home = getenv("HOME");
+    char dir[400];
+    long long best = 0;
+    DIR *d;
+    struct dirent *de;
+    if (!home || !*home) return 0;
+    snprintf(dir, sizeof dir, "%s/.var/app/" PRISM_REF "/data/PrismLauncher/instances", home);
+    if (!(d = opendir(dir))) return 0;
+    out[0] = 0;
+    while ((de = readdir(d))) {
+        char cfg[700], line[256];
+        FILE *f;
+        if (de->d_name[0] == '.' || strlen(de->d_name) >= (size_t)n) continue;
+        snprintf(cfg, sizeof cfg, "%s/%s/instance.cfg", dir, de->d_name);
+        if (!(f = fopen(cfg, "r"))) continue;
+        while (fgets(line, sizeof line, f))
+            if (!strncmp(line, "lastLaunchTime=", 15)) {
+                long long t = atoll(line + 15);
+                if (t > best) {
+                    best = t;
+                    snprintf(out, (size_t)n, "%s", de->d_name);
+                }
+            }
+        fclose(f);
+    }
+    closedir(d);
+    return best > 0;
+}
+
 static int put_arg(struct linux_app *a, int *k, int *used, const char *s)
 {
     int len = (int)strlen(s);
@@ -645,8 +679,8 @@ static int safe_word(const char *w)
 
 int linux_app_read(const char *path, struct linux_app *a, char *why, int why_len)
 {
-    char line[400], name[40] = "", ref[128] = "", args[200] = "", exec[300] = "", prog[256];
-    int steam = 0, k = 0, used = 0;
+    char line[400], name[40] = "", ref[128] = "", args[200] = "", exec[300] = "", prog[256], game[24] = "";
+    int steam = 0, k = 0, used = 0, pointer = 0;
     char *w, *save = NULL;
     FILE *f = fopen(path, "r");
 
@@ -663,8 +697,13 @@ int linux_app_read(const char *path, struct linux_app *a, char *why, int why_len
         else if (!strncmp(line, "args=", 5)) snprintf(args, sizeof args, "%s", line + 5);
         else if (!strncmp(line, "steam=", 6)) steam = atoi(line + 6);
         else if (!strncmp(line, "exec=", 5)) snprintf(exec, sizeof exec, "%s", line + 5);
+        else if (!strncmp(line, "pointer=", 8)) pointer = atoi(line + 8) == 1;
+        else if (!strncmp(line, "game=", 5)) ascii_copy(game, sizeof game, line + 5);
     }
     fclose(f);
+    /* Launchers that only take a mouse start with the controller as the pointer. */
+    a->pointer = pointer || !strcmp(ref, PRISM_REF);
+    snprintf(a->game_title, sizeof a->game_title, "%s", game);
 
     if (steam > 0) {
         char url[48];
@@ -691,6 +730,14 @@ int linux_app_read(const char *path, struct linux_app *a, char *why, int why_len
         for (w = strtok_r(args, " ", &save); w; w = strtok_r(NULL, " ", &save))
             if (safe_word(w)) PUT(w);
         a->steam = !strcmp(ref, STEAM_REF);
+        if (!strcmp(ref, PRISM_REF)) {
+            /* Minecraft like on a console: straight into the instance played last (Prism
+             * Launcher's own window only when there's none yet), and the controller plays it
+             * as a keyboard and mouse once Minecraft's window is up. */
+            char inst[200];
+            snprintf(a->game_title, sizeof a->game_title, "Minecraft");
+            if (prism_last_instance(inst, sizeof inst)) { PUT("--launch"); PUT(inst); }
+        }
     } else if (exec[0]) {
         for (w = strtok_r(exec, " ", &save); w; w = strtok_r(NULL, " ", &save)) {
             if (k == 0 && w[0] != '/') {

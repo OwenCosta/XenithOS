@@ -15,6 +15,8 @@ int  cloud_post(const char *path, const char *form, struct http_resp *r);
 int  cloud_get(const char *path, int max, struct http_resp *r);
 void cloud_sync(int quiet);                 /* refresh the profile, check the inbox */
 void cloud_route_check(void);               /* use XenithOS Cloud's home-network address if it's here */
+struct plat_guide;
+int  guide_run(struct plat_guide *g);       /* the guide's side panel over a game (plat_set_guide) */
 void cloud_poll_inbox(void);                /* cheap; checks about once a minute */
 void kv_get(const char *body, const char *key, char *out, int size);
 int  split_fields(char *line, char **f, int max);

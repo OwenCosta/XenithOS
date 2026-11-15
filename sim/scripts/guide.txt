@@ -1,0 +1,49 @@
+# The guide (PCs). XSIM_GUIDE acts out pressing the Xbox button in whatever is started: the
+# side panel over the game, Switch game, the controller as the pointer, then Return home, which
+# leaves a Flathub game running (its card says so), and starting another asks to close it first.
+#   XSIM_KIND=pc XSIM_GUIDE=1 XSIM_OTHER="roblox minecraft" sim/run.sh sim/scripts/guide.txt guide
+wait 210
+press down
+wait 10
+press right
+press right
+press right
+wait 25
+shot g_home
+press a
+wait 45
+shot g_panel
+press down
+wait 15
+shot g_panel_home
+press down
+wait 10
+press a
+wait 30
+shot g_switch
+press b
+wait 15
+press down
+wait 15
+shot g_controller
+press a
+wait 15
+shot g_controller_mouse
+press up
+press up
+wait 15
+press a
+wait 60
+shot g_home_running
+press right
+press right
+wait 15
+press a
+wait 30
+shot g_close_first
+press a
+wait 90
+shot g_after_switch
+press b
+wait 30
+quit

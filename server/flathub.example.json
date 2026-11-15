@@ -12,7 +12,7 @@
  },
  {
   "id": "minecraft",
-  "name": "Prism Launcher",
+  "name": "Minecraft",
   "ref": "org.prismlauncher.PrismLauncher",
   "arches": [
    "x86_64",
@@ -20,6 +20,6 @@
   ],
   "mb": 39,
   "shared_mb": 1350,
-  "description": "Plays Minecraft: Java Edition. Needs a Minecraft account, a keyboard and a mouse."
+  "description": "Minecraft: Java Edition, through Prism Launcher. Needs a Minecraft account."
  }
 ]

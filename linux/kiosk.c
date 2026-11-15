@@ -10,7 +10,15 @@
  *   - when the last one goes, XenithOS's own window has the screen and the keyboard again.
  * The events are handled whenever XenithOS polls its controller (every frame, and every 20 ms
  * while an app runs).
+ *
+ * "Holding" keeps XenithOS's window in front of the app's while the guide is open, and while a
+ * game left running from it waits behind the home screen; windows the app opens meanwhile go
+ * behind XenithOS's. The guide also gets a picture of the screen (kiosk_wm_capture), and the
+ * controller can work the pointer through the XTEST extension (libXtst, loaded when first
+ * needed: without it there's just no pointer mode).
  */
+#include <dlfcn.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <X11/Xatom.h>
@@ -26,6 +34,7 @@ static Window root, self;
 static int scr_w, scr_h;
 static Window shown[MAX_WINDOWS];            /* apps' windows on screen, bottom to top */
 static int nshown;
+static int hold;                             /* XenithOS's window stays in front */
 static Atom a_type, a_dialog, a_splash, a_utility, a_active;
 static volatile int other_wm;
 
@@ -145,11 +154,18 @@ static void forget(Window w)
     nshown--;
 }
 
+/* The newest window in front with the keyboard; all of the app's windows over XenithOS's in
+ * their order (a dialog's main window shows around it), unless XenithOS is holding the front. */
 static void focus_top(void)
 {
-    Window w = nshown ? shown[nshown - 1] : self;
-    XRaiseWindow(dpy, w);
-    XSetInputFocus(dpy, w, RevertToPointerRoot, CurrentTime);
+    int i;
+    if (hold || !nshown) {
+        XRaiseWindow(dpy, self);
+        XSetInputFocus(dpy, self, RevertToPointerRoot, CurrentTime);
+        return;
+    }
+    for (i = 0; i < nshown; i++) XRaiseWindow(dpy, shown[i]);
+    XSetInputFocus(dpy, shown[nshown - 1], RevertToPointerRoot, CurrentTime);
 }
 
 void kiosk_wm_poll(void)
@@ -165,6 +181,11 @@ void kiosk_wm_poll(void)
                 place(w);
                 forget(w);
                 if (nshown < MAX_WINDOWS) shown[nshown++] = w;
+            }
+            if (hold && w != self) {         /* behind XenithOS until the game is back */
+                XMapWindow(dpy, w);
+                focus_top();
+                break;
             }
             XMapRaised(dpy, w);
             if (w != self) XSetInputFocus(dpy, w, RevertToPointerRoot, CurrentTime);
@@ -217,10 +238,108 @@ int kiosk_wm_windows(void)
     return nshown;
 }
 
+/* The title of the app's window in front ("" when there's none). */
+void kiosk_wm_top_title(char *out, int n)
+{
+    char *name = NULL;
+    out[0] = 0;
+    if (!dpy || !nshown || !XFetchName(dpy, shown[nshown - 1], &name) || !name) return;
+    snprintf(out, (size_t)n, "%s", name);
+    XFree(name);
+}
+
 void kiosk_wm_show_self(void)
 {
     if (!dpy) return;
     nshown = 0;                              /* whatever the app left behind goes under us */
+    hold = 0;
     focus_top();
+    XFlush(dpy);
+}
+
+void kiosk_wm_hold(int on)
+{
+    if (!dpy) return;
+    hold = on;
+    focus_top();
+    XFlush(dpy);
+}
+
+/* The screen as it is, scaled to w x h (0x00RRGGBB), for the guide to draw over. */
+int kiosk_wm_capture(uint32_t *out, int w, int h)
+{
+    XImage *im;
+    int x, y, fast;
+    if (!dpy || w <= 0 || h <= 0) return 0;
+    im = XGetImage(dpy, root, 0, 0, (unsigned)scr_w, (unsigned)scr_h, AllPlanes, ZPixmap);
+    if (!im) return 0;
+    fast = im->bits_per_pixel == 32 && im->red_mask == 0xff0000 && im->green_mask == 0xff00 && im->blue_mask == 0xff;
+    for (y = 0; y < h; y++) {
+        int sy = y * scr_h / h;
+        const uint32_t *line = (const uint32_t *)(im->data + (size_t)sy * im->bytes_per_line);
+        for (x = 0; x < w; x++) {
+            int sx = x * scr_w / w;
+            if (fast) {
+                out[y * w + x] = line[sx] & 0xffffff;
+            } else {
+                unsigned long p = XGetPixel(im, sx, sy);
+                unsigned long m[3] = {im->red_mask, im->green_mask, im->blue_mask};
+                uint32_t c = 0;
+                int k;
+                for (k = 0; k < 3; k++) {    /* each channel scaled to 8 bits, whatever its mask */
+                    unsigned long v = m[k] ? p & m[k] : 0, mm = m[k];
+                    while (mm && !(mm & 1)) { mm >>= 1; v >>= 1; }
+                    c = (c << 8) | (uint32_t)(mm ? v * 255 / mm : 0);
+                }
+                out[y * w + x] = c;
+            }
+        }
+    }
+    XDestroyImage(im);
+    return 1;
+}
+
+/* --------------------------------------------------- the controller as a pointer (XTEST) */
+typedef int (*xt_motion_fn)(Display *, int, int, unsigned long);
+typedef int (*xt_button_fn)(Display *, unsigned int, Bool, unsigned long);
+typedef int (*xt_key_fn)(Display *, unsigned int, Bool, unsigned long);
+static xt_motion_fn xt_motion;
+static xt_button_fn xt_button;
+static xt_key_fn xt_key;
+
+int kiosk_wm_can_point(void)
+{
+    static int tried;
+    if (!tried) {
+        void *lib = dlopen("libXtst.so.6", RTLD_NOW | RTLD_LOCAL);
+        tried = 1;
+        if (lib) {
+            xt_motion = (xt_motion_fn)dlsym(lib, "XTestFakeRelativeMotionEvent");
+            xt_button = (xt_button_fn)dlsym(lib, "XTestFakeButtonEvent");
+            xt_key = (xt_key_fn)dlsym(lib, "XTestFakeKeyEvent");
+        }
+    }
+    return dpy && xt_motion && xt_button && xt_key;
+}
+
+void kiosk_wm_pointer_move(int dx, int dy)
+{
+    if (!kiosk_wm_can_point() || (!dx && !dy)) return;
+    xt_motion(dpy, dx, dy, CurrentTime);
+    XFlush(dpy);
+}
+
+void kiosk_wm_pointer_button(int button, int down)
+{
+    if (!kiosk_wm_can_point()) return;
+    xt_button(dpy, (unsigned)button, down ? True : False, CurrentTime);
+    XFlush(dpy);
+}
+
+void kiosk_wm_key(unsigned long keysym, int down)
+{
+    KeyCode kc;
+    if (!kiosk_wm_can_point() || !(kc = XKeysymToKeycode(dpy, (KeySym)keysym))) return;
+    xt_key(dpy, kc, down ? True : False, CurrentTime);
     XFlush(dpy);
 }

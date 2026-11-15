@@ -155,6 +155,28 @@ static void icon_render(int icon, float cx, float cy, float size, uint32_t fg, u
         ar(0, 0, 0.30f, 0.08f, -PI * 0.35f, PI * 1.45f);
         gfx_tri(PX(0.17f), PY(-0.41f), PX(0.36f), PY(-0.22f), PX(0.12f), PY(-0.16f), FG, 255);
         break;
+    case ICON_HOME:
+        ln(-0.40f, 0.0f, 0, -0.36f, 0.08f);
+        ln(0, -0.36f, 0.40f, 0.0f, 0.08f);
+        rs(-0.27f, -0.08f, 0.27f, 0.38f, 0.05f, 0.075f);
+        rr(-0.08f, 0.14f, 0.08f, 0.38f, 0.03f, FG);
+        break;
+    case ICON_CLOSE:
+        ln(-0.28f, -0.28f, 0.28f, 0.28f, 0.09f);
+        ln(0.28f, -0.28f, -0.28f, 0.28f, 0.09f);
+        break;
+    case ICON_SWITCH:                       /* two arrows, one each way */
+        ln(-0.36f, -0.17f, 0.34f, -0.17f, 0.075f);
+        ln(0.20f, -0.31f, 0.36f, -0.17f, 0.075f);
+        ln(0.20f, -0.03f, 0.36f, -0.17f, 0.075f);
+        ln(0.36f, 0.17f, -0.34f, 0.17f, 0.075f);
+        ln(-0.20f, 0.03f, -0.36f, 0.17f, 0.075f);
+        ln(-0.20f, 0.31f, -0.36f, 0.17f, 0.075f);
+        break;
+    case ICON_POINTER:                      /* a mouse pointer */
+        gfx_tri(PX(-0.26f), PY(-0.40f), PX(-0.26f), PY(0.24f), PX(0.26f), PY(0.08f), FG, 255);
+        ln(-0.06f, 0.10f, 0.10f, 0.40f, 0.11f);
+        break;
     }
 }
 

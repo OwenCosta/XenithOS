@@ -3,6 +3,7 @@
 #ifndef XENITH_PLATFORM_LINUX_H
 #define XENITH_PLATFORM_LINUX_H
 
+#include <stdint.h>
 #include <sys/types.h>
 
 const char *linux_data_dir(void);              /* the folder that holds "uda:" */
@@ -23,6 +24,11 @@ struct linux_app {
     char *argv[20];
     int steam;                                 /* it runs in Steam (Steam itself, or a game) */
     int steam_appid;                           /* a Steam game: Steam closes again after it */
+    int pointer;                               /* starts with the controller as the pointer
+                                                  (Prism Launcher, or "pointer=1" in the .app) */
+    char game_title[24];                       /* a launcher's game: while a window with a
+                                                  title starting like this is in front, the
+                                                  controller plays it as a keyboard and mouse */
 };
 
 /* Reads "uda:/apps/<id>.app". 0 with why[] set if it can't be run. */
@@ -42,6 +48,15 @@ int  kiosk_wm_start(unsigned long self_window);
 int  kiosk_wm_running(void);
 void kiosk_wm_poll(void);
 int  kiosk_wm_windows(void);                 /* apps' windows on screen now */
+void kiosk_wm_top_title(char *out, int n);   /* the title of the one in front, "" if none */
 void kiosk_wm_show_self(void);               /* XenithOS's window on top with the keyboard again */
+void kiosk_wm_hold(int on);                  /* 1: XenithOS's window stays in front of the app's */
+int  kiosk_wm_capture(uint32_t *out, int w, int h);   /* the screen, scaled; 0 if it can't */
+/* The pointer, through XTEST: 0 from can_point() when libXtst isn't there. Buttons are X's
+ * (1 left, 2 middle, 3 right, 4/5 scroll up/down, 6/7 left/right); keys are X keysyms. */
+int  kiosk_wm_can_point(void);
+void kiosk_wm_pointer_move(int dx, int dy);
+void kiosk_wm_pointer_button(int button, int down);
+void kiosk_wm_key(unsigned long keysym, int down);
 
 #endif
