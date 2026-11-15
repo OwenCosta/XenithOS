@@ -1,0 +1,10 @@
+[
+ {"id": "volt", "kind": "app", "name": "VOLT", "version": "1.1", "file": "volt.elf32",
+  "description": "STEER A STREAK OF LIGHT, GRAB SPARKS, CLIMB THE CLOUD LEADERBOARD"},
+ {"id": "doom", "kind": "app", "name": "DOOM", "version": "1.0", "file": "doom.elf32",
+  "description": "THE 1993 CLASSIC. NEEDS GAME DATA: INSTALL FREEDOOM BELOW"},
+ {"id": "freedoom1", "kind": "data", "name": "FREEDOOM PHASE 1", "version": "0.13.0", "file": "freedoom1.wad",
+  "description": "FREE DOOM GAME DATA, EPISODES LIKE THE ORIGINAL. BSD LICENSE"},
+ {"id": "xenith", "kind": "system", "name": "XENITH UPDATE", "version": "0.3", "file": "xenith.elf32",
+  "description": "UPDATES XENITH ITSELF ON YOUR USB STICK"}
+]

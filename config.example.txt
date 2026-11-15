@@ -1,0 +1,8 @@
+# XENITH settings. build.sh copies config.local.txt (not committed) to usb/xenith/config.txt.
+# Copy this file to config.local.txt and fill in your own values.
+
+# Your XENITH Cloud server as IP:port (the console has no DNS).
+server=203.0.113.10:8795
+
+# Your name on leaderboards: letters and digits, up to 12.
+name=PLAYER

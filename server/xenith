@@ -1,0 +1,14 @@
+#!/bin/sh
+# Admin helper for XENITH Cloud on the VPS. Run as root.
+#   xenith send "Dinner is ready"     message shows up in the Xbox's CLOUD inbox
+#   xenith motd "Game night at 9"     banner at the top of the CLOUD screen
+#   xenith status                     service state and the last log lines
+set -e
+if [ "$1" = "status" ]; then
+    systemctl --no-pager status xenith-cloud | head -n 12
+    exit 0
+fi
+set -a
+. /etc/xenith-cloud.env
+set +a
+exec python3 /opt/xenith-cloud/xenith_cloud.py "$@"

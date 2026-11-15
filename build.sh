@@ -16,6 +16,15 @@ rm -rf usb
 mkdir -p usb/apps
 cp xenith.elf32 usb/xenon.elf
 
+# Private settings (server IP) come from config.local.txt, which git ignores.
+mkdir -p usb/xenith
+if [ -f config.local.txt ]; then
+    cp config.local.txt usb/xenith/config.txt
+else
+    cp config.example.txt usb/xenith/config.txt
+    echo "note: no config.local.txt, staged the example config (no server set)"
+fi
+
 for app in apps/*/; do
     name=$(basename "$app")
     echo "== $name"

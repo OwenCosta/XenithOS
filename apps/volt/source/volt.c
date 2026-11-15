@@ -4,6 +4,7 @@
  * the walls or yourself. Every 5 sparks the streak gets faster.
  *
  * Controls: D-pad / left stick steer, START pause, A start / retry, BACK returns to XENITH.
+ * After a crash, X uploads the score to the XENITH Cloud leaderboard.
  *
  * Drawing is incremental (only the head, the old tail and the spark change per step),
  * which keeps it fast and flicker-free on a single framebuffer.
@@ -24,6 +25,8 @@
 
 #include "gfx.h"
 #include "theme.h"
+#include "net.h"
+#include "config.h"
 
 static const uint32_t C_FIELD = RGB(16, 16, 21);
 static const uint32_t C_SPARK = RGB(255, 214, 90);
@@ -220,6 +223,35 @@ static int step(void)
     return 1;
 }
 
+/* Send the last score to XENITH Cloud and show the rank. */
+static void upload_score(void)
+{
+    char body[64];
+    struct http_resp r;
+    int st;
+
+    if (!cfg.server[0]) {
+        banner("NO SERVER", "SET server= IN XENITH/CONFIG.TXT", C_WARN);
+        gfx_flush();
+        return;
+    }
+    banner("UPLOADING", "CONNECTING TO XENITH CLOUD", C_TEXT);
+    gfx_flush();
+    snprintf(body, sizeof body, "name=%s&score=%d", cfg.name, score);
+    st = http_request(cfg.server, "POST", "/v1/scores/volt", body, strlen(body), 4096, NULL, NULL, &r);
+    if (st == 200) {
+        char msg[64];
+        int rank = atoi(r.body);
+        if (rank > 0) snprintf(msg, sizeof msg, "%s IS RANK #%d     A PLAY AGAIN", cfg.name, rank);
+        else snprintf(msg, sizeof msg, "NOT IN THE TOP 50 YET     A PLAY AGAIN");
+        banner("UPLOADED", msg, C_OK);
+    } else {
+        banner("UPLOAD FAILED", st < 0 ? net_error(st) : st == 429 ? "WAIT A FEW SECONDS" : "SERVER REFUSED IT", C_BAD);
+    }
+    http_free(&r);
+    gfx_flush();
+}
+
 static void return_to_xenith(void)
 {
     set_controller_rumble(0, 0, 0);
@@ -233,7 +265,7 @@ static void return_to_xenith(void)
 /* ------------------------------------------------------------------- main */
 int main(void)
 {
-    int frame = 0, paused = 0, alive = 0;
+    int frame = 0, paused = 0, alive = 0, crashed = 0, uploaded = 0;
 
     xenos_init(VIDEO_MODE_AUTO);
     console_init();
@@ -255,6 +287,7 @@ int main(void)
     usb_init();
     usb_do_poll();
     fatInitDefault();
+    config_load();
     srand((unsigned)mftb());
 
     /* Title */
@@ -273,6 +306,12 @@ int main(void)
                 alive = 1;
                 paused = 0;
                 frame = 0;
+                crashed = 0;
+                uploaded = 0;
+            } else if (PRESSED(x) && crashed && !uploaded && score > 0) {
+                set_controller_rumble(0, 0, 0);
+                upload_score();
+                uploaded = 1;
             }
             continue;
         }
@@ -303,9 +342,13 @@ int main(void)
         if (!step()) {
             char buf[48];
             alive = 0;
+            crashed = 1;
             cell(body_x[head], body_y[head], C_BAD);
             buzz(255, 20);
-            snprintf(buf, sizeof buf, "SCORE %d     A TO RETRY", score);
+            if (score > 0 && cfg.server[0])
+                snprintf(buf, sizeof buf, "SCORE %d   A RETRY   X UPLOAD", score);
+            else
+                snprintf(buf, sizeof buf, "SCORE %d     A TO RETRY", score);
             banner("CRASHED", buf, C_BAD);
         }
         gfx_flush();

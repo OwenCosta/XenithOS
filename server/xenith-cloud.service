@@ -1,0 +1,33 @@
+[Unit]
+Description=XENITH Cloud (Xbox 360 XENITH server: store, inbox, leaderboards, stats)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/xenith-cloud/xenith_cloud.py
+EnvironmentFile=/etc/xenith-cloud.env
+Environment=XENITH_PORT=8795
+Environment=XENITH_STATE_DIR=/var/lib/xenith-cloud
+Environment=XENITH_STORE_DIR=/opt/xenith-cloud/store
+Restart=always
+RestartSec=3
+
+DynamicUser=yes
+StateDirectory=xenith-cloud
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

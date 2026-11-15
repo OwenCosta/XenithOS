@@ -3,3 +3,4 @@ build/
 *.elf32
 *.map
 usb/
+config.local.txt

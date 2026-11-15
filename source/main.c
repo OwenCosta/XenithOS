@@ -2,6 +2,8 @@
  *
  * Boots from XeLL, shows the XENITH splash, then a home menu:
  *   APPS        find .elf programs on USB/HDD and launch them
+ *   STORE       browse and install apps from XENITH Cloud (screens_cloud.c)
+ *   CLOUD       live server stats, inbox, leaderboards (screens_cloud.c)
  *   SYSTEM      live temperatures, video output, hardware info
  *   CONTROLLER  button/stick/trigger tester, triggers drive rumble
  *   RESTART / POWER OFF
@@ -26,101 +28,14 @@
 
 #include "gfx.h"
 #include "theme.h"
+#include "ui.h"
+#include "net.h"
+#include "config.h"
+#include "screens.h"
 
-#define XENITH_VERSION "0.2"
+#define XENITH_VERSION "0.3"
 
 int bdev_enum(int handle, const char **name);
-
-/* ----------------------------------------------------------------- layout */
-static int S;        /* base text scale: 3 at 720p, 2 at SD */
-static int M;        /* side margin */
-static int TOP;      /* y where screen content starts */
-
-static void layout_init(void)
-{
-    S = SCR_H >= 600 ? 3 : 2;
-    M = SCR_W / 16;
-    TOP = M / 2 + GFX_TEXT_H(S) + S * 12;
-}
-
-/* ------------------------------------------------------------------ input */
-static struct controller_data_s cur, prev;
-
-static void poll_input(void)
-{
-    prev = cur;
-    usb_do_poll();
-    get_controller_data(&cur, 0);
-    mdelay(16);
-}
-
-#define PRESSED(f) (cur.f && !prev.f)
-#define STICK_TH 20000
-
-/* -1 up, +1 down, with key repeat while held. */
-static int nav_y(void)
-{
-    static int held, frames;
-    int d = 0;
-
-    if (cur.up || cur.s1_y > STICK_TH) d = -1;
-    else if (cur.down || cur.s1_y < -STICK_TH) d = 1;
-
-    if (!d) { held = 0; frames = 0; return 0; }
-    if (d != held) { held = d; frames = 0; return d; }
-    frames++;
-    if (frames > 20 && (frames - 20) % 6 == 0) return d;
-    return 0;
-}
-
-static void wait_release(void)
-{
-    do { poll_input(); } while (cur.a || cur.b || cur.start || cur.back);
-}
-
-/* ----------------------------------------------------------- shared chrome */
-static void draw_chrome(const char *title, const char *hint)
-{
-    int y = M / 2;
-    gfx_clear(C_BG);
-    int x = M + gfx_text(M, y, S, C_ACCENT, "XENITH");
-    if (title) {
-        x += S * 6;
-        x += gfx_text(x, y, S, C_DIM, "/") + S * 6;
-        gfx_text(x, y, S, C_TEXT, title);
-    }
-    gfx_rect(M, y + GFX_TEXT_H(S) + S * 5, SCR_W - 2 * M, 2, C_PANEL);
-    if (hint)
-        gfx_text(M, SCR_H - M / 2 - GFX_TEXT_H(S - 1), S - 1, C_DIM, hint);
-}
-
-/* A selectable list row. Clears its own band so it can be redrawn alone. */
-static void draw_row(int y, int h, int selected, int scale, const char *label, const char *sub)
-{
-    gfx_rect(M, y, SCR_W - 2 * M, h, selected ? C_PANEL : C_BG);
-    if (selected) gfx_rect(M, y, S * 2, h, C_ACCENT);
-    int ty = y + (h - GFX_TEXT_H(scale)) / 2;
-    int w = gfx_text(M + S * 8, ty, scale, selected ? C_TEXT : C_DIM, label);
-    if (sub)
-        gfx_text(M + S * 8 + w + S * 8, y + (h - GFX_TEXT_H(S - 1)) / 2, S - 1, C_DIM, sub);
-}
-
-static int confirm(const char *question)
-{
-    int w = SCR_W / 2, h = GFX_TEXT_H(S) * 2 + S * 24;
-    int x = (SCR_W - w) / 2, y = (SCR_H - h) / 2;
-    gfx_rect(x, y, w, h, C_PANEL);
-    gfx_rect(x, y, w, S, C_ACCENT);
-    gfx_text_c(SCR_W / 2, y + S * 9, S, C_TEXT, question);
-    gfx_text_c(SCR_W / 2, y + h - S * 8 - GFX_TEXT_H(S - 1), S - 1, C_DIM, "A YES     B NO");
-    gfx_flush();
-    wait_release();
-    for (;;) {
-        poll_input();
-        if (PRESSED(a)) return 1;
-        if (PRESSED(b)) return 0;
-    }
-}
 
 /* ------------------------------------------------------------ boot splash */
 static void boot_splash(void)
@@ -147,7 +62,7 @@ static void boot_splash(void)
         gfx_rect(bx, by, bw * i / 24, S * 2, C_ACCENT);
         gfx_flush();
         usb_do_poll();
-        if (i == 8) { xenon_ata_init(); xenon_atapi_init(); fatInitDefault(); }
+        if (i == 8) { xenon_ata_init(); xenon_atapi_init(); fatInitDefault(); config_load(); }
         mdelay(20);
     }
 
@@ -437,11 +352,13 @@ static void screen_controller(void)
 }
 
 /* ------------------------------------------------------------------- home */
-enum { ITEM_APPS, ITEM_SYSTEM, ITEM_CONTROLLER, ITEM_RESTART, ITEM_POWER, ITEM_COUNT };
+enum { ITEM_APPS, ITEM_STORE, ITEM_CLOUD, ITEM_SYSTEM, ITEM_CONTROLLER, ITEM_RESTART, ITEM_POWER, ITEM_COUNT };
 
-static const char *home_items[ITEM_COUNT] = {"APPS", "SYSTEM", "CONTROLLER", "RESTART", "POWER OFF"};
+static const char *home_items[ITEM_COUNT] = {"APPS", "STORE", "CLOUD", "SYSTEM", "CONTROLLER", "RESTART", "POWER OFF"};
 static const char *home_desc[ITEM_COUNT] = {
     "LAUNCH PROGRAMS FROM USB OR HARD DRIVE",
+    "GET NEW APPS AND GAMES FROM XENITH CLOUD",
+    "YOUR SERVER: LIVE STATS, MESSAGES, LEADERBOARDS",
     "TEMPERATURES, VIDEO OUTPUT AND HARDWARE",
     "TEST EVERY BUTTON, STICK AND TRIGGER",
     "REBOOT THE CONSOLE",
@@ -481,7 +398,7 @@ int main(void)
     xenon_make_it_faster(XENON_SPEED_FULL);
 
     gfx_init();
-    layout_init();
+    ui_init();
 
     usb_init();
     usb_do_poll();
@@ -512,6 +429,8 @@ int main(void)
 
         switch (sel) {
         case ITEM_APPS:       screen_apps(); break;
+        case ITEM_STORE:      screen_store(); break;
+        case ITEM_CLOUD:      screen_cloud(); break;
         case ITEM_SYSTEM:     screen_system(); break;
         case ITEM_CONTROLLER: screen_controller(); break;
         case ITEM_RESTART:
