@@ -6,3 +6,6 @@ server=203.0.113.10:8795
 
 # Your name on leaderboards: letters and digits, up to 12.
 name=PLAYER
+
+# Console key: must match XENITH_CONSOLE_KEY on the server so only your Xbox can read its inbox.
+key=

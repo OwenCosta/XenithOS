@@ -402,7 +402,8 @@ static int draw_cloud(void)
         int yy = y;
         gfx_text(col2, yy, S - 1, C_DIM, "INBOX");
         yy += GFX_TEXT_H(S - 1) + S * 4;
-        st = http_request(cfg.server, "GET", "/v1/inbox", NULL, 0, 16 * 1024, NULL, NULL, &r);
+        snprintf(path, sizeof path, "/v1/inbox?key=%s", cfg.key);
+        st = http_request(cfg.server, "GET", path, NULL, 0, 16 * 1024, NULL, NULL, &r);
         if (st == 200 && r.body_len) {
             char *ln = r.body;
             for (i = 0; i < 4 && ln && *ln; i++) {

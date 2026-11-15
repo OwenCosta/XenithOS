@@ -4,9 +4,11 @@
 Standard library only. Plain HTTP, because the console has no TLS or DNS.
 Every reply is text/plain with simple line formats the console parses in C.
 
+  GET  /                              the XENITH website (web/index.html)
   GET  /v1/ping                       pong
+  GET  /v1/status                     key=value server stats (does not log a console)
   GET  /v1/hello?name=OWEN&ver=0.3    key=value lines: motd + live server stats
-  GET  /v1/inbox                      id|unix_time|text   (newest first)
+  GET  /v1/inbox?key=<console key>    id|unix_time|text   (newest first)
   GET  /v1/store                      id|kind|name|version|size|sha256|file|description
   GET  /v1/store/file/<id>            the file bytes
   GET  /v1/scores/<game>              rank|name|score
@@ -26,7 +28,9 @@ Environment:
   XENITH_PORT        default 8795
   XENITH_STATE_DIR   default ./state      (state.json lives here)
   XENITH_STORE_DIR   default ./store      (store.json + the files it lists)
+  XENITH_WEB_DIR     default ./web        (index.html for the website)
   XENITH_ADMIN_KEY   admin key; admin HTTP routes are disabled when unset
+  XENITH_CONSOLE_KEY when set, reading the inbox needs ?key=<this> (the console's config.txt key=)
 """
 import hashlib
 import hmac
@@ -211,7 +215,7 @@ def server_stats():
 # ---------------------------------------------------------------------- http
 
 
-def make_handler(state, store, admin_key):
+def make_handler(state, store, admin_key, web_dir="web", console_key=""):
     last_score = {}
     last_score_lock = threading.Lock()
 
@@ -250,6 +254,13 @@ def make_handler(state, store, admin_key):
             if parts == ["v1", "ping"]:
                 return self.reply(200, "pong\n")
 
+            if parts == ["v1", "status"]:
+                lines = {"motd": state.data["motd"], "server": "XENITH CLOUD " + VERSION,
+                         "consoles": str(len(state.data["consoles"])),
+                         "apps": str(len(store.items()))}
+                lines.update(server_stats())
+                return self.reply(200, "".join(f"{k}={clean(v)}\n" for k, v in lines.items()))
+
             if parts == ["v1", "hello"]:
                 name = clean(q.get("name", ["PLAYER"])[0], 12).upper()
                 if NAME_RE.match(name):
@@ -260,6 +271,9 @@ def make_handler(state, store, admin_key):
                 return self.reply(200, "".join(f"{k}={clean(v)}\n" for k, v in lines.items()))
 
             if parts == ["v1", "inbox"]:
+                if console_key and not hmac.compare_digest(
+                        q.get("key", [""])[0].encode(), console_key.encode()):
+                    return self.reply(401, "unauthorized\n")
                 return self.reply(200, "".join(f"{m['id']}|{m['t']}|{m['text']}\n"
                                                for m in state.data["inbox"]))
 
@@ -281,7 +295,11 @@ def make_handler(state, store, admin_key):
                 return self.reply(200, "".join(f"{n}|{e['name']}|{e['score']}\n"
                                                for n, e in enumerate(board, 1)))
 
-            if parts == []:
+            if parts == [] or parts == ["index.html"]:
+                page = os.path.join(web_dir, "index.html")
+                if os.path.isfile(page):
+                    with open(page, "rb") as f:
+                        return self.reply(200, f.read(), "text/html; charset=utf-8")
                 return self.reply(200, "XENITH Cloud " + VERSION + "\n")
 
             return self.reply(404, "not found\n")
@@ -334,7 +352,10 @@ def serve():
     state = State(os.environ.get("XENITH_STATE_DIR", "state"))
     store = Store(os.environ.get("XENITH_STORE_DIR", "store"))
     admin_key = os.environ.get("XENITH_ADMIN_KEY", "")
-    httpd = ThreadingHTTPServer(("0.0.0.0", port), make_handler(state, store, admin_key))
+    console_key = os.environ.get("XENITH_CONSOLE_KEY", "")
+    web_dir = os.environ.get("XENITH_WEB_DIR", "web")
+    httpd = ThreadingHTTPServer(("0.0.0.0", port),
+                                make_handler(state, store, admin_key, web_dir, console_key))
     httpd.daemon_threads = True
     print(f"XENITH Cloud {VERSION} on :{port} (admin routes {'on' if admin_key else 'off'})",
           flush=True)
@@ -363,7 +384,12 @@ def selftest():
 
     state = State(os.path.join(tmp, "state"))
     store = Store(store_dir)
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state, store, "k3y"))
+    web_dir = os.path.join(tmp, "web")
+    os.makedirs(web_dir)
+    with open(os.path.join(web_dir, "index.html"), "w") as f:
+        f.write("<!doctype html><title>XENITH</title>")
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0),
+                                make_handler(state, store, "k3y", web_dir, "c0nsole"))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{httpd.server_address[1]}"
 
@@ -384,6 +410,10 @@ def selftest():
         checks.append((name, bool(cond)))
 
     check("ping", req("GET", "/v1/ping") == (200, b"pong\n"))
+    check("website served", req("GET", "/") == (200, b"<!doctype html><title>XENITH</title>"))
+    code, body = req("GET", "/v1/status")
+    check("status ok", code == 200 and b"uptime=" in body and b"apps=" in body)
+    check("status does not log a console", state.data["consoles"] == {})
     code, body = req("GET", "/v1/hello?name=owen&ver=0.3")
     text = body.decode()
     check("hello ok", code == 200 and "motd=WELCOME TO XENITH CLOUD" in text)
@@ -422,12 +452,14 @@ def selftest():
     check("inbox needs key", req("POST", "/v1/inbox", "hi")[0] == 401)
     check("inbox wrong key", req("POST", "/v1/inbox", "hi", key="nope")[0] == 401)
     check("inbox add", req("POST", "/v1/inbox", "Hello|Xbox\nfrom phone", key="k3y")[0] == 200)
-    code, body = req("GET", "/v1/inbox")
+    check("inbox read without console key refused", req("GET", "/v1/inbox")[0] == 401)
+    check("inbox read with wrong console key refused", req("GET", "/v1/inbox?key=nope")[0] == 401)
+    code, body = req("GET", "/v1/inbox?key=c0nsole")
     check("inbox read cleaned", code == 200 and body.decode().split("|", 2)[2] == "Hello Xbox from phone\n")
     check("motd set", req("POST", "/v1/motd", "Game night 9PM", key="k3y")[0] == 200)
     check("motd shown", "motd=Game night 9PM" in req("GET", "/v1/hello")[1].decode())
     check("inbox clear", req("POST", "/v1/inbox/clear", "", key="k3y")[0] == 200
-          and req("GET", "/v1/inbox")[1] == b"")
+          and req("GET", "/v1/inbox?key=c0nsole")[1] == b"")
     check("body too large", req("POST", "/v1/motd", "x" * (MAX_BODY + 1), key="k3y")[0] == 413)
 
     reloaded = State(os.path.join(tmp, "state"))

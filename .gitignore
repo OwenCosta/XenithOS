@@ -4,3 +4,6 @@ build/
 *.map
 usb/
 config.local.txt
+server/state/
+server/store/
+.claude/

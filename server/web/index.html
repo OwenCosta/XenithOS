@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XENITH: a custom OS for the Xbox 360</title>
+<meta name="description" content="XENITH is a custom operating shell for the Xbox 360 with its own App Store, cloud server, and DOOM.">
+<style>
+  :root {
+    --bg: #0b0b0f;
+    --panel: #18181f;
+    --panel-2: #20202a;
+    --line: #2a2a35;
+    --text: #f2f2f5;
+    --dim: #8a8a99;
+    --accent: #7c5cff;
+    --ok: #46c878;
+    --warn: #ffaa3c;
+    --bad: #ff5050;
+    --spark: #ffd65a;
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+
+  /* nav */
+  nav { border-bottom: 1px solid var(--line); }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; gap: 12px; }
+  nav .links { display: flex; gap: 20px; font-size: 14px; }
+  nav .links a { color: var(--dim); }
+  nav .links a:hover { color: var(--text); text-decoration: none; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    font: 12px/1 var(--mono); letter-spacing: .06em;
+    padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--dim);
+    white-space: nowrap;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+  .pill.on .dot { background: var(--ok); }
+  .pill.off .dot { background: var(--bad); }
+
+  /* hero */
+  .hero { padding-top: 72px; padding-bottom: 48px; display: grid; grid-template-columns: 1.05fr 1fr; gap: 48px; align-items: center; }
+  .hero h1 { margin: 22px 0 14px; font-size: clamp(28px, 4.2vw, 44px); line-height: 1.12; letter-spacing: -.01em; }
+  .hero p.lead { color: var(--dim); font-size: 18px; margin: 0 0 28px; max-width: 34em; }
+  .cta { display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: 12px 18px; border-radius: var(--radius); font-weight: 600; font-size: 15px;
+    border: 1px solid var(--line); color: var(--text);
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn:hover { text-decoration: none; filter: brightness(1.08); }
+  #logo { display: block; width: 100%; max-width: 360px; height: auto; image-rendering: pixelated; }
+  .tv {
+    background: #000; border: 1px solid var(--line); border-radius: 14px; padding: 12px;
+  }
+  .tv canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; border-radius: 6px; }
+  .tv .cap { font: 12px var(--mono); color: var(--dim); margin: 10px 4px 2px; }
+
+  /* sections */
+  section { padding: 56px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: 26px; margin: 0 0 8px; letter-spacing: -.01em; }
+  .sub { color: var(--dim); margin: 0 0 28px; }
+  .grid { display: grid; gap: 16px; }
+  .g3 { grid-template-columns: repeat(3, 1fr); }
+  .g2 { grid-template-columns: repeat(2, 1fr); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; min-width: 0; }
+  .card h3 { margin: 0 0 6px; font-size: 17px; }
+  .card p { margin: 0; color: var(--dim); font-size: 15px; }
+  .tag { font: 11px var(--mono); letter-spacing: .08em; color: var(--accent); margin-bottom: 10px; display: block; }
+
+  /* live */
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 16px; }
+  .stat .k { font: 12px var(--mono); color: var(--dim); letter-spacing: .06em; }
+  .stat .v { font: 600 22px var(--mono); margin-top: 6px; overflow-wrap: anywhere; }
+  .bar { height: 6px; background: var(--panel-2); border-radius: 3px; margin-top: 12px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--ok); }
+  .motd { display: flex; gap: 14px; align-items: center; margin-bottom: 16px; }
+  .motd .v { font: 600 16px var(--mono); overflow-wrap: anywhere; }
+  .motd::before { content: ""; width: 4px; align-self: stretch; background: var(--accent); border-radius: 2px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th { text-align: left; font: 12px var(--mono); color: var(--dim); letter-spacing: .06em; font-weight: normal; padding: 0 0 10px; }
+  td { padding: 10px 0; border-top: 1px solid var(--line); vertical-align: top; }
+  td.num { font-family: var(--mono); text-align: right; white-space: nowrap; }
+  td.rank { font-family: var(--mono); color: var(--dim); width: 3em; }
+  tr.first td { color: var(--spark); }
+  .empty { color: var(--dim); font-size: 15px; padding: 10px 0; }
+  .item-kind { font: 11px var(--mono); color: var(--dim); letter-spacing: .06em; }
+  .item-desc { color: var(--dim); font-size: 14px; }
+
+  /* steps */
+  ol.steps { list-style: none; padding: 0; margin: 0; counter-reset: s; display: grid; gap: 12px; }
+  ol.steps li { counter-increment: s; display: grid; grid-template-columns: 36px 1fr; gap: 14px; align-items: start; }
+  ol.steps li::before {
+    content: counter(s); font: 600 14px var(--mono); color: var(--accent);
+    width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 8px;
+    display: grid; place-items: center;
+  }
+  ol.steps b { display: block; }
+  ol.steps span { color: var(--dim); font-size: 15px; }
+  .warn { margin-top: 20px; padding: 14px 16px; border: 1px solid #5a3a14; background: #1c140a; border-radius: var(--radius); color: #f3c98b; font-size: 14px; }
+
+  footer { border-top: 1px solid var(--line); padding: 28px 0 40px; color: var(--dim); font-size: 13px; }
+  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: 1fr; padding-top: 48px; gap: 32px; }
+    .g3, .stats { grid-template-columns: 1fr 1fr; }
+    .g2 { grid-template-columns: 1fr; }
+    nav .links { display: none; }
+  }
+  @media (max-width: 520px) {
+    .g3, .stats { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <svg id="navlogo" height="20" aria-label="XENITH"></svg>
+    <div class="links">
+      <a href="#features">Features</a>
+      <a href="#live">Live</a>
+      <a href="#store">Store</a>
+      <a href="#start">Get started</a>
+      <a href="https://github.com/OwenCosta/xenith-360">GitHub</a>
+    </div>
+    <span class="pill" id="pill"><span class="dot"></span><span id="pilltext">CHECKING</span></span>
+  </div>
+</nav>
+
+<header class="wrap hero">
+  <div>
+    <svg id="logo" aria-label="XENITH"></svg>
+    <h1>A custom operating system for the Xbox 360.</h1>
+    <p class="lead">XENITH runs bare metal on the real hardware. It has its own interface, its own App Store,
+      a cloud server you control, and yes, it runs DOOM.</p>
+    <div class="cta">
+      <a class="btn primary" href="#start">Get started</a>
+      <a class="btn" href="https://github.com/OwenCosta/xenith-360">Source on GitHub</a>
+    </div>
+  </div>
+  <div class="tv">
+    <canvas id="screen" width="640" height="360" aria-label="The XENITH home screen"></canvas>
+    <div class="cap">The XENITH home screen, drawn with the console's own pixel font.</div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <h2>What's inside</h2>
+    <p class="sub">Everything is written from scratch on LibXenon. No Microsoft code runs while XENITH is up.</p>
+    <div class="grid g3">
+      <div class="card"><span class="tag">SHELL</span><h3>Its own home screen</h3>
+        <p>Boot splash, app launcher, live temperatures, and a controller tester where the triggers drive the rumble motors.</p></div>
+      <div class="card"><span class="tag">STORE</span><h3>An App Store</h3>
+        <p>Install apps, game data and system updates over Ethernet. Every download is checked against its SHA-256 before anything is saved.</p></div>
+      <div class="card"><span class="tag">CLOUD</span><h3>A server you own</h3>
+        <p>XENITH Cloud shows live server stats on the TV, takes leaderboard scores, and delivers messages to the console.</p></div>
+      <div class="card"><span class="tag">GAME</span><h3>VOLT</h3>
+        <p>Steer a streak of light, grab sparks, and speed up every five. Upload your score with one button.</p></div>
+      <div class="card"><span class="tag">GAME</span><h3>DOOM</h3>
+        <p>The 1993 classic with full controller support. Install free Freedoom data straight from the Store.</p></div>
+      <div class="card"><span class="tag">OPEN</span><h3>Open source</h3>
+        <p>GPL-3.0. Write your own app in C with the shared drawing, network and theme code.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="live">
+  <div class="wrap">
+    <h2>Live from XENITH Cloud</h2>
+    <p class="sub">This page reads the same API the console uses. It refreshes every 15 seconds.</p>
+    <div class="card motd"><div><div class="stat"><div class="k">MESSAGE OF THE DAY</div></div><div class="v" id="motd">...</div></div></div>
+    <div class="stats">
+      <div class="card stat"><div class="k">UPTIME</div><div class="v" id="uptime">...</div></div>
+      <div class="card stat"><div class="k">LOAD (1 / 5 / 15 MIN)</div><div class="v" id="load">...</div></div>
+      <div class="card stat"><div class="k">CONSOLES SEEN</div><div class="v" id="consoles">...</div></div>
+      <div class="card stat"><div class="k">MEMORY</div><div class="v" id="mem">...</div><div class="bar"><i id="membar"></i></div></div>
+      <div class="card stat"><div class="k">DISK</div><div class="v" id="disk">...</div><div class="bar"><i id="diskbar"></i></div></div>
+      <div class="card stat"><div class="k">SERVER TIME</div><div class="v" id="time">...</div></div>
+    </div>
+    <div class="grid g2">
+      <div class="card">
+        <span class="tag">LEADERBOARD</span><h3>VOLT top 10</h3>
+        <table><thead><tr><th>#</th><th>PLAYER</th><th style="text-align:right">SCORE</th></tr></thead>
+          <tbody id="scores"></tbody></table>
+      </div>
+      <div class="card" id="store">
+        <span class="tag">STORE</span><h3>Available now</h3>
+        <table><thead><tr><th>ITEM</th><th style="text-align:right">SIZE</th></tr></thead>
+          <tbody id="items"></tbody></table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap">
+    <h2>Get started</h2>
+    <p class="sub">No soldering needed. You need an Xbox 360 on dashboard 17559, a USB stick, and an Ethernet cable.</p>
+    <div class="grid g2">
+      <ol class="steps">
+        <li><div><b>Build or download XENITH</b><span>Clone the repo and run <code>./build.sh</code>. It stages a ready-to-copy USB layout.</span></div></li>
+        <li><div><b>Prepare the USB stick</b><span>FAT32. Add ABadAvatar and FreeMyXe, then XENITH as <code>xenon.elf</code> in the root.</span></div></li>
+        <li><div><b>Run the exploit offline</b><span>Keep the hard drive in for avatar data. Wait on the profile screen. It can take up to 20 minutes.</span></div></li>
+        <li><div><b>Launch XeLL from FreeMyXe</b><span>XeLL finds <code>xenon.elf</code> and boots XENITH.</span></div></li>
+        <li><div><b>Plug in Ethernet</b><span>Only after XENITH is up. Then open STORE and CLOUD.</span></div></li>
+      </ol>
+      <div class="card">
+        <span class="tag">CONTROLS</span><h3>DOOM on a 360 controller</h3>
+        <table>
+          <tbody>
+            <tr><td>Left stick</td><td class="num">move / strafe</td></tr>
+            <tr><td>Right stick</td><td class="num">turn</td></tr>
+            <tr><td>RT / LT</td><td class="num">fire / run</td></tr>
+            <tr><td>A / B</td><td class="num">use / back</td></tr>
+            <tr><td>LB / RB</td><td class="num">weapons</td></tr>
+            <tr><td>X</td><td class="num">automap</td></tr>
+            <tr><td>Hold Back</td><td class="num">quit to XENITH</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="warn">Never flash a modified NAND or run anything that writes to the NAND while using FreeMyXe. It will brick the console. XENITH never writes to the NAND.</div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>XENITH is open source under GPL-3.0. DOOM engine by id Software via doomgeneric. Freedoom is BSD licensed.</span>
+    <span>Not affiliated with Microsoft or id Software.</span>
+  </div>
+</footer>
+
+<script>
+"use strict";
+
+/* ---- the console's 5x7 font, rows as 5-bit masks (bit 4 = leftmost) ---- */
+const FONT = {
+  A:[14,17,17,31,17,17,17], B:[30,17,17,30,17,17,30], C:[14,17,16,16,16,17,14], D:[30,17,17,17,17,17,30],
+  E:[31,16,16,30,16,16,31], F:[31,16,16,30,16,16,16], G:[14,17,16,23,17,17,15], H:[17,17,17,31,17,17,17],
+  I:[14,4,4,4,4,4,14], J:[7,2,2,2,2,18,12], K:[17,18,20,24,20,18,17], L:[16,16,16,16,16,16,31],
+  M:[17,27,21,21,17,17,17], N:[17,17,25,21,19,17,17], O:[14,17,17,17,17,17,14], P:[30,17,17,30,16,16,16],
+  Q:[14,17,17,17,21,18,13], R:[30,17,17,30,20,18,17], S:[15,16,16,14,1,1,30], T:[31,4,4,4,4,4,4],
+  U:[17,17,17,17,17,17,14], V:[17,17,17,17,17,10,4], W:[17,17,17,21,21,21,10], X:[17,17,10,4,10,17,17],
+  Y:[17,17,17,10,4,4,4], Z:[31,1,2,4,8,16,31], "0":[14,17,19,21,25,17,14], "1":[4,12,4,4,4,4,14],
+  "2":[14,17,1,2,4,8,31], "3":[31,2,4,2,1,17,14], "4":[2,6,10,18,31,2,2], "5":[31,16,30,1,1,17,14],
+  "6":[6,8,16,30,17,17,14], "7":[31,1,2,4,8,8,8], "8":[14,17,17,14,17,17,14], "9":[14,17,17,15,1,2,12],
+  ".":[0,0,0,0,0,12,12], ",":[0,0,0,0,12,4,8], ":":[0,12,12,0,12,12,0], "-":[0,0,0,31,0,0,0],
+  "/":[1,2,2,4,8,8,16], "!":[4,4,4,4,4,0,4], "?":[14,17,1,2,4,0,4], " ":[0,0,0,0,0,0,0],
+};
+const glyph = ch => FONT[ch.toUpperCase()] || FONT["?"];
+
+/* Pixel text as SVG rects (crisp at any size). */
+function svgText(svg, text, color) {
+  const ns = "http://www.w3.org/2000/svg";
+  const w = text.length * 6 - 1;
+  svg.setAttribute("viewBox", `0 0 ${w} 7`);
+  svg.setAttribute("shape-rendering", "crispEdges");
+  if (!svg.getAttribute("height")) svg.setAttribute("width", "100%");
+  else svg.setAttribute("width", (w / 7) * Number(svg.getAttribute("height")));
+  [...text].forEach((ch, i) => {
+    glyph(ch).forEach((row, y) => {
+      for (let x = 0; x < 5; x++) {
+        if (row & (16 >> x)) {
+          const r = document.createElementNS(ns, "rect");
+          r.setAttribute("x", i * 6 + x); r.setAttribute("y", y);
+          r.setAttribute("width", 1); r.setAttribute("height", 1);
+          r.setAttribute("fill", color);
+          svg.appendChild(r);
+        }
+      }
+    });
+  });
+}
+svgText(document.getElementById("logo"), "XENITH", "#f2f2f5");
+svgText(document.getElementById("navlogo"), "XENITH", "#7c5cff");
+
+/* ---- a recreation of the home screen, same layout rules as source/ui.c ---- */
+function drawScreen() {
+  const c = document.getElementById("screen"), g = c.getContext("2d");
+  const W = c.width, H = c.height, S = 1, M = Math.floor(W / 16);
+  const text = (x, y, s, col, str) => {
+    g.fillStyle = col;
+    [...str].forEach((ch, i) => glyph(ch).forEach((row, ry) => {
+      for (let rx = 0; rx < 5; rx++) if (row & (16 >> rx)) g.fillRect(x + (i * 6 + rx) * s, y + ry * s, s, s);
+    }));
+    return str.length * 6 * s - s;
+  };
+  g.fillStyle = "#0b0b0f"; g.fillRect(0, 0, W, H);
+  const y0 = Math.floor(M / 2);
+  text(M, y0, 2, "#7c5cff", "XENITH");
+  g.fillStyle = "#18181f"; g.fillRect(M, y0 + 14 + 10, W - 2 * M, 1);
+  const items = ["APPS", "STORE", "CLOUD", "SYSTEM", "CONTROLLER", "RESTART", "POWER OFF"];
+  const top = y0 + 14 + 22, rowh = 34, sel = 1;
+  items.forEach((it, i) => {
+    const y = top + i * rowh;
+    if (i === sel) {
+      g.fillStyle = "#18181f"; g.fillRect(M, y, W - 2 * M, rowh - 4);
+      g.fillStyle = "#7c5cff"; g.fillRect(M, y, 4, rowh - 4);
+    }
+    text(M + 16, y + Math.floor((rowh - 4 - 21) / 2), 3, i === sel ? "#f2f2f5" : "#6e6e7c", it);
+  });
+  text(M + 16, H - 24, 2, "#6e6e7c", "A SELECT     GUIDE EXIT TO XELL");
+}
+drawScreen();
+
+/* ---- live data ---- */
+const $ = id => document.getElementById(id);
+const parseKV = t => Object.fromEntries(
+  t.split("\n").filter(l => l.includes("=")).map(l => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
+const rows = t => t.split("\n").filter(Boolean).map(l => l.split("|"));
+
+function setBar(el, used, total) {
+  const pct = total > 0 ? Math.min(100, Math.round(used * 100 / total)) : 0;
+  el.style.width = pct + "%";
+  el.style.background = pct >= 90 ? "var(--bad)" : pct >= 70 ? "var(--warn)" : "var(--ok)";
+}
+function cell(tr, text, cls) {
+  const td = document.createElement("td");
+  if (cls) td.className = cls;
+  td.textContent = text;
+  tr.appendChild(td);
+  return td;
+}
+function fmtSize(n) {
+  n = Number(n);
+  return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.ceil(n / 1024) + " KB";
+}
+const KIND = { app: "APP", data: "GAME DATA", system: "SYSTEM UPDATE" };
+
+async function refresh() {
+  try {
+    const [st, sc, it] = await Promise.all([
+      fetch("/v1/status", { cache: "no-store" }).then(r => { if (!r.ok) throw 0; return r.text(); }),
+      fetch("/v1/scores/volt", { cache: "no-store" }).then(r => r.text()),
+      fetch("/v1/store", { cache: "no-store" }).then(r => r.text()),
+    ]);
+    const s = parseKV(st);
+    $("pill").className = "pill on"; $("pilltext").textContent = "CLOUD ONLINE";
+    $("motd").textContent = s.motd || "";
+    $("uptime").textContent = s.uptime || "?";
+    $("load").textContent = s.load || "?";
+    $("consoles").textContent = s.consoles || "0";
+    $("time").textContent = s.time || "?";
+    $("mem").textContent = `${(s.mem_used_mb / 1024).toFixed(1)} / ${(s.mem_total_mb / 1024).toFixed(1)} GB`;
+    setBar($("membar"), +s.mem_used_mb, +s.mem_total_mb);
+    $("disk").textContent = `${s.disk_used_gb} / ${s.disk_total_gb} GB`;
+    setBar($("diskbar"), +s.disk_used_gb, +s.disk_total_gb);
+
+    const sb = $("scores"); sb.replaceChildren();
+    const board = rows(sc);
+    if (!board.length) {
+      const tr = document.createElement("tr"); const td = cell(tr, "No scores yet. Be the first.", "empty");
+      td.colSpan = 3; sb.appendChild(tr);
+    }
+    board.forEach(([rank, name, score]) => {
+      const tr = document.createElement("tr"); if (rank === "1") tr.className = "first";
+      cell(tr, rank, "rank"); cell(tr, name); cell(tr, Number(score).toLocaleString(), "num");
+      sb.appendChild(tr);
+    });
+
+    const ib = $("items"); ib.replaceChildren();
+    rows(it).forEach(([id, kind, name, ver, size, sha, file, desc]) => {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      const k = document.createElement("div"); k.className = "item-kind"; k.textContent = `${KIND[kind] || kind}  V${ver}`;
+      const n = document.createElement("div"); n.textContent = name;
+      const d = document.createElement("div"); d.className = "item-desc"; d.textContent = desc;
+      td.append(k, n, d); tr.appendChild(td);
+      cell(tr, fmtSize(size), "num");
+      ib.appendChild(tr);
+    });
+  } catch (e) {
+    $("pill").className = "pill off"; $("pilltext").textContent = "CLOUD OFFLINE";
+  }
+}
+refresh();
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>

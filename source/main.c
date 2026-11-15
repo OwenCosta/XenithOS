@@ -33,7 +33,7 @@
 #include "config.h"
 #include "screens.h"
 
-#define XENITH_VERSION "0.3"
+#define XENITH_VERSION "0.3.1"
 
 int bdev_enum(int handle, const char **name);
 

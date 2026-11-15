@@ -9,6 +9,7 @@ EnvironmentFile=/etc/xenith-cloud.env
 Environment=XENITH_PORT=8795
 Environment=XENITH_STATE_DIR=/var/lib/xenith-cloud
 Environment=XENITH_STORE_DIR=/opt/xenith-cloud/store
+Environment=XENITH_WEB_DIR=/opt/xenith-cloud/web
 Restart=always
 RestartSec=3
 

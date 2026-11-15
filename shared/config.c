@@ -3,7 +3,7 @@
 #include <ctype.h>
 #include "config.h"
 
-struct xenith_config cfg = {"", "PLAYER", 0};
+struct xenith_config cfg = {"", "PLAYER", "", 0};
 
 static void trim(char *s)
 {
@@ -32,6 +32,11 @@ void config_load(void)
 
         if (!strcmp(key, "server")) {
             snprintf(cfg.server, sizeof cfg.server, "%s", val);
+        } else if (!strcmp(key, "key")) {
+            int o = 0;
+            for (; *val && o < (int)sizeof cfg.key - 1; val++)
+                if (isalnum((unsigned char)*val)) cfg.key[o++] = *val;
+            cfg.key[o] = 0;
         } else if (!strcmp(key, "name")) {
             int o = 0;
             for (; *val && o < 12; val++)
