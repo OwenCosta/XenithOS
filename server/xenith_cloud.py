@@ -12,6 +12,7 @@ Public
   GET  /v1/hello?name=Owen&ver=0.5    key=value: motd, players, online now (logs the console)
   GET  /v1/news                       id|unix_time|text   (newest first), XenithOS news
   GET  /v1/store                      id|kind|name|version|size|sha256|file|description
+  GET  /v1/store/needs                id|data_id,data_id   game data an item comes with
   GET  /v1/store/file/<id>            the file bytes
   GET  /v1/store/icon/<id>.ximg|.png  the item's thumbnail
   GET  /v1/scores/<game>              rank|name|score|avatar
@@ -332,7 +333,9 @@ class State:
 
 
 class Store:
-    """store.json: [{"id","kind","name","version","file","description"}], files next to it."""
+    """store.json: [{"id","kind","name","version","file","description"}], files next to it.
+    An item may also list "needs": ids of the game data it comes with (DOOM -> Freedoom).
+    Consoles install those along with it, and the USB download includes them."""
 
     def __init__(self, store_dir):
         self.dir = store_dir
@@ -367,10 +370,23 @@ class Store:
             if not ID_RE.match(iid) or kind not in KINDS or not fname or not os.path.isfile(path):
                 continue
             size, sha = self._digest(path)
+            needs = item.get("needs") if isinstance(item.get("needs"), list) else []
             out.append({"id": iid, "kind": kind, "name": clean(item.get("name", iid), 24),
                         "version": clean(item.get("version", "1"), 12), "size": size,
                         "sha256": sha, "description": clean(item.get("description", ""), 96),
-                        "file": fname, "path": path})
+                        "file": fname, "path": path,
+                        "needs": [str(n) for n in needs if ID_RE.match(str(n))][:8]})
+        return out
+
+    def needs(self, items=None):
+        """{item id: [ids of the game data it comes with]}, only data that's in the Store."""
+        items = self.items() if items is None else items
+        data = {i["id"] for i in items if i["kind"] == "data"}
+        out = {}
+        for i in items:
+            have = [n for n in i["needs"] if n in data and n != i["id"]]
+            if have:
+                out[i["id"]] = have
         return out
 
     def find(self, iid):
@@ -823,29 +839,49 @@ def public_addr(handler, configured):
     return host if PUBLIC_ADDR_RE.match(host) else ""
 
 
+_zip_cache = {"key": None, "data": b""}
+_zip_lock = threading.Lock()
+
+
 def xbox_zip(store, addr):
-    """Everything for a USB stick: XenithOS, the apps with their thumbnails, and a config with
-    the XenithOS Cloud address. Built from what's in the Store."""
-    buf = io.BytesIO()
-    items = {i["id"]: i for i in store.items()}
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        if "xenith" in items:
-            z.write(items["xenith"]["path"], "xenon.elf")
-        for iid, it in items.items():
-            if it["kind"] != "app":
-                continue
-            z.write(it["path"], f"apps/{iid}.elf32")
-            z.writestr(f"apps/{iid}.txt", f"name={it['name']}\nversion={it['version']}\n")
-            icon = store.icon(iid, "ximg")
-            if icon:
-                z.write(icon, f"apps/{iid}.ximg")
-        z.writestr("xenith/config.txt", (f"server={addr}\n" if addr else "") + "name=PLAYER\n")
-        z.writestr("README.txt",
-                   "XenithOS for the Xbox 360\r\n\r\n"
-                   "Copy everything here to the root of a FAT32 USB stick, next to ABadAvatar and\r\n"
-                   "FreeMyXe. Start the exploit, choose Launch XeLL in FreeMyXe, and XeLL loads\r\n"
-                   "xenon.elf. Never write to the NAND while using the exploit.\r\n")
-    return buf.getvalue()
+    """Everything for a USB stick: XenithOS, the apps with their thumbnails, the game data
+    they come with (Freedoom for DOOM), and a config with the XenithOS Cloud address. Built
+    from what's in the Store, and kept until the Store or the address changes (with the game
+    data it's tens of MB)."""
+    items_list = store.items()
+    items = {i["id"]: i for i in items_list}
+    needs = store.needs(items_list)
+    apps = [iid for iid, it in items.items() if it["kind"] == "app"]
+    data = sorted({n for a in apps for n in needs.get(a, [])})
+    files = [it["path"] for it in items.values() if it["id"] in apps or it["id"] in data or it["kind"] == "system"]
+    manifest = os.path.join(store.dir, "store.json")
+    key = (addr, os.path.getmtime(manifest) if os.path.exists(manifest) else 0,
+           tuple((p, os.path.getmtime(p), os.path.getsize(p)) for p in sorted(files)))
+    with _zip_lock:
+        if _zip_cache["key"] == key:
+            return _zip_cache["data"]
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            if "xenith" in items:
+                z.write(items["xenith"]["path"], "xenon.elf")
+            for iid in apps:
+                it = items[iid]
+                z.write(it["path"], f"apps/{iid}.elf32")
+                z.writestr(f"apps/{iid}.txt", f"name={it['name']}\nversion={it['version']}\n")
+                icon = store.icon(iid, "ximg")
+                if icon:
+                    z.write(icon, f"apps/{iid}.ximg")
+            for did in data:                      # stored as they are: game data barely compresses
+                z.write(items[did]["path"], f"data/{items[did]['file']}", compress_type=zipfile.ZIP_STORED)
+            z.writestr("xenith/config.txt", (f"server={addr}\n" if addr else "") + "name=PLAYER\n")
+            z.writestr("README.txt",
+                       "XenithOS for the Xbox 360\r\n\r\n"
+                       "Copy everything here to the root of a FAT32 USB stick, next to ABadAvatar and\r\n"
+                       "FreeMyXe. Start the exploit, choose Launch XeLL in FreeMyXe, and XeLL loads\r\n"
+                       "xenon.elf. Never write to the NAND while using the exploit.\r\n\r\n"
+                       "The data folder holds the game data the apps come with, like Freedoom for DOOM.\r\n")
+        _zip_cache["key"], _zip_cache["data"] = key, buf.getvalue()
+        return _zip_cache["data"]
 
 
 # ---------------------------------------------------------------------- http
@@ -1005,6 +1041,10 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 return self.reply(200, "".join(
                     f"{i['id']}|{i['kind']}|{i['name']}|{i['version']}|{i['size']}|"
                     f"{i['sha256']}|{i['file']}|{i['description']}\n" for i in store.items()))
+
+            if parts == ["v1", "store", "needs"]:
+                # Its own route: a 9th field on /v1/store would end up in older consoles' descriptions.
+                return self.reply(200, "".join(f"{iid}|{','.join(ns)}\n" for iid, ns in store.needs().items()))
 
             if len(parts) == 4 and parts[:3] == ["v1", "store", "file"]:
                 item = store.find(parts[3])
@@ -1235,12 +1275,16 @@ def selftest():
         f.write(b"\x7fELF" + bytes(range(256)) * 10)
     with open(os.path.join(store_dir, "game.ximg"), "wb") as f:
         f.write(b"XIMGthumb")
+    with open(os.path.join(store_dir, "gamedata.wad"), "wb") as f:
+        f.write(b"IWAD" + bytes(range(256)) * 40)
+    store_list = [{"id": "game", "kind": "app", "name": "Game|X", "version": "1.0", "file": "game.elf32",
+                   "description": "line\nbreak", "needs": ["gamedata", "missing", "../bad", "game"]},
+                  {"id": "gamedata", "kind": "data", "name": "Game data", "version": "1", "file": "gamedata.wad"},
+                  {"id": "../evil", "kind": "app", "file": "game.elf32"},
+                  {"id": "missing", "kind": "app", "file": "nope.bin"},
+                  {"id": "weird", "kind": "exe", "file": "game.elf32"}]
     with open(os.path.join(store_dir, "store.json"), "w") as f:
-        json.dump([{"id": "game", "kind": "app", "name": "Game|X", "version": "1.0",
-                    "file": "game.elf32", "description": "line\nbreak"},
-                   {"id": "../evil", "kind": "app", "file": "game.elf32"},
-                   {"id": "missing", "kind": "app", "file": "nope.bin"},
-                   {"id": "weird", "kind": "exe", "file": "game.elf32"}], f)
+        json.dump(store_list, f)
     web_dir = os.path.join(tmp, "web")
     os.makedirs(os.path.join(web_dir, "static"))
     with open(os.path.join(web_dir, "index.html"), "w") as f:
@@ -1328,11 +1372,13 @@ else:
     # Store
     code, body = req("GET", "/v1/store")
     lines = body.decode().strip().split("\n")
-    f = lines[0].split("|")
+    rows = {line.split("|")[0]: line.split("|") for line in lines}
+    f = rows.get("game", [])
     with open(os.path.join(store_dir, "game.elf32"), "rb") as fh:
         payload = fh.read()
-    check("store lists only valid items", code == 200 and len(lines) == 1)
-    check("store line has 8 fields", len(f) == 8)
+    check("store lists only valid items", code == 200 and sorted(rows) == ["game", "gamedata"])
+    check("store lines have 8 fields", all(len(r) == 8 for r in rows.values()))
+    check("store needs: only data that's in the Store", req("GET", "/v1/store/needs") == (200, b"game|gamedata\n"))
     check("store pipe cleaned from name", f[2] == "Game X")
     check("store sha256 matches", f[5] == hashlib.sha256(payload).hexdigest())
     check("store description one line", f[7] == "line break")
@@ -1427,8 +1473,21 @@ else:
     with zipfile.ZipFile(io.BytesIO(body)) as z:
         names = set(z.namelist())
         cfg_text = z.read("xenith/config.txt").decode()
+        data_info = z.getinfo("data/gamedata.wad") if "data/gamedata.wad" in names else None
     check("xbox zip", code == 200 and {"apps/game.elf32", "apps/game.txt", "apps/game.ximg", "xenith/config.txt",
                                        "README.txt"} <= names and cfg_text.startswith("server=127.0.0.1:"))
+    check("xbox zip has the game data its apps need, stored as is", data_info is not None
+          and data_info.compress_type == zipfile.ZIP_STORED and "apps/gamedata.elf32" not in names)
+    check("xbox zip comes from the cache", req("GET", "/download/xenithos-xbox360.zip") == (200, body))
+    store_list[0]["version"] = "1.1"
+    with open(os.path.join(store_dir, "store.json"), "w") as f:
+        json.dump(store_list, f)
+    later = time.time() + 5
+    os.utime(os.path.join(store_dir, "store.json"), (later, later))
+    code, body = req("GET", "/download/xenithos-xbox360.zip")
+    with zipfile.ZipFile(io.BytesIO(body)) as z:
+        app_txt = z.read("apps/game.txt").decode()
+    check("xbox zip is rebuilt when the Store changes", code == 200 and "version=1.1" in app_txt)
     check("install.sh missing is 404", req("GET", "/install.sh")[0] == 404)
     with open(os.path.join(dl_dir, "install.sh"), "w") as f:
         f.write('SERVER="@XENITHOS_SERVER@"\nSOURCE_URL="@XENITHOS_SOURCE@"\n')
