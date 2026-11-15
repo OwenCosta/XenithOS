@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>XenithOS for Xbox 360</title>
 <meta name="description" content="XenithOS is a homebrew shell for the Xbox 360 S, built on libxenon. It has profiles with avatars, an app store, a small cloud server, and a DOOM port.">
+<link rel="canonical" href="https://owencosta.diy/xenithos/">
 <style>
   :root {
     --bg: #090d16;
@@ -27,11 +28,14 @@
   code { font: 14px var(--mono); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
   .wrap { max-width: 1000px; margin: 0 auto; padding: 0 16px; }
 
-  header.top { border-bottom: 1px solid var(--line); }
-  header.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 56px; }
-  header.top nav { display: flex; gap: 18px; font-size: 14px; }
-  header.top nav a { color: var(--sub); text-decoration: none; }
+  header.top { border-bottom: 1px solid var(--line); position: relative; }
+  header.top .wrap { display: flex; align-items: center; gap: 14px; min-height: 56px; }
+  header.top .home { display: inline-flex; align-items: center; margin-right: auto; }
+  header.top nav { display: flex; gap: 16px; font-size: 14px; }
+  header.top nav a { color: var(--sub); text-decoration: none; white-space: nowrap; }
   header.top nav a:hover { color: var(--text); }
+  .menu-btn { display: none; background: none; border: 1px solid var(--line); color: var(--text); border-radius: 8px;
+              padding: 6px 11px; font: 600 14px system-ui, sans-serif; cursor: pointer; }
   .pill { display: inline-flex; align-items: center; gap: 7px; font: 12px var(--mono); color: var(--sub); white-space: nowrap; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
   .pill.on .dot { background: var(--ok); }
@@ -40,8 +44,8 @@
   #logo { display: block; width: 300px; max-width: 75%; height: auto; margin-bottom: 22px; }
   .intro p { max-width: 42em; margin: 0 0 12px; }
   .intro p.sub { color: var(--sub); }
-  .facts { font: 13px var(--mono); color: var(--sub); margin: 16px 0 22px; }
-  .facts span + span::before { content: " / "; color: var(--line); }
+  .facts { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 16px 0 22px; }
+  .facts span { font: 12px/1.4 var(--mono); color: var(--sub); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
   .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
   .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 10px; border: 1px solid var(--line);
          color: var(--text); background: none; text-decoration: none; font: 600 15px system-ui, sans-serif; cursor: pointer; }
@@ -88,8 +92,11 @@
   .kind { font: 12px var(--mono); color: var(--dim); }
   .muted { color: var(--sub); }
 
-  pre.cmd { margin: 0 0 18px; padding: 14px 16px; background: var(--panel-2); border-radius: 10px; overflow-x: auto; }
-  pre.cmd code { padding: 0; background: none; font-size: 15px; white-space: pre; }
+  .cmdbox { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 18px; padding: 12px 12px 12px 16px; background: var(--panel-2); border-radius: 10px; }
+  pre.cmd { flex: 1; min-width: 0; margin: 0; padding-top: 4px; white-space: pre-wrap; word-break: break-all; }
+  pre.cmd code { padding: 0; background: none; font-size: 15px; }
+  .copy { flex: none; background: none; border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 5px 10px;
+          font: 600 13px system-ui, sans-serif; cursor: pointer; }
   ol.steps { margin: 0; padding-left: 20px; max-width: 46em; }
   ol.steps li { margin-bottom: 10px; }
   .warning { margin-top: 18px; padding: 12px 14px; border-left: 3px solid var(--warn); background: #1a1409; color: #efc98f; font-size: 14px; max-width: 46em; }
@@ -104,8 +111,22 @@
   footer p { margin: 4px 0; }
 
   @media (max-width: 760px) {
-    header.top nav { display: none; }
+    .menu-btn { display: inline-block; }
+    header.top nav { display: none; position: absolute; left: 0; right: 0; top: 100%; z-index: 5; flex-direction: column; gap: 0;
+                     padding: 6px 16px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
+    header.top nav.open { display: flex; }
+    header.top nav a { padding: 11px 0; font-size: 16px; }
     .cols { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 640px) {
+    /* The status table as cards: each row stacks, with its column names beside the values. */
+    .status table, .status tbody, .status tr, .status td { display: block; }
+    .status thead { display: none; }
+    .status tr { border-top: 1px solid var(--line); padding: 12px 0; }
+    .status td { border: 0; padding: 2px 0; }
+    .status td:first-child { font-weight: 600; }
+    .status td[data-k]::before { content: attr(data-k) ": "; color: var(--dim); font: 12px var(--mono); }
+    .scroll table { min-width: 0; }
   }
 </style>
 </head>
@@ -113,16 +134,18 @@
 
 <header class="top">
   <div class="wrap">
-    <svg id="navlogo" height="16" aria-label="XenithOS"></svg>
-    <nav>
+    <a class="home" href="#" aria-label="XenithOS, top of the page"><svg id="navlogo" height="16" aria-hidden="true"></svg></a>
+    <nav id="nav" aria-label="XenithOS">
       <a href="#screens">Screens</a>
       <a href="#players">Players</a>
       <a href="#scores">Leaderboard</a>
       <a href="#status">Status</a>
-      <a href="#run">Run it</a>
+      <a href="#run">Get it</a>
+      <a href="https://owencosta.diy/account/">Account</a>
       <a href="https://github.com/OwenCosta/XenithOS">GitHub</a>
     </nav>
-    <span class="pill" id="pill"><span class="dot"></span><span id="pilltext">checking server</span></span>
+    <span class="pill" id="pill"><span class="dot"></span><span id="pilltext">checking</span></span>
+    <button class="menu-btn" id="menu-btn" type="button" aria-expanded="false" aria-controls="nav">Menu</button>
   </div>
 </header>
 
@@ -158,7 +181,7 @@
 <section id="players">
   <div class="wrap">
     <h2>Players</h2>
-    <p class="lead">Everyone with a XenithOS profile. Your gamertag and avatar are saved to XenithOS Cloud, so they follow you to any Xbox, PC or Pi.</p>
+    <p class="lead">Everyone with a XenithOS profile. Your gamertag and avatar are saved to XenithOS Cloud, so they follow you to any Xbox, PC or Pi. You can link yours to an <a href="https://owencosta.diy/account/">OwenCosta account</a>, which works across Owen's other projects too.</p>
     <div class="players" id="playerlist"><p class="muted">Loading...</p></div>
   </div>
 </section>
@@ -180,17 +203,17 @@
   <div class="wrap">
     <h2>Where it's at</h2>
     <p class="lead">"Works" in the Xbox column only means I've seen it working on the real console. Everything else has run in the simulator or on Linux so far.</p>
-    <div class="scroll">
+    <div class="scroll status">
     <table>
       <thead><tr><th>Part</th><th>Builds</th><th>On the Xbox</th><th>Notes</th></tr></thead>
       <tbody>
-        <tr><td>Booting XenithOS from the exploit</td><td class="yes">yes</td><td class="yes">works</td><td class="note">0.3.1, 0.4.0 and 0.4.1 ran on the 360 S</td></tr>
-        <tr><td>Interface, Store updates</td><td class="yes">yes</td><td class="yes">works</td><td class="note">0.4.1 installed itself from the Store</td></tr>
-        <tr><td>Sound in games, app start times</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">0.5.0 stops the sound chip before an app loads and skips 1.5 s of disk set-up per start</td></tr>
-        <tr><td>Profiles, Cloud, avatars</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">needs the Ethernet cable on the Xbox; no Wi-Fi driver</td></tr>
-        <tr><td>VOLT, DOOM, Tube</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">DOOM has sound effects in 0.5.0; no music yet</td></tr>
-        <tr><td>PCs and Raspberry Pis</td><td class="yes">yes</td><td class="note">-</td><td class="note">new in 0.5.0, tested on Linux</td></tr>
-        <tr><td>XenithOS Cloud and this site</td><td class="yes">yes</td><td class="live">live</td><td class="note">you're on it</td></tr>
+        <tr><td>Booting XenithOS from the exploit</td><td class="yes" data-k="Builds">yes</td><td class="yes" data-k="On the Xbox">works</td><td class="note">0.3.1, 0.4.0 and 0.4.1 ran on the 360 S</td></tr>
+        <tr><td>Interface, Store updates</td><td class="yes" data-k="Builds">yes</td><td class="yes" data-k="On the Xbox">works</td><td class="note">0.4.1 installed itself from the Store</td></tr>
+        <tr><td>Sound in games, app start times</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">0.5.1 keeps the picture up between programs and lines the sound chip up after a game</td></tr>
+        <tr><td>Profiles, Cloud, avatars</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">needs the Ethernet cable on the Xbox; no Wi-Fi driver</td></tr>
+        <tr><td>VOLT, DOOM, Tube</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">DOOM comes with Freedoom and has sound effects; no music yet</td></tr>
+        <tr><td>PCs and Raspberry Pis</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">new in 0.5.0, tested on Linux</td></tr>
+        <tr><td>XenithOS Cloud and this site</td><td class="yes" data-k="Builds">yes</td><td class="live" data-k="On the Xbox">live</td><td class="note">you're on it</td></tr>
       </tbody>
     </table>
     </div>
@@ -217,7 +240,10 @@
   <div class="wrap">
     <h2>On a PC or Raspberry Pi</h2>
     <p class="lead">Install Debian 12 or newer, Ubuntu 22.04 or newer, or Raspberry Pi OS (Lite is fine), then run this as your user. It builds XenithOS and sets the machine to start straight into it.</p>
-    <pre class="cmd"><code id="installcmd">curl -fsSL http://this-server/install.sh | sudo bash</code></pre>
+    <div class="cmdbox">
+      <pre class="cmd"><code id="installcmd">curl -fsSL https://owencosta.diy/xenithos/install.sh | sudo bash</code></pre>
+      <button class="copy" id="copy" type="button">Copy</button>
+    </div>
     <ol class="steps">
       <li>Restart. You're in <b>console mode</b>: XenithOS full screen, with a controller or the keyboard (arrows, Enter, Escape).</li>
       <li><b>Desktop mode</b> is in XenithOS's power menu: the full Linux desktop, for a browser and everything else.</li>
@@ -231,6 +257,10 @@
   <div class="wrap">
     <h2>Build log</h2>
     <ul class="log">
+      <li><b>0.5.1</b><time datetime="2026-11-15">Nov 15, 2026</time>
+        <p>Switching between XenithOS and apps keeps the picture on the TV instead of going black: each program hands the next one what it needs, and the next one keeps the video mode that's already running. XenithOS shows a progress bar while it reads an app, and leaving an app goes straight back to the home screen with that app selected. The sound chip is lined up with where the last program left it, the likely cause of broken sound after a game. DOOM installs together with Freedoom: Phase 1 and 2, and asks which one to play.</p></li>
+      <li><b>Tube 1.1</b><time datetime="2026-11-15">Nov 15, 2026</time>
+        <p>Videos start without the console timing out, and Tube says why when one won't play. When YouTube turns XenithOS Cloud away, it asks again the full way, solving YouTube's JavaScript challenge and using a proof-of-origin token. Skipping ahead reuses the video's links instead of asking YouTube again.</p></li>
       <li><b>0.5.0</b><time datetime="2026-11-15">Nov 15, 2026</time>
         <p>XenithOS runs on PCs and Raspberry Pis, with console mode and desktop mode. Tube plays YouTube, even on the Xbox. A new avatar editor with thirteen parts in three tabs. DOOM has sound effects. Apps start faster with a loading screen instead of a black one, and the sound chip is stopped before an app loads so it can't play noise. XenithOS Cloud is now a public service with news for everyone.</p></li>
       <li><b>0.4.1</b><time datetime="2026-11-15">Nov 15, 2026</time>
@@ -250,7 +280,7 @@
 
 <footer>
   <div class="wrap">
-    <p>Made by <a href="https://github.com/OwenCosta">OwenCosta</a>. XenithOS is GPL-3.0. It uses the Inter typeface (OFL), doomgeneric (GPL-2.0+), stb_image (public domain) and Freedoom (BSD).</p>
+    <p>Made by <a href="https://owencosta.diy/">Owen Costa</a>. XenithOS is GPL-3.0. It uses the Inter typeface (OFL), doomgeneric (GPL-2.0+), stb_image (public domain) and Freedoom (BSD).</p>
     <p>Not affiliated with Microsoft, Google or id Software. Xbox, YouTube and DOOM are their trademarks.</p>
   </div>
 </footer>
@@ -280,8 +310,30 @@ function wordmark(svg, main, os) {
 }
 wordmark($("logo"), "#ecf1fa", "#2f7dff");
 wordmark($("navlogo"), "#ecf1fa", "#2f7dff");
-/* The install command points at whichever address this page was opened from. */
-$("installcmd").textContent = `curl -fsSL http://${location.host}/install.sh | sudo bash`;
+/* The install command points at wherever this page was opened from (owencosta.diy/xenithos/ or
+   the server's own address). */
+$("installcmd").textContent = `curl -fsSL ${new URL("install.sh", location.href).href} | sudo bash`;
+$("copy").addEventListener("click", () => {
+  const done = () => { $("copy").textContent = "Copied"; setTimeout(() => { $("copy").textContent = "Copy"; }, 1600); };
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText($("installcmd").textContent).then(done, () => {});
+  else {
+    const r = document.createRange();
+    r.selectNodeContents($("installcmd"));
+    const s = getSelection();
+    s.removeAllRanges();
+    s.addRange(r);
+    $("copy").textContent = "Selected";
+  }
+});
+
+/* Menu on phones */
+$("menu-btn").addEventListener("click", () => {
+  const open = $("nav").classList.toggle("open");
+  $("menu-btn").setAttribute("aria-expanded", open ? "true" : "false");
+});
+$("nav").addEventListener("click", (e) => {
+  if (e.target.closest("a")) { $("nav").classList.remove("open"); $("menu-btn").setAttribute("aria-expanded", "false"); }
+});
 
 /* Screens */
 const SHOTS = [
@@ -327,7 +379,7 @@ async function refresh() {
   try {
     const [sc, it, pl] = await Promise.all([get("v1/scores/volt"), get("v1/store"), get("v1/players")]);
     $("pill").className = "pill on";
-    $("pilltext").textContent = "server online";
+    $("pilltext").textContent = "online";
 
     const board = $("board");
     board.replaceChildren();
@@ -392,7 +444,7 @@ async function refresh() {
     });
   } catch (e) {
     $("pill").className = "pill";
-    $("pilltext").textContent = "server offline";
+    $("pilltext").textContent = "offline";
   }
 }
 refresh();
