@@ -38,7 +38,7 @@
   header.top .home { display: inline-flex; align-items: center; margin-right: auto; }
   .back { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; background: rgba(255, 255, 255, 0.08);
           color: var(--text); text-decoration: none; font: 600 13px system-ui, sans-serif; white-space: nowrap; }
-  .back::before { content: "9"; font-size: 16px; line-height: 1; }
+  .back svg { flex: none; margin-left: -2px; }
   .back:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
   header.top nav { display: flex; gap: 16px; font-size: 14px; }
   header.top nav a { color: var(--sub); text-decoration: none; white-space: nowrap; }
@@ -149,7 +149,7 @@
 
 <header class="top">
   <div class="wrap">
-    <a class="back" href="https://owencosta.diy/">Owen Costa</a>
+    <a class="back" href="https://owencosta.diy/" aria-label="Back to owencosta.diy"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Owen Costa</a>
     <a class="home" href="#" aria-label="XenithOS, top of the page"><svg id="navlogo" height="26" aria-hidden="true"></svg></a>
     <nav id="nav" aria-label="XenithOS">
       <a href="#screens">Screens</a>
@@ -227,7 +227,7 @@
         <tr><td>Profiles, Cloud, avatars</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">needs the Ethernet cable on the Xbox; no Wi-Fi driver</td></tr>
         <tr><td>VOLT, DOOM, Tube, Photos</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">DOOM comes with Freedoom and has sound effects; no music yet</td></tr>
         <tr><td>PCs and Raspberry Pis</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">0.5.2 runs apps inside XenithOS's window: no black screen between them</td></tr>
-        <tr><td>Apps from Flathub, Steam</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">PCs only; 0.5.5 opens them over XenithOS on its own X server, tested in a virtual display</td></tr>
+        <tr><td>Roblox, Minecraft and the guide</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">PCs only; they open over XenithOS on its own X server and the guide comes up over them, tested in a virtual display</td></tr>
         <tr><td>XenithOS Cloud and this site</td><td class="yes" data-k="Builds">yes</td><td class="live" data-k="On the Xbox">live</td><td class="note">you're on it</td></tr>
       </tbody>
     </table>
@@ -264,10 +264,11 @@
       <li><b>Desktop mode</b> is in XenithOS's power menu: the full Linux desktop, for a browser and everything else.</li>
       <li><b>Return to XenithOS</b> in the desktop's menu goes back to console mode.</li>
       <li><b>Updates</b> come from the Store: pick <b>XenithOS update</b>, and it builds the new version on your machine and restarts into it.</li>
-      <li><b>Roblox</b> and <b>Minecraft</b> are in the Store's Apps section too (LB and RB switch sections). They install from Flathub through XenithOS, start from its home screen and get the whole screen: hold Guide for three seconds to come back.</li>
+      <li><b>Roblox</b> and <b>Minecraft</b> are in the Store's Apps section too (LB and RB switch sections). They install from Flathub through XenithOS, start from its home screen and get the whole screen.</li>
+      <li><b>The guide</b>: press the Xbox button, or hold Esc, in a game. Return home leaves the game running (choose it again to go back), Switch game starts another, and the controller can work as a mouse for launchers or as a keyboard and mouse for Minecraft.</li>
     </ol>
     <h3>In the Store on PCs</h3>
-    <p class="muted">Apps come from <a href="https://flathub.org/">Flathub</a> and run under their own licenses. Roblox runs through <a href="https://sober.vinegarhq.org/">Sober</a>, a community project that isn't made by Roblox (use it at your own risk), and only on x86-64 PCs. Steam games install and run through Steam with your Steam account: free games only need the account, others are bought on Steam. Machines installed before 0.5.4 need the install command once more for apps.</p>
+    <p class="muted">Apps come from <a href="https://flathub.org/">Flathub</a> and run under their own licenses. Roblox runs through <a href="https://sober.vinegarhq.org/">Sober</a>, a community project that isn't made by Roblox (use it at your own risk), and only on x86-64 PCs. Minecraft: Java Edition runs through <a href="https://prismlauncher.org/">Prism Launcher</a> and needs a Minecraft account; XenithOS starts the instance you played last. Machines installed before 0.5.4 need the install command once more for apps.</p>
     <div class="tiles" id="pcapps"></div>
     <p class="muted">Add <code>--no-desktop</code> to skip desktop mode, or run it again with <code>--uninstall</code> to undo it. More in <a href="https://github.com/OwenCosta/XenithOS/blob/main/linux/README.md">linux/README.md</a>.</p>
   </div>
@@ -311,7 +312,7 @@
 <footer>
   <div class="wrap">
     <p>Made by <a href="https://owencosta.diy/">Owen Costa</a>. XenithOS is GPL-3.0. It uses the Inter typeface (OFL), doomgeneric (GPL-2.0+), stb_image (public domain) and Freedoom (BSD).</p>
-    <p>Not affiliated with Microsoft, Google, id Software, Valve or Roblox. Xbox, YouTube, DOOM, Steam and Roblox are their trademarks.</p>
+    <p>Not affiliated with Microsoft, Mojang, Google, id Software, Valve or Roblox. Xbox, Minecraft, YouTube, DOOM, Steam and Roblox are their trademarks.</p>
   </div>
 </footer>
 
@@ -372,6 +373,7 @@ $("nav").addEventListener("click", (e) => {
 const SHOTS = [
   ["home", "Home", "Your profile at the top, five tiles, and the apps you've installed. A notification slides in when there's XenithOS news."],
   ["store", "Store", "Apps, game data and updates from XenithOS Cloud, with thumbnails. Downloads are checked against their SHA-256 before they're saved."],
+  ["guide", "Guide", "On a PC, the Xbox button (or Esc held down) brings up the guide over any game: back to the home screen while it keeps running, another game, or the controller as a mouse or a keyboard."],
   ["profile", "Profile", "Profiles are saved to XenithOS Cloud and follow you to any Xbox, PC or Pi. Make one with a gamertag and a passcode."],
   ["avatar", "Avatar", "Thirteen parts in three tabs: face, hair and outfit, with every colour as a swatch. Y picks something random."],
   ["cloud", "Cloud", "Who's playing, XenithOS news, and the VOLT leaderboard with everyone's avatar."],
@@ -379,7 +381,7 @@ const SHOTS = [
 ];
 function showShot(i) {
   const [id, name, text] = SHOTS[i];
-  $("shot").src = `static/shot-${id}.png?v=2`;
+  $("shot").src = `static/shot-${id}.png?v=3`;
   $("shot").alt = `XenithOS ${name} screen`;
   $("caption").textContent = text;
   [...$("tabs").children].forEach((b, j) => b.setAttribute("aria-selected", i === j ? "true" : "false"));
