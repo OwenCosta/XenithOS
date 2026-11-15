@@ -81,6 +81,32 @@ int  plat_launch(const char *path);
  * when the new version is in place (plat_launch(XENITH_SHELL_PATH) restarts into it), or 0
  * with why[] set. Not used on the Xbox, where the update is xenon.elf itself. */
 int  plat_install_update(const char *tarball, void (*step)(const char *what, int seconds), char *why, int why_len);
+
+/* PCs and Pis: apps from Flathub (through Flatpak) and games from Steam. The Xbox has none of
+ * this, and says so.
+ *   plat_arch()              the processor as Flathub names it: "x86_64", "aarch64" ("" on the Xbox)
+ *   plat_flatpak_ready()     1 when Flatpak is installed here
+ *   plat_flatpak_installed() 1 when that app (an id like "tv.kodi.Kodi") is installed
+ *   plat_flatpak()           verb "install", "update" or "uninstall". step(percent or -1,
+ *                            seconds) is called many times a second while it works, and can
+ *                            return 0 to cancel. 1 when done, -1 when cancelled, 0 with why[] set.
+ *   plat_steam_ready()       1 when the Steam app is installed
+ *   plat_steam_open(url)     Steam full screen at a steam:// address (a game's page, say), until
+ *                            it's closed. 0 if it couldn't start (plat_launch_error() says why)
+ *   plat_sync_apps()         puts the games installed in Steam into uda:/apps as
+ *                            "steam-<appid>.app", with Steam's picture of each
+ * An installed app is "uda:/apps/<id>.app" (name=, then flatpak=<id> and args=, steam=<appid>
+ * or exec=<program and arguments>), started with plat_launch() like any other app. It gets
+ * the whole screen; holding Guide for three seconds closes it and comes back to XenithOS. */
+const char *plat_arch(void);
+int  plat_flatpak_ready(void);
+int  plat_flatpak_installed(const char *ref);
+int  plat_flatpak(const char *verb, const char *ref, int (*step)(int percent, int seconds), char *why, int why_len);
+int  plat_steam_ready(void);
+int  plat_steam_open(const char *url);
+void plat_sync_apps(void);
+/* Why the last plat_launch() or plat_steam_open() returned 0, when the platform knows. */
+const char *plat_launch_error(void);
 /* fn(done, total) is called as plat_launch reads the program (Xbox), for a progress bar.
  * NULL turns it off. */
 void plat_set_launch_progress(void (*fn)(int done, int total));

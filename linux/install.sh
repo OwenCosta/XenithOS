@@ -78,6 +78,16 @@ apt-get install -y $PKGS
 # DOOM's free game data (Freedoom: Phase 1 and 2, in /usr/share/games/doom). Not every
 # system has the package; DOOM can get it from the Store instead.
 apt-get install -y freedoom || say "No freedoom package here; DOOM can get Freedoom from the Store"
+# Apps from Flathub and Steam (the Store's Apps and Steam sections): Flatpak; cage, a small
+# compositor that shows one app full screen in console mode; Xwayland for apps that still
+# need X11; a D-Bus for the user's apps; and a sound server the apps and XenithOS can share,
+# if the system has none.
+APP_PKGS="flatpak cage xwayland dbus-user-session"
+if ! dpkg -s pipewire-pulse >/dev/null 2>&1 && ! dpkg -s pulseaudio >/dev/null 2>&1; then
+    APP_PKGS="$APP_PKGS pipewire pipewire-pulse wireplumber"
+fi
+# shellcheck disable=SC2086
+apt-get install -y $APP_PKGS || say "Couldn't install all of: $APP_PKGS. XenithOS works without them, but apps from Flathub won't"
 
 say "Getting the XenithOS source"
 HERE=""
@@ -103,13 +113,13 @@ make -C "$SRC/linux" -j"$(nproc)"
 
 say "Installing"
 install -d /usr/lib/xenithos /usr/share/xenithos/apps "$STATE"
-install -m 755 "$SRC/linux/xenithos" "$SRC/linux/volt" "$SRC/linux/doom" "$SRC/linux/tube" /usr/lib/xenithos/
+install -m 755 "$SRC/linux/xenithos" "$SRC/linux/volt" "$SRC/linux/doom" "$SRC/linux/tube" "$SRC/linux/photos" /usr/lib/xenithos/
 # The programs belong to the XenithOS user, so the Store's "XenithOS update" can build a new
 # version and put it in place without sudo (linux/update.sh). They only ever run as that user.
 chown -R "$USER_NAME": /usr/lib/xenithos
 install -m 755 "$SRC/linux/xenithos-session" "$SRC/linux/xenithos-console" /usr/bin/
 install -m 644 "$SRC/linux/xenithos-console.desktop" "$SRC/linux/xenithos.desktop" /usr/share/applications/
-for app in volt doom tube; do
+for app in volt doom tube photos; do
     if [ -f "$SRC/art/thumbs/$app.ximg" ]; then install -m 644 "$SRC/art/thumbs/$app.ximg" /usr/share/xenithos/apps/; fi
     if [ -f "$SRC/apps/$app/app.txt" ]; then install -m 644 "$SRC/apps/$app/app.txt" "/usr/share/xenithos/apps/$app.txt"; fi
 done
@@ -119,7 +129,7 @@ fi
 
 say "Setting up $USER_NAME"
 sudo -u "$USER_NAME" mkdir -p "$DATA/uda:/apps" "$DATA/uda:/xenith" "$HOME_DIR/.config/xenithos"
-for app in volt doom tube; do
+for app in volt doom tube photos; do
     sudo -u "$USER_NAME" ln -sfn "/usr/lib/xenithos/$app" "$DATA/uda:/apps/$app.elf32"
     for ext in ximg txt; do
         if [ -f "/usr/share/xenithos/apps/$app.$ext" ]; then
@@ -133,6 +143,11 @@ fi
 for g in video render input audio; do
     if getent group "$g" >/dev/null; then usermod -aG "$g" "$USER_NAME"; fi
 done
+# Flathub for the user's apps (the Store also adds it before the first install).
+if command -v flatpak >/dev/null; then
+    sudo -u "$USER_NAME" -H flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo \
+        || say "Couldn't reach Flathub just now; the Store adds it when it installs the first app"
+fi
 
 say "Starting in console mode"
 mkdir -p "$GETTY_DIR"

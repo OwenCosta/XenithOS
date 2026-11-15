@@ -66,6 +66,42 @@ int img_load_file(struct img *out, const char *path)
     return ok;
 }
 
+int img_save_file(const struct img *im, const char *path)
+{
+    size_t raw_len = (size_t)im->w * im->h * 4, i;
+    uLongf zlen = compressBound((uLong)raw_len);
+    unsigned char *raw, *z, head[16];
+    FILE *f;
+    int ok = 0;
+    if (!im->px || im->w <= 0 || im->h <= 0 || im->w > MAX_SIDE || im->h > MAX_SIDE) return 0;
+    raw = malloc(raw_len);
+    z = malloc(zlen);
+    if (raw && z) {
+        for (i = 0; i < (size_t)im->w * im->h; i++) {   /* stored as R, G, B, A bytes */
+            uint32_t c = im->px[i];
+            raw[i * 4] = (c >> 16) & 255;
+            raw[i * 4 + 1] = (c >> 8) & 255;
+            raw[i * 4 + 2] = c & 255;
+            raw[i * 4 + 3] = c >> 24;
+        }
+        if (compress2(z, &zlen, raw, (uLong)raw_len, 6) == Z_OK && (f = fopen(path, "wb"))) {
+            memcpy(head, "XIMG", 4);
+            head[4] = im->w >> 8; head[5] = im->w & 255;
+            head[6] = im->h >> 8; head[7] = im->h & 255;
+            head[8] = 1;                          /* RGBA8 */
+            head[9] = 1;                          /* zlib */
+            head[10] = head[11] = 0;
+            head[12] = raw_len >> 24; head[13] = (raw_len >> 16) & 255; head[14] = (raw_len >> 8) & 255; head[15] = raw_len & 255;
+            ok = fwrite(head, 1, 16, f) == 16 && fwrite(z, 1, zlen, f) == zlen;
+            if (fclose(f) != 0) ok = 0;
+            if (!ok) remove(path);
+        }
+    }
+    free(raw);
+    free(z);
+    return ok;
+}
+
 void img_free(struct img *im)
 {
     free(im->px);

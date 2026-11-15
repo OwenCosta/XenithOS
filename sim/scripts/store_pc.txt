@@ -1,0 +1,43 @@
+# The Store on a PC: sections, installing an app from Flathub (acted out by the simulator),
+# and a Steam game when Steam isn't installed yet.
+#   XSIM_KIND=pc sim/run.sh sim/scripts/store_pc.txt store_pc 127.0.0.1:8899
+wait 200
+press right
+press a
+wait 90
+shot store_apps
+press down
+wait 12
+shot store_apps_second
+press a
+wait 20
+shot store_install_confirm
+press a
+wait 30
+shot store_installing
+wait 160
+shot store_installed
+press b
+wait 20
+shot store_after_install
+press x
+wait 20
+shot store_options
+press b
+wait 10
+press rb
+wait 30
+shot store_steam
+press down
+wait 12
+press a
+wait 20
+shot store_get_steam_first
+press b
+wait 10
+press rb
+wait 30
+shot store_xenithos
+press b
+wait 20
+quit

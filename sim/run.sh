@@ -22,6 +22,11 @@ mkdir -p "$work/uda:/xenith"
     [ -n "$XSIM_KEY" ] && echo "key=$XSIM_KEY"
 } > "$work/uda:/xenith/config.txt"
 [ -n "$XSIM_PROFILE" ] && cp "$XSIM_PROFILE" "$work/uda:/xenith/profile.txt"
+# XSIM_PHOTOS: a folder of pictures for Photos (copied to uda:/photos)
+if [ -n "$XSIM_PHOTOS" ]; then
+    mkdir -p "$work/uda:/photos"
+    cp -r "$XSIM_PHOTOS"/. "$work/uda:/photos/"
+fi
 # XSIM_WAD: one or more WADs (space-separated) for DOOM
 if [ -n "$XSIM_WAD" ]; then
     mkdir -p "$work/uda:/doom"

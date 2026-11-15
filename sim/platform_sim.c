@@ -483,6 +483,82 @@ int plat_launch(const char *path)
     return sim_is_pc();        /* as on a PC: the "app" ran and came back */
 }
 
+/* Apps from Flathub and Steam, acted out. XSIM_FLATPAK=none: Flatpak isn't installed.
+ * XSIM_FLATPAK_FAIL=1: installing fails. XSIM_ARCH sets the processor (default x86_64).
+ * XSIM_INSTALLED="tv.kodi.Kodi,com.valvesoftware.Steam" starts with those installed. */
+static char sim_installed[1024];
+static int sim_installed_init;
+
+static void sim_installed_load(void)
+{
+    const char *s = getenv("XSIM_INSTALLED");
+    if (sim_installed_init) return;
+    sim_installed_init = 1;
+    snprintf(sim_installed, sizeof sim_installed, ",%s,", s ? s : "");
+}
+
+const char *plat_arch(void)
+{
+    const char *a = getenv("XSIM_ARCH");
+    return a && *a ? a : "x86_64";
+}
+
+int plat_flatpak_ready(void)
+{
+    const char *f = getenv("XSIM_FLATPAK");
+    return sim_is_pc() && !(f && !strcmp(f, "none"));
+}
+
+int plat_flatpak_installed(const char *ref)
+{
+    char key[160];
+    sim_installed_load();
+    snprintf(key, sizeof key, ",%s,", ref);
+    return strstr(sim_installed, key) != NULL;
+}
+
+int plat_flatpak(const char *verb, const char *ref, int (*step)(int percent, int seconds), char *why, int why_len)
+{
+    char key[160], *at;
+    int i;
+    sim_installed_load();
+    if (!plat_flatpak_ready()) {
+        snprintf(why, why_len, "Apps need Flatpak, which isn't on this machine yet. Run the XenithOS install command once more and come back to the Store.");
+        return 0;
+    }
+    fprintf(stderr, "sim: flatpak %s %s\n", verb, ref);
+    for (i = 0; i < 120; i++)
+        if (step && !step(i < 10 ? -1 : (i - 10) * 100 / 110, i / 60)) return -1;
+    if (getenv("XSIM_FLATPAK_FAIL")) {
+        snprintf(why, why_len, "Unable to load summary from remote flathub: Could not resolve hostname");
+        return 0;
+    }
+    snprintf(key, sizeof key, ",%s,", ref);
+    if (!strcmp(verb, "uninstall")) {
+        if ((at = strstr(sim_installed, key))) memmove(at, at + strlen(key) - 1, strlen(at + strlen(key) - 1) + 1);
+    } else if (!strstr(sim_installed, key) && strlen(sim_installed) + strlen(ref) + 2 < sizeof sim_installed) {
+        strcat(sim_installed, ref);
+        strcat(sim_installed, ",");
+    }
+    return 1;
+}
+
+int plat_steam_ready(void)
+{
+    return plat_flatpak_installed("com.valvesoftware.Steam");
+}
+
+int plat_steam_open(const char *url)
+{
+    save_png("steam");
+    fprintf(stderr, "sim: steam %s\n", url);
+    return plat_steam_ready();
+}
+
+void plat_sync_apps(void) { }
+
+const char *plat_launch_error(void) { return ""; }
+
 /* Typing on a real keyboard: XSIM_TYPE="text" is typed the first time typing is switched on. */
 static int typing_on, typed_once;
 void plat_text_input(int on) { typing_on = on; }

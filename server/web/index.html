@@ -90,6 +90,12 @@
   .item { display: flex; gap: 12px; align-items: center; min-width: 0; }
   .item img { width: 96px; height: 54px; border-radius: 8px; flex: none; background: var(--panel-2); }
   .kind { font: 12px var(--mono); color: var(--dim); }
+  #pc h3 { margin: 26px 0 4px; font-size: 16px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; margin: 14px 0 6px; }
+  .tile { min-width: 0; }
+  .tile img { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: var(--panel-2); }
+  .tile div { margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile .kind { margin-top: 2px; }
   .muted { color: var(--sub); }
 
   .cmdbox { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 18px; padding: 12px 12px 12px 16px; background: var(--panel-2); border-radius: 10px; }
@@ -211,8 +217,9 @@
         <tr><td>Interface, Store updates</td><td class="yes" data-k="Builds">yes</td><td class="yes" data-k="On the Xbox">works</td><td class="note">0.4.1 installed itself from the Store</td></tr>
         <tr><td>Sound in games, app start times</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">0.5.1 keeps the picture up between programs and lines the sound chip up after a game</td></tr>
         <tr><td>Profiles, Cloud, avatars</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">needs the Ethernet cable on the Xbox; no Wi-Fi driver</td></tr>
-        <tr><td>VOLT, DOOM, Tube</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">DOOM comes with Freedoom and has sound effects; no music yet</td></tr>
+        <tr><td>VOLT, DOOM, Tube, Photos</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">DOOM comes with Freedoom and has sound effects; no music yet</td></tr>
         <tr><td>PCs and Raspberry Pis</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">0.5.2 runs apps inside XenithOS's window: no black screen between them</td></tr>
+        <tr><td>Apps from Flathub, Steam</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">PCs only; tested with stand-ins and Flatpak on Linux, not yet on a real console-mode PC</td></tr>
         <tr><td>XenithOS Cloud and this site</td><td class="yes" data-k="Builds">yes</td><td class="live" data-k="On the Xbox">live</td><td class="note">you're on it</td></tr>
       </tbody>
     </table>
@@ -249,7 +256,11 @@
       <li><b>Desktop mode</b> is in XenithOS's power menu: the full Linux desktop, for a browser and everything else.</li>
       <li><b>Return to XenithOS</b> in the desktop's menu goes back to console mode.</li>
       <li><b>Updates</b> come from the Store: pick <b>XenithOS update</b>, and it builds the new version on your machine and restarts into it.</li>
+      <li><b>Apps</b> from Flathub and <b>Steam</b> are in the Store too (LB and RB switch sections). They install through XenithOS, start from its home screen and get the whole screen: hold Guide for three seconds to come back.</li>
     </ol>
+    <h3>In the Store on PCs</h3>
+    <p class="muted">Apps come from <a href="https://flathub.org/">Flathub</a> and run under their own licenses. Roblox runs through <a href="https://sober.vinegarhq.org/">Sober</a>, a community project that isn't made by Roblox (use it at your own risk), and only on x86-64 PCs. Steam games install and run through Steam with your Steam account: free games only need the account, others are bought on Steam. Machines installed before 0.5.4 need the install command once more for apps.</p>
+    <div class="tiles" id="pcapps"></div>
     <p class="muted">Add <code>--no-desktop</code> to skip desktop mode, or run it again with <code>--uninstall</code> to undo it. More in <a href="https://github.com/OwenCosta/XenithOS/blob/main/linux/README.md">linux/README.md</a>.</p>
   </div>
 </section>
@@ -258,6 +269,8 @@
   <div class="wrap">
     <h2>Build log</h2>
     <ul class="log">
+      <li><b>0.5.4</b><time datetime="2026-11-15">Nov 15, 2026</time>
+        <p>The Store on PCs has apps from Flathub: Roblox (through Sober, a community project not made by Roblox), Minecraft through Prism Launcher, Kodi, Firefox, Spotify, Discord, Moonlight, emulators and games. They install behind XenithOS's own screens, start from the home screen and get the whole screen to themselves; hold Guide for three seconds to come back. Steam is there too, opening in Big Picture, with a section of games on Steam, and every game installed in Steam shows up on XenithOS's home screen with its picture. When a Steam game ends, XenithOS closes Steam and comes back. New everywhere: Photos, for your pictures, with zoom, turning and slideshows. On a PC, run the install command once more to add what apps need.</p></li>
       <li><b>0.5.3</b><time datetime="2026-11-15">Nov 15, 2026</time>
         <p>PCs and Raspberry Pis update from the Store, like the Xbox: XenithOS update downloads the new version's source, builds it on the machine, puts it in place and restarts into it. If the build fails, the current version stays. Machines installed before 0.5.3 need the install command once more first.</p></li>
       <li><b>0.5.2</b><time datetime="2026-11-15">Nov 15, 2026</time>
@@ -286,7 +299,7 @@
 <footer>
   <div class="wrap">
     <p>Made by <a href="https://owencosta.diy/">Owen Costa</a>. XenithOS is GPL-3.0. It uses the Inter typeface (OFL), doomgeneric (GPL-2.0+), stb_image (public domain) and Freedoom (BSD).</p>
-    <p>Not affiliated with Microsoft, Google or id Software. Xbox, YouTube and DOOM are their trademarks.</p>
+    <p>Not affiliated with Microsoft, Google, id Software, Valve or Roblox. Xbox, YouTube, DOOM, Steam and Roblox are their trademarks.</p>
   </div>
 </footer>
 
@@ -427,6 +440,26 @@ async function refresh() {
         $("sha").textContent = "xenon.elf sha256 " + sha;
       }
     });
+
+    const pcapps = $("pcapps");
+    if (pcapps) {
+      const [fh, st] = await Promise.all([get("v1/store/flathub").catch(() => ""), get("v1/store/steam").catch(() => "")]);
+      pcapps.replaceChildren();
+      const tile = (id, name, kind) => {
+        const box = document.createElement("div");
+        box.className = "tile";
+        const img = document.createElement("img");
+        img.src = `v1/store/icon/${encodeURIComponent(id)}.png`;
+        img.alt = "";
+        img.loading = "lazy";
+        const n = document.createElement("div"); n.textContent = name;
+        const k = document.createElement("div"); k.className = "kind"; k.textContent = kind;
+        box.append(img, n, k);
+        pcapps.appendChild(box);
+      };
+      rows(fh).forEach(([id, name, ref, arches]) => tile(id, name, arches === "x86_64" ? "App, x86-64 PCs" : "App"));
+      rows(st).forEach(([id, name, appid, free]) => tile(id, name, free === "1" ? "On Steam, free to play" : "On Steam"));
+    }
 
     const list = $("playerlist");
     list.replaceChildren();

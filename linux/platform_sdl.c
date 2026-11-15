@@ -14,7 +14,8 @@
  *
  * Apps run as their own programs but inside XenithOS's window (see "apps inside XenithOS"
  * below), so switching never changes the screen or the sound device. Holding Guide for two
- * seconds, or Ctrl+Alt+Backspace, closes an app that has stopped responding.
+ * seconds, or Ctrl+Alt+Backspace, closes an app that has stopped responding. Other programs
+ * (apps from Flathub, Steam and its games) get the screen to themselves: see "other programs".
  *
  * Testing: XENITHOS_SHOT=file.png and XENITHOS_SHOT_FRAME=n save frame n and quit, which
  * works with SDL_VIDEODRIVER=offscreen on a machine with no screen.
@@ -23,13 +24,17 @@
 #define _GNU_SOURCE
 #endif
 #include <SDL.h>
+#include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/input.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -40,6 +45,7 @@
 #include <zlib.h>
 
 #include "platform.h"
+#include "platform_linux.h"
 
 #define SCREEN_W 1280
 #define SCREEN_H 720
@@ -639,6 +645,11 @@ void plat_storage_init(void)
     }
 }
 
+const char *linux_data_dir(void)
+{
+    return data_dir;
+}
+
 int plat_bdev_next(int handle, const char **name)
 {
     if (handle < 0) { *name = "uda"; return 0; }
@@ -913,6 +924,251 @@ static int run_inside(const char *path, int *status)
     return 1;
 }
 
+/* ------------------------------------------------------------ other programs
+ *
+ * Programs that aren't XenithOS apps (apps from Flathub, Steam and its games, "exec=" ones)
+ * can't draw into XenithOS's window, so they get the screen to themselves:
+ *   on the bare console, XenithOS lets go of the display and the sound device and the program
+ *   runs under cage, a kiosk Wayland compositor (one program, full screen, with Xwayland for
+ *   the ones that still need X11);
+ *   in a desktop, XenithOS's window steps aside while the program opens its own.
+ * Meanwhile XenithOS keeps watching the controller: Guide held for three seconds, or
+ * Ctrl+Alt+Backspace, closes the program (asked first, then made to). A Steam game started
+ * from XenithOS closes Steam again when the game ends, if Steam says when that is.
+ */
+static char launch_why[240];
+
+const char *plat_launch_error(void)
+{
+    return launch_why;
+}
+
+/* Keyboards, read directly for Ctrl+Alt+Backspace: with the screen handed over, SDL sees none. */
+#define MAX_KBD 16
+static int kbd_fd[MAX_KBD], nkbd, kbd_ctrl, kbd_alt;
+
+static void kbd_open(void)
+{
+    DIR *d = opendir("/dev/input");
+    struct dirent *de;
+    nkbd = kbd_ctrl = kbd_alt = 0;
+    if (!d) return;
+    while ((de = readdir(d)) && nkbd < MAX_KBD) {
+        unsigned long bits[KEY_MAX / (8 * sizeof(long)) + 1];
+        char path[300];
+        int fd;
+        if (strncmp(de->d_name, "event", 5)) continue;
+        snprintf(path, sizeof path, "/dev/input/%s", de->d_name);
+        if ((fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)) < 0) continue;
+        memset(bits, 0, sizeof bits);
+        if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof bits), bits) >= 0 &&
+            ((bits[KEY_BACKSPACE / (8 * sizeof(long))] >> (KEY_BACKSPACE % (8 * sizeof(long)))) & 1))
+            kbd_fd[nkbd++] = fd;
+        else
+            close(fd);
+    }
+    closedir(d);
+}
+
+static int kbd_combo(void)
+{
+    struct input_event ev[32];
+    int i, k, hit = 0;
+    for (i = 0; i < nkbd; i++) {
+        ssize_t got;
+        while ((got = read(kbd_fd[i], ev, sizeof ev)) > 0)
+            for (k = 0; k < (int)(got / (ssize_t)sizeof ev[0]); k++) {
+                if (ev[k].type != EV_KEY) continue;
+                if (ev[k].code == KEY_LEFTCTRL || ev[k].code == KEY_RIGHTCTRL) kbd_ctrl = ev[k].value != 0;
+                else if (ev[k].code == KEY_LEFTALT || ev[k].code == KEY_RIGHTALT) kbd_alt = ev[k].value != 0;
+                else if (ev[k].code == KEY_BACKSPACE && ev[k].value == 1 && kbd_ctrl && kbd_alt) hit = 1;
+            }
+    }
+    return hit;
+}
+
+static void kbd_close(void)
+{
+    while (nkbd > 0) close(kbd_fd[--nkbd]);
+}
+
+/* Our environment, minus XenithOS's own settings: SDL_VIDEODRIVER=kmsdrm would send SDL games
+ * to the bare console instead of the compositor. */
+static char **other_env(void)
+{
+    size_t n = 0, i, k = 0;
+    char **env;
+    while (environ[n]) n++;
+    if (!(env = malloc(sizeof *env * (n + 1)))) return NULL;
+    for (i = 0; i < n; i++)
+        if (strncmp(environ[i], "XENITHOS_", 9) && strncmp(environ[i], "SDL_VIDEODRIVER=", 16) &&
+            strncmp(environ[i], "SDL_AUDIODRIVER=", 16))
+            env[k++] = environ[i];
+    env[k] = NULL;
+    return env;
+}
+
+/* Asks everything a program started to close (SIGTERM), deepest first, except the compositor,
+ * Xwayland and Flatpak's sandbox (bwrap): if those went first, the rest would be killed
+ * outright instead of getting to save and close. */
+struct proc { pid_t pid, ppid; char comm[20]; };
+
+static void ask_to_close(pid_t root)
+{
+    static struct proc all[4096];
+    static pid_t tree[1024];
+    int n = 0, nt = 0, i, j;
+    DIR *d = opendir("/proc");
+    struct dirent *de;
+    if (d) {
+        while ((de = readdir(d)) && n < 4096) {
+            char path[64], buf[512], *open_p, *close_p;
+            size_t got;
+            FILE *f;
+            if (!isdigit((unsigned char)de->d_name[0])) continue;
+            snprintf(path, sizeof path, "/proc/%s/stat", de->d_name);
+            if (!(f = fopen(path, "r"))) continue;
+            got = fread(buf, 1, sizeof buf - 1, f);
+            fclose(f);
+            buf[got] = 0;
+            open_p = strchr(buf, '(');
+            close_p = strrchr(buf, ')');
+            if (!open_p || !close_p || close_p < open_p || !close_p[1]) continue;
+            all[n].pid = atoi(buf);
+            snprintf(all[n].comm, sizeof all[n].comm, "%.*s", (int)(close_p - open_p - 1), open_p + 1);
+            if (sscanf(close_p + 2, "%*c %d", &all[n].ppid) == 1) n++;
+        }
+        closedir(d);
+    }
+    tree[nt++] = root;
+    for (i = 0; i < nt; i++)
+        for (j = 0; j < n && nt < 1024; j++)
+            if (all[j].ppid == tree[i]) tree[nt++] = all[j].pid;
+    for (i = nt - 1; i >= 0; i--) {
+        const char *comm = "";
+        for (j = 0; j < n; j++) if (all[j].pid == tree[i]) comm = all[j].comm;
+        if (!strcmp(comm, "cage") || !strcmp(comm, "Xwayland") || !strcmp(comm, "bwrap") || !strcmp(comm, "xdg-dbus-proxy"))
+            continue;
+        kill(tree[i], SIGTERM);
+    }
+}
+
+/* Runs a program with the screen to itself until it closes. 1 once it has run, 0 (with
+ * launch_why) if it couldn't start or stopped straight away. */
+static int run_other(struct linux_app *app)
+{
+    char cage[256], log[700], reason[160], *argv[32], **env;
+    int console = !windowed, n = 0, i, status = 0, seen_running = 0, idle = 0, said, forced = 0;
+    uint64_t start, now, guide_since = 0, close_at = 0, checked = 0, test_close;
+    pid_t pid, r;
+
+    if (console) {
+        if (!linux_find_program("cage", cage, sizeof cage)) {
+            snprintf(launch_why, sizeof launch_why, "XenithOS needs cage to show %s on this screen. Run the XenithOS install command once more, then try again.", app->name);
+            return 0;
+        }
+        argv[n++] = cage;
+        argv[n++] = "-d";                          /* no title bars */
+        argv[n++] = "-s";                          /* Ctrl+Alt+F2 and so on still switch consoles */
+        argv[n++] = "--";
+    }
+    for (i = 0; app->argv[i] && n < 31; i++) argv[n++] = app->argv[i];
+    argv[n] = NULL;
+    snprintf(log, sizeof log, "%s/uda:/xenith/app.log", data_dir);
+    remove(log);
+    if (!(env = other_env())) return 0;
+
+    if (hook_before) hook_before();                /* XenithOS's sounds stop */
+    plat_rumble(0, 0);
+    audio_close();                                 /* the program gets the sound device */
+    if (console) {
+        video_close();                             /* and the screen */
+    } else {
+        SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");    /* Guide still counts */
+        SDL_MinimizeWindow(win);
+    }
+    pid = linux_spawn(argv, env, log, 1);
+    free(env);
+    kbd_open();
+    start = plat_time_us();
+    /* Tests can't hold Guide in a virtual display: XENITHOS_TEST_CLOSE=<seconds> does the same. */
+    test_close = getenv("XENITHOS_TEST_CLOSE") ? (uint64_t)atoi(getenv("XENITHOS_TEST_CLOSE")) * 1000000 : 0;
+    while (pid > 0) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) handle_event(&e, type_char);    /* controllers coming and going */
+        open_first_pad();
+        now = plat_time_us();
+        guide_since = btn(SDL_CONTROLLER_BUTTON_GUIDE) ? (guide_since ? guide_since : now) : 0;
+        memset(tapped_btn, 0, sizeof tapped_btn);
+        memset(tapped_key, 0, sizeof tapped_key);
+        if (!close_at && ((guide_since && now - guide_since > 3000000) || kbd_combo() || (test_close && now - start > test_close))) {
+            ask_to_close(pid);
+            close_at = now;
+        }
+        /* A Steam game from XenithOS: once Steam says it has ended, Steam closes too. */
+        if (app->steam_appid && !close_at && now - checked > 1000000) {
+            int running = linux_steam_game_running(app->steam_appid);
+            checked = now;
+            if (running == 1) {
+                seen_running = 1;
+                idle = 0;
+            } else if (running == 0 && seen_running && ++idle >= 3) {
+                ask_to_close(pid);
+                close_at = now;
+            }
+        }
+        /* Still there: everything it started is told to go, then made to. */
+        if (close_at && now - close_at > 6000000 && forced == 0) { kill(-pid, SIGTERM); forced = 1; }
+        if (close_at && now - close_at > 10000000 && forced == 1) { kill(-pid, SIGKILL); forced = 2; }
+        r = waitpid(pid, &status, WNOHANG);
+        if (r == pid || (r < 0 && errno != EINTR)) break;
+        SDL_Delay(20);
+    }
+    kbd_close();
+    if (pid > 0) kill(-pid, SIGTERM);             /* anything it left behind */
+
+    if (console) {
+        video_open();
+    } else {
+        SDL_RestoreWindow(win);
+        SDL_RaiseWindow(win);
+        SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "0");
+    }
+    plat_audio_init();
+    open_first_pad();
+    if (hook_failed) hook_failed();                /* XenithOS's sounds start again */
+
+    if (pid <= 0) {
+        snprintf(launch_why, sizeof launch_why, "%s didn't start.", app->name);
+        return 0;
+    }
+    /* Gone again within a few seconds without being asked: say what it printed. */
+    said = linux_log_reason(log, reason, sizeof reason);
+    if (!close_at && plat_time_us() - start < 5000000 &&
+        (!WIFEXITED(status) || WEXITSTATUS(status) != 0 || said == 2)) {
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 127 && !said)
+            snprintf(launch_why, sizeof launch_why, "%s couldn't be started.", app->name);
+        else if (strstr(reason, "not installed"))
+            snprintf(launch_why, sizeof launch_why, "%s isn't installed any more. Get it again from the Store.", app->name);
+        else
+            snprintf(launch_why, sizeof launch_why, "%s stopped straight away%s%s", app->name, reason[0] ? ": " : ".", reason);
+        return 0;
+    }
+    return 1;
+}
+
+int plat_steam_open(const char *url)
+{
+    struct linux_app a;
+    launch_why[0] = 0;
+    if (guest) return 0;
+    if (!linux_steam_command(url, &a)) {
+        snprintf(launch_why, sizeof launch_why, "Steam isn't installed yet. Get it from the Store first.");
+        return 0;
+    }
+    return run_other(&a);
+}
+
 /* Apps are programs in uda:/apps, shown inside XenithOS's window (run_inside). Only if that
  * can't be set up does XenithOS hand the screen and sound over and take them back after. */
 /* XenithOS starts again as the program now at self_path: the new version after an update. */
@@ -939,6 +1195,12 @@ int plat_launch(const char *path)
         quit_now(0);
     }
     if (guest) return 0;                                  /* apps don't start other apps */
+    launch_why[0] = 0;
+    if (strlen(path) > 4 && !strcmp(path + strlen(path) - 4, ".app")) {   /* Flathub, Steam, your own */
+        struct linux_app a;
+        if (!linux_app_read(path, &a, launch_why, sizeof launch_why)) return 0;
+        return run_other(&a);
+    }
     if (access(path, X_OK) != 0) chmod(path, 0755);
     if (access(path, X_OK) != 0) return 0;
 

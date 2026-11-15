@@ -10,6 +10,7 @@
 
 int  img_load_file(struct img *out, const char *path);        /* 1 on success */
 int  img_load_mem(struct img *out, const void *data, int len);
+int  img_save_file(const struct img *im, const char *path);  /* 1 on success */
 void img_free(struct img *im);
 
 #endif

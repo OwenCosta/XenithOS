@@ -1,0 +1,27 @@
+# A Steam game in the Store with Steam installed: the disclaimer, then Steam opens on it.
+#   XSIM_KIND=pc XSIM_INSTALLED=com.valvesoftware.Steam sim/run.sh sim/scripts/store_steam.txt store_steam 127.0.0.1:8899
+wait 200
+press right
+press a
+wait 90
+press rb
+wait 30
+press down
+press down
+press down
+press down
+press down
+press down
+press down
+press down
+wait 12
+shot steam_paid_game
+press a
+wait 20
+shot steam_disclaimer
+press a
+wait 30
+shot steam_back
+press b
+wait 20
+quit

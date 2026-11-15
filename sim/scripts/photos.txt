@@ -1,0 +1,40 @@
+# Photos: the grid filling in, a picture full screen, zoom, turn, next, and a slideshow.
+#   XSIM_BIN=xphotos XSIM_PHOTOS=<folder of pictures> sim/run.sh sim/scripts/photos.txt photos
+wait 40
+shot grid_loading
+wait 60
+shot grid
+press right
+press down
+wait 10
+shot grid_moved
+press a
+wait 20
+shot view
+press a
+wait 10
+shot zoom2
+stick lx 30000 30
+wait 6
+shot zoom2_moved
+press a
+press a
+wait 6
+press y
+wait 10
+shot turned
+press right
+wait 20
+shot next
+press b
+wait 10
+press x
+wait 20
+shot slideshow
+wait 330
+shot slideshow_next
+press b
+wait 10
+press b
+wait 30
+quit

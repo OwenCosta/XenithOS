@@ -18,14 +18,19 @@ DOOMFLAGS := -O1 -g -std=gnu11 -w -fsanitize=address -fno-omit-frame-pointer -I.
            -DXENITH_SIM -DFEATURE_SOUND -DNORMALUNIX -D_DEFAULT_SOURCE -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200
 
 TUBE    := $(wildcard ../apps/tube/source/*.c) $(SHARED) platform_sim.c net_sim.c
+PHOTOS  := ../apps/photos/source/photos.c $(SHARED) platform_sim.c net_sim.c
 
-all: xsim xvolt xdoom xtube
+all: xsim xvolt xdoom xtube xphotos
 
 # stb_image is checked for memory errors only (it does its own careful casting).
 xtube: $(TUBE) $(HDRS)
 	$(CC) $(filter-out -fsanitize=address$(comma)undefined,$(CFLAGS)) -fsanitize=address -I../apps/tube/source $(TUBE) -o $@ $(LDLIBS)
 
 comma := ,
+
+# Photos decodes pictures with stb_image too: memory errors only, like Tube.
+xphotos: $(PHOTOS) $(HDRS)
+	$(CC) $(filter-out -fsanitize=address$(comma)undefined,$(CFLAGS)) -fsanitize=address $(PHOTOS) -o $@ $(LDLIBS)
 
 xsim: $(SRC) $(HDRS)
 	$(CC) $(CFLAGS) $(SRC) -o $@ $(LDLIBS)
@@ -37,4 +42,4 @@ xdoom: $(DOOM) $(HDRS)
 	$(CC) $(DOOMFLAGS) $(DOOM) -o $@ $(LDLIBS)
 
 clean:
-	rm -f xsim xvolt xdoom xtube
+	rm -f xsim xvolt xdoom xtube xphotos

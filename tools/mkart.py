@@ -3,9 +3,13 @@
 
     python3 tools/mkart.py            -> art/thumbs/<id>.png and art/thumbs/<id>.ximg
 
+Besides XenithOS's own apps, it draws a card for every app in server/flathub.example.json and
+every game in server/steam.example.json: the name on a flat colour, and what it is under it.
+
 Needs Pillow and the Inter font (Debian/Kali: apt install python3-pil fonts-inter).
 XIMG is the console's thumbnail format; see shared/img.h.
 """
+import json
 import os
 import struct
 import zlib
@@ -93,6 +97,19 @@ def tube():
     return img
 
 
+def photos():
+    img = Image.new("RGB", (W, H), (13, 20, 34))
+    d = ImageDraw.Draw(img)
+    # A flat picture frame: a sun and two hills.
+    d.rounded_rectangle([24, 40, 92, 96], radius=8, fill=(47, 125, 255))
+    d.ellipse([66, 48, 80, 62], fill=(255, 214, 90))
+    d.polygon([(24, 96), (46, 66), (64, 96)], fill=(236, 241, 250))
+    d.polygon([(48, 96), (70, 74), (92, 96)], fill=(176, 196, 230))
+    d.text((108, 34), "PHOTOS", font=font("Black", 50), fill=(236, 241, 250))
+    d.text((26, 128), "Your pictures on the TV", font=font("Medium", 20), fill=(156, 168, 192))
+    return img
+
+
 def xenith():
     img = Image.new("RGB", (W, H), (9, 13, 22))
     d = ImageDraw.Draw(img)
@@ -105,16 +122,84 @@ def xenith():
     return img
 
 
+# What each catalog item is, under its name, and the colour it sits on (by kind of thing).
+BG = {"game": (17, 27, 52), "media": (34, 20, 48), "social": (12, 38, 44), "emulator": (46, 20, 24),
+      "steam": (20, 32, 48), "stream": (14, 34, 30)}
+ABOUT = {
+    "roblox": ("game", "Through Sober"), "minecraft": ("game", "Minecraft: Java Edition"),
+    "kodi": ("media", "Media center"), "firefox": ("social", "Web browser"), "spotify": ("media", "Music and podcasts"),
+    "discord": ("social", "Chat and voice"), "moonlight": ("stream", "Game streaming"),
+    "chiaki": ("stream", "PlayStation Remote Play"), "heroic": ("game", "Epic, GOG and Amazon games"),
+    "retroarch": ("emulator", "Emulators"), "dolphin": ("emulator", "GameCube and Wii"), "ppsspp": ("emulator", "PSP"),
+    "supertuxkart": ("game", "Kart racing"), "luanti": ("game", "Block building"), "supertux": ("game", "Platformer"),
+    "xonotic": ("game", "Arena shooter"), "tuxracer": ("game", "Racing"), "vlc": ("media", "Video player"),
+    "steam": ("steam", "Big Picture"),
+}
+
+
+def fit(d, text, weight, start, smallest, width):
+    """The biggest size from start down to smallest at which text fits in width, or None."""
+    for size in range(start, smallest - 1, -2):
+        f = font(weight, size)
+        if d.textlength(text, font=f) <= width:
+            return f
+    return None
+
+
+def card(name, sub, bg):
+    """A flat card: the name as big as fits (on two lines if it must), what it is under it."""
+    img = Image.new("RGB", (W, H), bg)
+    d = ImageDraw.Draw(img)
+    width = W - 44
+    f = fit(d, name, "Black", 56, 30, width)
+    if f:
+        lines = [name]
+    else:
+        words = name.split()
+        best = None
+        for cut in range(1, len(words)):
+            a, b = " ".join(words[:cut]), " ".join(words[cut:])
+            g = fit(d, max(a, b, key=len), "Black", 44, 24, width)
+            if g and (best is None or g.size > best[0].size):
+                best = (g, [a, b])
+        f, lines = best if best else (font("Black", 24), [name])
+    line_h = int(f.size * 1.08)
+    sf = fit(d, sub, "Medium", 20, 14, width) or font("Medium", 14)
+    block = line_h * len(lines) + 12 + sf.size
+    y = (H - block) // 2 - 4
+    for line in lines:
+        d.text((22, y), line, font=f, fill=(236, 241, 250))
+        y += line_h
+    d.text((24, y + 12), sub, font=sf, fill=(170, 182, 206))
+    return img
+
+
+def catalog_art():
+    here = os.path.join(ROOT, "server")
+    art = {}
+    with open(os.path.join(here, "flathub.example.json"), encoding="utf-8") as f:
+        for a in json.load(f):
+            kind, sub = ABOUT.get(a["id"], ("game", "App"))
+            art[a["id"]] = card(a["name"], sub, BG[kind])
+    with open(os.path.join(here, "steam.example.json"), encoding="utf-8") as f:
+        for g in json.load(f):
+            art[g["id"]] = card(g["name"], "On Steam, free to play" if g.get("free") else "On Steam", BG["steam"])
+    return art
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     art = {
         "volt": volt(),
         "doom": doom(),
         "tube": tube(),
+        "photos": photos(),
         "freedoom1": freedoom(1, (19, 32, 26), (143, 181, 154)),
         "freedoom2": freedoom(2, (35, 20, 20), (214, 160, 143)),
         "xenith": xenith(),
+        "xenithos-pc": xenith(),
     }
+    art.update(catalog_art())
     for name, img in art.items():
         img.save(os.path.join(OUT, f"{name}.png"))
         write_ximg(img, os.path.join(OUT, f"{name}.ximg"))

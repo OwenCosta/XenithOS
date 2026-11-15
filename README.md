@@ -2,8 +2,10 @@
 
 XenithOS is a homebrew console system. It runs on an Xbox 360 in place of the Microsoft dashboard, and on PCs
 and Raspberry Pis as a console-style system you can switch to a normal Linux desktop. It has its own home
-screen, profiles with avatars, a store, YouTube, a DOOM port with sound, and a light-trail game. It's written in
-C: on the Xbox on [libxenon](https://github.com/Free60Project/libxenon), on PCs and Pis on SDL2.
+screen, profiles with avatars, a store, YouTube, photos, a DOOM port with sound, and a light-trail game. On PCs
+its Store also installs apps from Flathub (Roblox through Sober, Minecraft, Kodi, emulators and more) and Steam
+with its games. It's written in C: on the Xbox on [libxenon](https://github.com/Free60Project/libxenon), on PCs
+and Pis on SDL2.
 
 XenithOS Cloud is the free online service every copy uses for profiles, the Store, news, leaderboards and
 YouTube. Nothing to set up: the downloads come with its address.
@@ -19,7 +21,7 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
   installed apps with thumbnails
 - Apps: a thumbnail grid of everything installed
 - Store: apps, game data and system updates from XenithOS Cloud. Each download's SHA-256 is checked before
-  anything is written.
+  anything is written. On PCs it has sections: apps from Flathub, Steam and games on Steam, and XenithOS.
 - Cloud: who's playing, XenithOS news, and the VOLT leaderboard with avatars
 - Profile: a gamertag and passcode, saved to XenithOS Cloud so it follows you to any machine
 - Avatar editor: thirteen parts in three tabs (face, hair, outfit), colour swatches, random looks
@@ -32,6 +34,8 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
   Freedoom from the Store, or copy your own `doom1.wad` / `doom2.wad` into a `doom/` folder.
 - Tube: search and watch YouTube. XenithOS Cloud turns the video into small JPEG frames and plain sound that
   even the Xbox can play. Needs a XenithOS profile.
+- Photos: your pictures (JPEG, PNG, BMP, GIF) from a `photos` folder on the USB stick, or `~/Pictures` on a
+  PC, as a grid of thumbnails. Full screen with zoom, turning and slideshows.
 
 | DOOM control | |
 |---|---|
@@ -85,6 +89,11 @@ It builds XenithOS, sets the machine to start straight into it, and installs a d
 a restart you're in **console mode**: XenithOS full screen, with a controller or keyboard. **Desktop mode** (the
 XFCE Linux desktop) is in XenithOS's power menu; "Return to XenithOS" in the desktop's menu goes back. Details,
 keyboard controls and how to undo it are in [linux/README.md](linux/README.md).
+
+The Store on a PC also has apps from Flathub and Steam. They install through XenithOS's own screens, start from
+its home screen and get the whole screen (under cage, a kiosk compositor, in console mode); hold Guide for three
+seconds to come back. Games installed in Steam show up on the home screen too. Roblox comes through Sober, a
+community project that isn't made by Roblox, and only runs on x86-64 PCs; Steam needs a Steam account.
 
 ## XenithOS Cloud (the server)
 
@@ -181,7 +190,10 @@ shared/ui.c, keyboard.c  input, frame pacing, headers, hints, loading screens, t
 shared/avatar.c          the avatar renderer (server/web/static/avatar.js is the website copy)
 shared/startlog.c        start-up timing for System info
 shared/net_*.c           HTTP client: lwIP on the Xbox (linux/net_posix.c and sim/net_sim.c elsewhere)
-apps/volt, doom, tube    the apps
+apps/volt, doom, tube,   the apps
+  photos
+linux/apps_linux.c       apps from Flathub (Flatpak) and Steam's library, on PCs
+shared/picture.c         JPEG, PNG, BMP and GIF through stb_image
 server/                  XenithOS Cloud, its systemd unit, the admin helper, the website
 tools/                   font and thumbnail generators
 ```
@@ -204,9 +216,12 @@ XenithOS is licensed under the **GNU GPL v3.0**, see [LICENSE](LICENSE).
 - `apps/doom/doomgeneric/` is [doomgeneric](https://github.com/ozkl/doomgeneric) (GPL v2 or later, see its
   `LICENSE`; upstream commit in `UPSTREAM_COMMIT`). Changed: `m_config.c` stores config and saves in `uda:/doom/`,
   `i_sound.c` doesn't use SDL_mixer, and `i_video.c` reports reads for the loading screen.
-- `apps/tube/source/stb_image.h` is [stb_image](https://github.com/nothings/stb) 2.32 by Sean Barrett (public
-  domain or MIT, see the end of the file).
+- `shared/stb_image.h` is [stb_image](https://github.com/nothings/stb) 2.32 by Sean Barrett (public domain or
+  MIT, see the end of the file).
+- Apps from Flathub and Steam aren't part of XenithOS: Flatpak downloads them from Flathub on your machine,
+  under their own licenses. Sober is a VinegarHQ project, not affiliated with Roblox.
 - Freedoom (served by the Store, not included here) is BSD licensed, see [freedoom.github.io](https://freedoom.github.io).
 
-Not affiliated with or endorsed by Microsoft, Google, YouTube or id Software. Xbox and Xbox 360 are trademarks
-of Microsoft, YouTube of Google, and DOOM of id Software.
+Not affiliated with or endorsed by Microsoft, Google, YouTube, id Software, Valve or Roblox. Xbox and Xbox 360
+are trademarks of Microsoft, YouTube of Google, DOOM of id Software, Steam of Valve, and Roblox of Roblox
+Corporation.

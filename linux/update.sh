@@ -17,17 +17,17 @@ if [ ! -w "$DEST" ]; then
 fi
 
 echo "Building $(grep -o 'XENITH_VERSION "[0-9.]*"' "$SRC/shared/theme.h") in $SRC"
-make -C "$SRC/linux" -j"$(nproc)" xenithos volt doom tube
+make -C "$SRC/linux" -j"$(nproc)" xenithos volt doom tube photos
 
 echo "Installing into $DEST"
-for b in xenithos volt doom tube; do
+for b in xenithos volt doom tube photos; do
     install -m 755 "$SRC/linux/$b" "$DEST/.$b.new"
     mv -f "$DEST/.$b.new" "$DEST/$b"
 done
 
 # The apps' names, versions and thumbnails, as XenithOS shows them
 mkdir -p "$DATA/uda:/apps"
-for app in volt doom tube; do
+for app in volt doom tube photos; do
     if [ -f "$SRC/apps/$app/app.txt" ]; then cp "$SRC/apps/$app/app.txt" "$DATA/uda:/apps/$app.txt"; fi
     if [ -f "$SRC/art/thumbs/$app.ximg" ]; then cp "$SRC/art/thumbs/$app.ximg" "$DATA/uda:/apps/$app.ximg"; fi
     if [ ! -e "$DATA/uda:/apps/$app.elf32" ]; then ln -s "$DEST/$app" "$DATA/uda:/apps/$app.elf32"; fi

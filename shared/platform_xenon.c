@@ -402,6 +402,23 @@ int plat_install_update(const char *tarball, void (*step)(const char *what, int 
     return 0;
 }
 
+/* Flathub apps and Steam are Linux programs: there are none on the Xbox. */
+const char *plat_arch(void) { return ""; }
+int plat_flatpak_ready(void) { return 0; }
+int plat_flatpak_installed(const char *ref) { (void)ref; return 0; }
+int plat_flatpak(const char *verb, const char *ref, int (*step)(int percent, int seconds), char *why, int why_len)
+{
+    (void)verb;
+    (void)ref;
+    (void)step;
+    snprintf(why, why_len, "Apps from Flathub are for PCs and Raspberry Pis.");
+    return 0;
+}
+int plat_steam_ready(void) { return 0; }
+int plat_steam_open(const char *url) { (void)url; return 0; }
+void plat_sync_apps(void) { }
+const char *plat_launch_error(void) { return ""; }
+
 void plat_text_input(int on) { (void)on; }
 int plat_text_take(char *out, int n) { (void)out; (void)n; return 0; }
 

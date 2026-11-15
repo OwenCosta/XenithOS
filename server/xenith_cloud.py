@@ -13,6 +13,10 @@ Public
   GET  /v1/news                       id|unix_time|text   (newest first), XenithOS news
   GET  /v1/store                      id|kind|name|version|size|sha256|file|description
   GET  /v1/store/needs                id|data_id,data_id   game data an item comes with
+  GET  /v1/store/flathub              id|name|flathub id|processors|download MB|shared MB|arguments|description
+                                      apps from Flathub, for PCs and Raspberry Pis (flathub.json)
+  GET  /v1/store/steam                id|name|steam app id|1 if free to play|description
+                                      games on Steam, for PCs (steam.json)
   GET  /v1/store/file/<id>            the file bytes
   GET  /v1/store/icon/<id>.ximg|.png  the item's thumbnail
   GET  /v1/scores/<game>              rank|name|score|avatar
@@ -55,7 +59,8 @@ Command line
 Environment
   XENITH_PORT        default 8795
   XENITH_STATE_DIR   default ./state      (state.json lives here)
-  XENITH_STORE_DIR   default ./store      (store.json + the files it lists)
+  XENITH_STORE_DIR   default ./store      (store.json + the files it lists, flathub.json, steam.json,
+                                          and <id>.ximg / <id>.png thumbnails)
   XENITH_WEB_DIR     default ./web        (index.html and static/)
   XENITH_ADMIN_KEY   admin key; admin routes are off when unset
   XENITH_CONSOLE_KEY when set, the old /v1/inbox route needs ?key=<this>
@@ -112,12 +117,24 @@ PUBLIC_ADDR_RE = re.compile(r"^[A-Za-z0-9.-]{1,64}:[0-9]{1,5}$")
 PIN_RE = re.compile(r"^[0-9]{4,8}$")
 STATIC_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}\.(png|js|css|svg|ico|webp|wav)$")
 KINDS = {"app", "data", "system", "pc"}      # pc: XenithOS's source, which PCs and Pis build themselves
+# Flathub's app ids ("tv.kodi.Kodi"), the processors it builds for, and the words the Store may
+# add after an app's id when starting it (never options for Flatpak itself).
+FLATHUB_REF_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*(\.[A-Za-z0-9_-]+){2,}$")
+FLATHUB_ARCHES = ("x86_64", "aarch64")
+ARG_RE = re.compile(r"^[A-Za-z0-9_=.:/+-]+$")
 RESERVED = {"admin", "administrator", "xenith", "xenithos", "system", "guest", "player", "moderator",
             "support", "server", "root", "sim"}
 CTYPES = {"png": "image/png", "js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8",
           "svg": "image/svg+xml", "ico": "image/x-icon", "webp": "image/webp", "wav": "audio/wav"}
 
 # ---------------------------------------------------------------------- helpers
+
+
+def int_or(value, default):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def clean(text, limit=200):
@@ -392,8 +409,49 @@ class Store:
     def find(self, iid):
         return next((i for i in self.items() if i["id"] == iid), None)
 
+    def _list(self, name):
+        try:
+            with open(os.path.join(self.dir, name), encoding="utf-8") as f:
+                raw = json.load(f)
+        except (OSError, ValueError):
+            return []
+        return [x for x in raw if isinstance(x, dict)] if isinstance(raw, list) else []
+
+    def flathub(self):
+        """flathub.json: apps from Flathub that PCs and Pis install with Flatpak, in the order
+        the Store shows them: [{"id", "name", "ref", "arches", "mb", "shared_mb", "args",
+        "description"}]. ref is the Flathub id, arches the processors Flathub builds it for,
+        mb its download and shared_mb the shared parts (runtime) it may need, in MB."""
+        out, seen = [], set()
+        for a in self._list("flathub.json"):
+            iid, ref = str(a.get("id", "")), str(a.get("ref", ""))
+            arches = [x for x in FLATHUB_ARCHES if x in (a.get("arches") or [])]
+            if (not ID_RE.match(iid) or iid.startswith("steam-") or iid in seen or not FLATHUB_REF_RE.match(ref)
+                    or len(ref) > 63 or not arches):
+                continue
+            seen.add(iid)
+            args = " ".join(w for w in str(a.get("args", "")).split() if ARG_RE.match(w) and not w.startswith("--"))
+            out.append({"id": iid, "name": clean(a.get("name", iid), 24), "ref": ref, "arches": arches,
+                        "mb": max(0, int_or(a.get("mb"), 0)), "shared_mb": max(0, int_or(a.get("shared_mb"), 0)),
+                        "args": args[:47], "description": clean(a.get("description", ""), 96)})
+        return out
+
+    def steam(self):
+        """steam.json: games on Steam the Store lists for PCs: [{"id", "name", "appid", "free",
+        "description"}]. They're installed and played through the Steam app."""
+        out, seen = [], set()
+        for g in self._list("steam.json"):
+            iid, appid = str(g.get("id", "")), int_or(g.get("appid"), 0)
+            if not ID_RE.match(iid) or iid in seen or not 0 < appid < 1 << 31:
+                continue
+            seen.add(iid)
+            out.append({"id": iid, "name": clean(g.get("name", iid), 24), "appid": appid,
+                         "free": bool(g.get("free")), "description": clean(g.get("description", ""), 96)})
+        return out
+
     def icon(self, iid, ext):
-        if not self.find(iid):
+        if not (self.find(iid) or any(a["id"] == iid for a in self.flathub())
+                or any(g["id"] == iid for g in self.steam())):
             return None
         path = os.path.join(self.dir, f"{iid}.{ext}")
         return path if os.path.isfile(path) else None
@@ -1042,6 +1100,17 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                     f"{i['id']}|{i['kind']}|{i['name']}|{i['version']}|{i['size']}|"
                     f"{i['sha256']}|{i['file']}|{i['description']}\n" for i in store.items()))
 
+            if parts == ["v1", "store", "flathub"]:
+                # Their own routes: consoles that don't know these kinds never see them.
+                return self.reply(200, "".join(
+                    f"{a['id']}|{a['name']}|{a['ref']}|{','.join(a['arches'])}|{a['mb']}|{a['shared_mb']}|"
+                    f"{a['args']}|{a['description']}\n" for a in store.flathub()))
+
+            if parts == ["v1", "store", "steam"]:
+                return self.reply(200, "".join(
+                    f"{g['id']}|{g['name']}|{g['appid']}|{1 if g['free'] else 0}|{g['description']}\n"
+                    for g in store.steam()))
+
             if parts == ["v1", "store", "needs"]:
                 # Its own route: a 9th field on /v1/store would end up in older consoles' descriptions.
                 return self.reply(200, "".join(f"{iid}|{','.join(ns)}\n" for iid, ns in store.needs().items()))
@@ -1289,6 +1358,24 @@ def selftest():
                   {"id": "weird", "kind": "exe", "file": "game.elf32"}]
     with open(os.path.join(store_dir, "store.json"), "w") as f:
         json.dump(store_list, f)
+    flathub_list = [{"id": "kodi", "name": "Kodi|TV", "ref": "tv.kodi.Kodi", "arches": ["aarch64", "x86_64", "riscv"],
+                     "mb": 285, "shared_mb": "690", "args": "-gamepadui --command=sh ok;rm", "description": "Media\ncenter"},
+                    {"id": "kodi", "name": "Again", "ref": "tv.kodi.Kodi", "arches": ["x86_64"]},
+                    {"id": "badref", "ref": "--command=sh", "arches": ["x86_64"]},
+                    {"id": "tworef", "ref": "org.example", "arches": ["x86_64"]},
+                    {"id": "noarch", "ref": "org.example.App", "arches": ["sparc"]},
+                    {"id": "steam-1", "ref": "org.example.App", "arches": ["x86_64"]},
+                    {"id": "../x", "ref": "org.example.App", "arches": ["x86_64"]},
+                    "not a dict"]
+    with open(os.path.join(store_dir, "flathub.json"), "w") as f:
+        json.dump(flathub_list, f)
+    with open(os.path.join(store_dir, "kodi.ximg"), "wb") as f:
+        f.write(b"XIMGkodi")
+    steam_list = [{"id": "cs2", "name": "Counter-Strike 2", "appid": 730, "free": True, "description": "Free"},
+                  {"id": "portal2", "name": "Portal 2", "appid": "620", "free": False, "description": "Paid"},
+                  {"id": "bad", "appid": -5}, {"id": "Bad Id", "appid": 10}, {"id": "cs2", "appid": 731}]
+    with open(os.path.join(store_dir, "steam.json"), "w") as f:
+        json.dump(steam_list, f)
     web_dir = os.path.join(tmp, "web")
     os.makedirs(os.path.join(web_dir, "static"))
     with open(os.path.join(web_dir, "index.html"), "w") as f:
@@ -1392,6 +1479,13 @@ else:
     check("icon served", req("GET", "/v1/store/icon/game.ximg") == (200, b"XIMGthumb"))
     check("icon missing 404", req("GET", "/v1/store/icon/game.png")[0] == 404)
     check("icon for unknown item 404", req("GET", "/v1/store/icon/nope.ximg")[0] == 404)
+    code, body = req("GET", "/v1/store/flathub")
+    check("flathub lists only valid apps",
+          code == 200 and body == b"kodi|Kodi TV|tv.kodi.Kodi|x86_64,aarch64|285|690|-gamepadui|Media center\n")
+    check("flathub kept out of /v1/store", b"kodi" not in req("GET", "/v1/store")[1])
+    check("flathub icon served", req("GET", "/v1/store/icon/kodi.ximg") == (200, b"XIMGkodi"))
+    check("steam lists only valid games",
+          req("GET", "/v1/store/steam") == (200, b"cs2|Counter-Strike 2|730|1|Free\nportal2|Portal 2|620|0|Paid\n"))
 
     # Accounts
     code, body = req("POST", "/v1/accounts/create", "name=Owen&pin=1234&avatar=1202001000")

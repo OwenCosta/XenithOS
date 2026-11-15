@@ -1,5 +1,5 @@
 # XenithOS for PCs and Raspberry Pis: the same code as the Xbox version, on Linux + SDL2.
-#   make         builds xenithos, volt and doom here
+#   make         builds xenithos and its apps here
 #   make clean
 # install.sh does the rest (packages, installing, console mode). Needs libsdl2-dev and zlib.
 
@@ -11,8 +11,8 @@ CFLAGS_ALL  := $(OPT) -std=gnu11 -Wall -Wno-format-truncation -I../shared -I../s
 LIBS        := $(SDL_LIBS) -lz -lm -lpthread
 
 SHARED      := $(filter-out ../shared/platform_xenon.c ../shared/net_xenon.c, $(wildcard ../shared/*.c))
-PLATFORM    := platform_sdl.c net_posix.c
-HEADERS     := $(wildcard ../shared/*.h ../source/*.h)
+PLATFORM    := platform_sdl.c apps_linux.c net_posix.c
+HEADERS     := $(wildcard ../shared/*.h ../source/*.h) platform_linux.h
 
 SHELL_SRC   := $(wildcard ../source/*.c) $(SHARED) $(PLATFORM)
 VOLT_SRC    := ../apps/volt/source/volt.c $(SHARED) $(PLATFORM)
@@ -21,11 +21,15 @@ DOOM_CFLAGS := $(OPT) -std=gnu11 -w -I../apps/doom/doomgeneric -I../shared $(SDL
                -DFEATURE_SOUND -DNORMALUNIX -D_DEFAULT_SOURCE -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200
 
 TUBE_SRC    := $(wildcard ../apps/tube/source/*.c) $(SHARED) $(PLATFORM)
+PHOTOS_SRC  := ../apps/photos/source/photos.c $(SHARED) $(PLATFORM)
 
-all: xenithos volt doom tube
+all: xenithos volt doom tube photos
 
 tube: $(TUBE_SRC) $(HEADERS)
 	$(CC) $(CFLAGS_ALL) -I../apps/tube/source $(TUBE_SRC) -o $@ $(LIBS)
+
+photos: $(PHOTOS_SRC) $(HEADERS)
+	$(CC) $(CFLAGS_ALL) $(PHOTOS_SRC) -o $@ $(LIBS)
 
 xenithos: $(SHELL_SRC) $(HEADERS)
 	$(CC) $(CFLAGS_ALL) $(SHELL_SRC) -o $@ $(LIBS)
@@ -37,6 +41,6 @@ doom: $(DOOM_SRC) $(HEADERS)
 	$(CC) $(DOOM_CFLAGS) $(DOOM_SRC) -o $@ $(LIBS)
 
 clean:
-	rm -f xenithos volt doom tube
+	rm -f xenithos volt doom tube photos
 
 .PHONY: all clean

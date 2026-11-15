@@ -21,10 +21,10 @@ XenithOS (**console mode**) and can switch to a normal Linux desktop (**desktop 
 Options: `--no-desktop` skips desktop mode (saves about 1 GB), `--user NAME` picks the account, `--server
 HOST:PORT` sets the XenithOS Cloud address, `--uninstall` puts back a normal login (your XenithOS data stays).
 
-What it does: installs the packages it needs (SDL2, a compiler, and XFCE for desktop mode), builds XenithOS and
-its apps into `/usr/lib/xenithos`, logs your user in by itself on the first console, and starts
-`xenithos-session` from `~/.profile`. Machines that started on a graphical login screen are set to start in
-text mode instead, which `--uninstall` undoes.
+What it does: installs the packages it needs (SDL2, a compiler, XFCE for desktop mode, and Flatpak, cage,
+Xwayland and a sound server for apps from Flathub), builds XenithOS and its apps into `/usr/lib/xenithos`,
+logs your user in by itself on the first console, and starts `xenithos-session` from `~/.profile`. Machines
+that started on a graphical login screen are set to start in text mode instead, which `--uninstall` undoes.
 
 ## Console mode and desktop mode
 
@@ -48,6 +48,7 @@ Any controller SDL knows works: Xbox, PlayStation, Switch Pro and most others. O
 | X, Y | X, Y |
 | Q, E | LB, RB |
 | Tab | the power menu (Back) |
+| Ctrl+Alt+Backspace | close an app that has the screen (apps from Flathub, Steam) |
 | F1 | Start |
 | Page Up / Page Down, Ctrl | LT / RT |
 | W A S D | left stick (in games) |
@@ -62,7 +63,51 @@ In the on-screen keyboard you can type on the real keyboard: letters type, Backs
 | `~/.local/share/xenithos/uda:/` | your settings, profile, game data and saves (same layout as the Xbox's USB stick) |
 | `~/.config/xenithos/` | the mode file and logs |
 
-The Store offers game data and XenithOS updates here (the apps come with XenithOS on PCs and Pis).
+XenithOS's own apps (VOLT, DOOM, Tube, Photos) come with it on PCs and Pis. The Store has three sections here
+(LB and RB switch between them): **Apps** from Flathub, **Steam**, and **XenithOS** (updates and game data).
+
+## Apps from Flathub, and Steam
+
+The Store's Apps section lists apps from [Flathub](https://flathub.org) that XenithOS Cloud picks
+(`flathub.json` on the server: Roblox through Sober, Minecraft through Prism Launcher, Kodi, Firefox,
+Spotify, Discord, Moonlight, emulators, games and more). Install downloads one with Flatpak, for your
+user only (`flatpak install --user`, no sudo), behind XenithOS's own progress screen; B stops it. The
+first app also fetches the shared parts apps are built on (Flatpak runtimes, up to a gigabyte or so). An
+installed app is `uda:/apps/<id>.app`:
+
+```
+name=Kodi
+flatpak=tv.kodi.Kodi
+args=
+```
+
+It's on the home screen and in Apps like the rest. These apps aren't drawn inside XenithOS's window, so
+they get the screen: in console mode XenithOS hands the display and the sound over and the app runs under
+**cage**, a kiosk compositor that shows one app full screen (with Xwayland for apps that need X11); in
+desktop mode XenithOS's window steps aside. **Hold Guide for three seconds** (or press
+Ctrl+Alt+Backspace) to close the app and come back to XenithOS; the app is asked to close first, so it
+can save. X on an installed app in the Store updates or removes it (its settings stay in
+`~/.var/app`). Apps removed some other way (from the desktop, say) disappear from the home screen too.
+
+**Steam** is in the Steam section (x86-64 PCs only; Steam doesn't run on ARM). It opens in Big Picture,
+made for controllers; sign in with your Steam account the first time. The section also lists games on
+Steam: getting one opens Steam on it, after the Store says how it works (Steam games install and run
+through Steam with your Steam account; free games only need the account, others are bought on Steam).
+Every game installed in Steam shows up on XenithOS's home screen with Steam's picture of it
+(`uda:/apps/steam-<appid>.app`, kept up to date from Steam's library folders), and starts straight into
+the game. When the game ends, XenithOS closes Steam and comes back, as long as Steam says the game has
+ended in its `registry.vdf`; otherwise hold Guide.
+
+Roblox runs through **Sober**, a community project that isn't made or supported by Roblox (its makers
+say to use it at your own risk), and only on x86-64 PCs. Some apps (Firefox, Discord, Spotify, Prism
+Launcher) need a keyboard and mouse.
+
+Your own: any `.app` file with `name=` and `exec=` (a program and its arguments, split at spaces, no
+shell) is started the same way.
+
+Machines installed before 0.5.4 need the install command once more for Flatpak and cage; the Store says
+so if they're missing. What Flatpak and the apps print goes to `flatpak.log` and `app.log` in
+`uda:/xenith`.
 
 ## Updates
 
@@ -85,6 +130,10 @@ linux/xenithos             # in a window, when run from a desktop
 
 For testing without a screen: `SDL_VIDEODRIVER=offscreen XENITHOS_SHOT=home.png XENITHOS_SHOT_FRAME=200
 linux/xenithos` saves frame 200 and quits. `XENITHOS_DATA` changes the data folder.
+
+`linux/test-other-apps.sh` (or `linux/test-other-apps.sh console`) does the same for apps that take the
+screen, with stand-ins for Steam, cage and Flatpak: a Steam game on the home screen with its picture,
+Steam closed again when the game ends, and a failing app explained.
 
 `linux/test-in-window.sh volt` (or `doom`) runs the whole thing in a virtual display (needs `xvfb xdotool
 x11-apps imagemagick`): it boots XenithOS, starts the app, leaves it, and moves around the home screen,

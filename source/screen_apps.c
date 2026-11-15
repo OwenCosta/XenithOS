@@ -5,6 +5,7 @@
 #include "audio.h"
 #include "gfx.h"
 #include "icons.h"
+#include "platform.h"
 #include "screens.h"
 #include "theme.h"
 #include "ui.h"
@@ -37,12 +38,13 @@ void screen_apps(void)
         if (sel / cols >= first_row + visible_rows) first_row = sel / cols - visible_rows + 1;
 
         ui_bg();
-        snprintf(sub, sizeof sub, napps == 1 ? "1 app on your USB stick" : "%d apps on your USB stick", napps);
+        if (plat_kind() == PLAT_PC) snprintf(sub, sizeof sub, napps == 1 ? "1 app and game" : "%d apps and games", napps);
+        else snprintf(sub, sizeof sub, napps == 1 ? "1 app on your USB stick" : "%d apps on your USB stick", napps);
         ui_header("Apps", sub);
         if (!napps) {
             icon_draw(ICON_APPS, SCR_W / 2.0f, SCR_H / 2.0f - 40, 70, C_DIM, C_BG);
             gfx_str_c(FONT_LABEL, SCR_W / 2, SCR_H / 2 + 20, C_TEXT, "No apps yet");
-            gfx_str_c(FONT_BODY, SCR_W / 2, SCR_H / 2 + 58, C_SUB, "Get some from the Store, or copy .elf32 files into an apps folder.");
+            gfx_str_c(FONT_BODY, SCR_W / 2, SCR_H / 2 + 58, C_SUB, plat_kind() == PLAT_PC ? "Get some from the Store." : "Get some from the Store, or copy .elf32 files into an apps folder.");
         }
         for (i = 0; i < napps; i++) {
             int r = i / cols - first_row, c = i % cols, x, y;
