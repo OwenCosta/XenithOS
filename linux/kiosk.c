@@ -433,6 +433,40 @@ void kiosk_wm_pointer_button(int button, int down)
     XFlush(dpy);
 }
 
+/* Whether the mouse pointer can be seen, through XFIXES (libXfixes, loaded when first needed).
+ * Minecraft hides it while you play (GLFW's disabled cursor: a blank image) and shows it in its
+ * menus, so the controller can play it one way and point and click in menus the other way.
+ * Only the start of XFixesCursorImage is read, which hasn't changed since XFIXES 1. */
+typedef struct {
+    short x, y;
+    unsigned short width, height, xhot, yhot;
+    unsigned long cursor_serial;
+    unsigned long *pixels;
+} cursor_image;
+typedef cursor_image *(*xf_image_fn)(Display *);
+typedef Bool (*xf_query_fn)(Display *, int *, int *);
+
+int kiosk_wm_pointer_hidden(void)
+{
+    static int tried;
+    static xf_image_fn get_image;
+    cursor_image *im;
+    int hidden = 1, i, n;
+    if (!tried) {
+        void *lib = dlopen("libXfixes.so.3", RTLD_NOW | RTLD_LOCAL);
+        xf_query_fn query = lib ? (xf_query_fn)dlsym(lib, "XFixesQueryExtension") : NULL;
+        int ev, err;
+        tried = 1;
+        if (dpy && query && query(dpy, &ev, &err)) get_image = (xf_image_fn)dlsym(lib, "XFixesGetCursorImage");
+    }
+    if (!dpy || !get_image || !(im = get_image(dpy))) return -1;
+    n = im->width * im->height;
+    for (i = 0; i < n && hidden; i++)
+        if (im->pixels[i] & 0xff000000UL) hidden = 0;   /* a pixel that isn't see-through */
+    XFree(im);
+    return hidden;
+}
+
 void kiosk_wm_key(unsigned long keysym, int down)
 {
     KeyCode kc;

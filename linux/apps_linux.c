@@ -626,6 +626,7 @@ void plat_sync_apps(void)
     char path[160], text[200];
     /* With Steam gone, its games' tiles go too (their files can stay behind in its data folder). */
     int n = plat_steam_ready() ? find_games(games, MAX_GAMES) : 0, i;
+    int minecraft = 0;
     DIR *d;
     struct dirent *de;
 
@@ -656,6 +657,8 @@ void plat_sync_apps(void)
                 remove(path);
                 snprintf(path, sizeof path, "uda:/apps/%.*s.ximg", (int)(len - 4), de->d_name);
                 remove(path);
+            } else if (!strcmp(ref, PRISM_REF) && strcmp(de->d_name, "prism-launcher.app")) {
+                minecraft = 1;
             }
             continue;
         }
@@ -668,6 +671,10 @@ void plat_sync_apps(void)
         remove(path);
     }
     closedir(d);
+    /* Minecraft starts straight into the game; Prism Launcher's own window, for another instance
+     * or version, gets a tile of its own next to it. */
+    if (minecraft) write_if_changed("uda:/apps/prism-launcher.app", "name=Prism Launcher\nflatpak=" PRISM_REF "\nlauncher=1\n");
+    else if (plat_flatpak_ready()) remove("uda:/apps/prism-launcher.app");
 }
 
 /* ---------------------------------------------------------------- .app files */
@@ -684,7 +691,7 @@ static int safe_word(const char *w)
 int linux_app_read(const char *path, struct linux_app *a, char *why, int why_len)
 {
     char line[400], name[40] = "", ref[128] = "", args[200] = "", exec[300] = "", prog[256], game[24] = "";
-    int steam = 0, k = 0, used = 0, pointer = 0;
+    int steam = 0, k = 0, used = 0, pointer = 0, launcher = 0;
     char *w, *save = NULL;
     FILE *f = fopen(path, "r");
 
@@ -703,6 +710,7 @@ int linux_app_read(const char *path, struct linux_app *a, char *why, int why_len
         else if (!strncmp(line, "exec=", 5)) snprintf(exec, sizeof exec, "%s", line + 5);
         else if (!strncmp(line, "pointer=", 8)) pointer = atoi(line + 8) == 1;
         else if (!strncmp(line, "game=", 5)) ascii_copy(game, sizeof game, line + 5);
+        else if (!strncmp(line, "launcher=", 9)) launcher = atoi(line + 9) == 1;
     }
     fclose(f);
     /* Launchers that only take a mouse start with the controller as the pointer. */
@@ -739,10 +747,11 @@ int linux_app_read(const char *path, struct linux_app *a, char *why, int why_len
         if (!strcmp(ref, PRISM_REF)) {
             /* Minecraft like on a console: straight into the instance played last (Prism
              * Launcher's own window only when there's none yet), and the controller plays it
-             * as a keyboard and mouse once Minecraft's window is up. */
+             * as a keyboard and mouse once Minecraft's window is up. The "Prism Launcher" tile
+             * (launcher=1, made by plat_sync_apps) opens the launcher itself. */
             char inst[200];
             snprintf(a->game_title, sizeof a->game_title, "Minecraft");
-            if (prism_last_instance(inst, sizeof inst)) { PUT("--launch"); PUT(inst); }
+            if (!launcher && prism_last_instance(inst, sizeof inst)) { PUT("--launch"); PUT(inst); }
         }
     } else if (exec[0]) {
         for (w = strtok_r(exec, " ", &save); w; w = strtok_r(NULL, " ", &save)) {

@@ -15,6 +15,9 @@
 #    does for Minecraft when it sees no window manager): it must get the keyboard, and the
 #    controller's keys must reach it. The window manager must also say it's there (EWMH).
 # 8. A window that can't be resized asking for full screen (_NET_WM_STATE): it must fill it.
+# 9. Minecraft's menus: a game window that hides the mouse pointer (playing), then shows it (a
+#    menu), and so on. With A held (XENITHOS_TEST_BUTTON), A must be Space while it's hidden
+#    and a left click while it shows.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 T=/tmp/xos-guide-test
 if [ -e /tmp/.X85-lock ] && [ -d "/proc/$(tr -d ' ' < /tmp/.X85-lock)" ]; then
@@ -35,6 +38,7 @@ printf 'name=Point\nexec=/usr/bin/xclock -update 1\npointer=1\n' > "$T/data/uda:
 # size whenever that changes (into XenithOS's app.log).
 cat > "$T/xwin.c" <<'EOF'
 #include <X11/Xatom.h>
+#include <X11/cursorfont.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <stdio.h>
@@ -61,7 +65,7 @@ int main(int argc, char **argv)
     if (p) XFree(p);
     memset(&at, 0, sizeof at);
     at.override_redirect = or_;
-    at.event_mask = KeyPressMask | StructureNotifyMask;
+    at.event_mask = KeyPressMask | ButtonPressMask | StructureNotifyMask;
     at.background_pixel = 0x3366cc;
     w = XCreateWindow(d, DefaultRootWindow(d), 0, 0, or_ ? DisplayWidth(d, s) : 640, or_ ? DisplayHeight(d, s) : 400, 0,
                       CopyFromParent, InputOutput, CopyFromParent, CWOverrideRedirect | CWEventMask | CWBackPixel, &at);
@@ -90,10 +94,31 @@ int main(int argc, char **argv)
         XSendEvent(d, DefaultRootWindow(d), False, SubstructureRedirectMask | SubstructureNotifyMask, &e);
         XFlush(d);
     }
+    Cursor blank = None, arrow = None;
+    if (!strcmp(mode, "cursor") || or_) {      /* a pointer you can't see, like GLFW's disabled one */
+        Pixmap pm = XCreatePixmap(d, w, 1, 1, 1);
+        GC gc = XCreateGC(d, pm, 0, NULL);
+        XColor black;
+        XSetForeground(d, gc, 0);
+        XFillRectangle(d, pm, gc, 0, 0, 1, 1);
+        XFreeGC(d, gc);
+        memset(&black, 0, sizeof black);
+        blank = XCreatePixmapCursor(d, pm, pm, &black, &black, 0, 0);
+        arrow = XCreateFontCursor(d, XC_left_ptr);
+    }
+    if (or_) XDefineCursor(d, w, blank);        /* a full-screen game while it's being played */
     for (i = 0; i < 6000; i++) {
+        if (!or_ && blank != None && i % 200 == 0) {   /* every 2 seconds: playing, then a menu */
+            int playing = (i / 200) % 2 == 0;
+            XDefineCursor(d, w, playing ? blank : arrow);
+            XFlush(d);
+            printf("phase %s\n", playing ? "game" : "menu");
+            fflush(stdout);
+        }
         while (XPending(d)) {
             XEvent e;
             XNextEvent(d, &e);
+            if (e.type == ButtonPress) printf("button %u\n", e.xbutton.button);
             if (e.type == KeyPress) printf("key %s\n", XKeysymToString(XLookupKeysym(&e.xkey, 0)));
             if (e.type == ConfigureNotify) printf("size %dx%d\n", e.xconfigure.width, e.xconfigure.height);
             fflush(stdout);
@@ -106,6 +131,7 @@ EOF
 cc "$T/xwin.c" -lX11 -o "$T/bin/xwin" || exit 1
 printf 'name=Wide game\nexec=%s/bin/xwin or Minecraft-or\npointer=1\ngame=Minecraft\n' "$T" > "$T/data/uda:/apps/d-wide.app"
 printf 'name=Windowed game\nexec=%s/bin/xwin fs Windowed-fs\n' "$T" > "$T/data/uda:/apps/e-windowed.app"
+printf 'name=Xmenus\nexec=%s/bin/xwin cursor Minecraft-menus\npointer=1\ngame=Minecraft\n' "$T" > "$T/data/uda:/apps/f-menus.app"
 
 cat > "$T/bin/startx" <<EOF
 #!/bin/bash
@@ -131,7 +157,7 @@ shot() { DISPLAY=:85 xwd -root -silent | convert xwd:- "$T/shots/$1.png"; printf
 press() { DISPLAY=:85 xdotool keydown "$1"; sleep 0.08; DISPLAY=:85 xdotool keyup "$1"; sleep 0.15; }
 
 env -u DISPLAY -u WAYLAND_DISPLAY XENITHOS_SESSION=1 XENITHOS_STARTX="$T/bin/startx" XENITHOS_DATA="$T/data" \
-    XENITHOS_TEST_GUIDE=4 XENITHOS_TEST_STICK=60,0 SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=kmsdrm \
+    XENITHOS_TEST_GUIDE=4 XENITHOS_TEST_STICK=60,0 XENITHOS_TEST_BUTTON=a SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=kmsdrm \
     "$repo/linux/xenithos" 2> "$T/xenithos.log" &
 sleep 6
 pgrep -f "^$repo/linux/xenithos" | head -1 > "$T/xenithos.pid"
@@ -192,6 +218,15 @@ sleep 1.5
 for i in 1 2 3 4 5; do press Down; done
 press Return
 sleep 3; shot windowed_closed
+echo "== 9. Minecraft's menus: A is Space while playing, a click in a menu"
+for i in 1 2 3 4 5; do press Right; done   # Windowed game first: Clock, Craft, Point, Wide game, Xmenus
+press Return
+sleep 9
+L="$T/data/uda:/xenith/app.log"
+echo "  what the game got, in order: $(grep -E '^(phase|key space|button 1)' "$L" | uniq -c | awk '{printf "%s %s x%s | ", $2, $3, $1}')"
+for i in 1 2 3 4 5; do press Down; done
+press Return
+sleep 3; shot menus_closed
 cleanup
 echo "screenshots in $T/shots"
 echo "log: $(grep -v '^$' "$T/xenithos.log" | tail -6 | tr '\n' ' ' | cut -c1-400)"

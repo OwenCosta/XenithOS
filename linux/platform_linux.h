@@ -59,5 +59,6 @@ int  kiosk_wm_can_point(void);
 void kiosk_wm_pointer_move(int dx, int dy);
 void kiosk_wm_pointer_button(int button, int down);
 void kiosk_wm_key(unsigned long keysym, int down);
+int  kiosk_wm_pointer_hidden(void);          /* 1 hidden (a game playing), 0 shown (a menu), -1 can't tell */
 
 #endif

@@ -212,6 +212,17 @@ static void make_sounds(void)
     tone(&b, 0, 0.025f, 2400, 2200, 0.001f, 0.004f, 0.16f, 0, 0);
     finish(SFX_KEY, &b, 0);
 
+    /* The guide: two soft notes gliding up as it slides in, and down as it goes. */
+    b = buf_new(0.34f);
+    tone(&b, 0.000f, 0.16f, 587.3f, 784.0f, 0.004f, 0.060f, 0.24f, 0.18f, -0.25f);
+    tone(&b, 0.060f, 0.26f, 880.0f, 1174.7f, 0.004f, 0.110f, 0.22f, 0.16f, 0.25f);
+    finish(SFX_GUIDE_OPEN, &b, 0);
+
+    b = buf_new(0.32f);
+    tone(&b, 0.000f, 0.14f, 1174.7f, 880.0f, 0.004f, 0.055f, 0.20f, 0.16f, 0.25f);
+    tone(&b, 0.055f, 0.24f, 784.0f, 587.3f, 0.004f, 0.100f, 0.22f, 0.18f, -0.25f);
+    finish(SFX_GUIDE_CLOSE, &b, 0);
+
     /* A rising arpeggio. */
     b = buf_new(1.8f);
     bell(&b, 0.00f, 1046.5f, 0.35f, 0.20f, -0.2f);

@@ -52,7 +52,7 @@ static const char *mode_name(int m)
 static const char *mode_help(int m)
 {
     return m == PAD_MOUSE ? "For launchers and menus: the left stick moves the pointer, A clicks, B right clicks and the right stick scrolls."
-         : m == PAD_KEYS ? "Laid out like Minecraft on a console: the sticks walk and look, RT breaks, LT places, A jumps, B drops, Y opens the inventory and LB and RB pick from the hotbar."
+         : m == PAD_KEYS ? "Like Minecraft on an Xbox: A jumps, B sneaks, Y opens the inventory, RT breaks, LT places, LB and RB pick from the hotbar. In menus the left stick moves the pointer and A clicks."
          : "The game reads the controller itself.";
 }
 
@@ -122,7 +122,7 @@ int guide_run(struct plat_guide *g)
     if (g->keeps_running) rows[nrows++] = ROW_CLOSE;
 
     ui_settle_input();                       /* the Esc or Xbox button that opened it */
-    sfx(SFX_SELECT);
+    sfx(SFX_GUIDE_OPEN);
     while (result < 0) {
         int x, y, w = PANEL_W - 64, d;
         ui_poll();
@@ -134,15 +134,15 @@ int guide_run(struct plat_guide *g)
                 g->pad_mode = next_mode(g, dx < 0 ? -1 : 1);
                 sfx(SFX_SELECT);
             } else if (PRESSED(a)) {
-                sfx(SFX_SELECT);
+                sfx(rows[sel] == ROW_RESUME ? SFX_GUIDE_CLOSE : SFX_SELECT);
                 switch (rows[sel]) {
                 case ROW_RESUME: result = GUIDE_RESUME; break;
                 case ROW_HOME:   result = GUIDE_HOME; break;
                 case ROW_SWITCH: page = 1; pick = 0; first = 0; hl2 = 0; break;
                 case ROW_CLOSE:  result = GUIDE_CLOSE; break;
                 }
-            } else if (PRESSED(b) || PRESSED(guide)) {
-                sfx(SFX_BACK);
+            } else if (PRESSED(b) || PRESSED(guide)) {       /* B, Esc, or the Xbox button again */
+                sfx(SFX_GUIDE_CLOSE);
                 result = GUIDE_RESUME;
             }
         } else {
@@ -155,7 +155,7 @@ int guide_run(struct plat_guide *g)
                 sfx(SFX_BACK);
                 page = 0;
             } else if (PRESSED(guide)) {
-                sfx(SFX_BACK);
+                sfx(SFX_GUIDE_CLOSE);
                 result = GUIDE_RESUME;
             }
         }
@@ -213,8 +213,20 @@ int guide_run(struct plat_guide *g)
         }
         ui_end_frame();
     }
+    /* Back to the game: the panel slides away while the closing sound plays (about a third of a
+     * second; the platform takes the sound device away again after). */
+    for (i = 0; result == GUIDE_RESUME && i < 18; i++) {
+        ui_poll();
+        slide = ui_ease(slide, 0, 0.3f);
+        if (back) memcpy(gfx_bb, back, (size_t)SCR_W * SCR_H * 4);
+        else gfx_clear(C_BG);
+        gfx_rect(SCR_W - (int)(PANEL_W * slide), 0, PANEL_W, SCR_H, C_SURFACE);
+        ui_end_frame();
+    }
     free(back);
-    do { ui_poll(); } while (cur.a || cur.b);
+    /* Everything that can close it let go first: an Xbox button still down when the game is back
+     * would count as a new tap and bring the guide straight back up. */
+    do { ui_poll(); } while (cur.a || cur.b || cur.guide);
     if (result == GUIDE_CLOSE || result == GUIDE_SWITCH || (result == GUIDE_HOME && !g->keeps_running)) {
         say_closing(g);
     } else {

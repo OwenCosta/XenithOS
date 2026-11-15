@@ -238,6 +238,32 @@ static void kiosk_maybe_start(void)
     unsetenv("XENITHOS_KIOSK");
 }
 
+/* Services started on demand over D-Bus, like xdg-desktop-portal and its backends (which apps
+ * from Flathub ask for their settings, links and file pickers), get the environment of the
+ * session's D-Bus, not ours. A desktop's session tells it the display; console mode didn't, so
+ * those services couldn't start and every app waited for them to time out (25 seconds or so,
+ * each time a game started). */
+static void kiosk_tell_dbus(void)
+{
+    char prog[256], *argv[8];
+    int n = 0, i, status;
+    pid_t pid;
+    setenv("XDG_SESSION_TYPE", "x11", 1);       /* on the console it says "tty" */
+    if (!linux_find_program("dbus-update-activation-environment", prog, sizeof prog)) return;
+    argv[n++] = prog;
+    argv[n++] = "--systemd";
+    argv[n++] = "DISPLAY";
+    if (getenv("XAUTHORITY")) argv[n++] = "XAUTHORITY";
+    argv[n++] = "XDG_SESSION_TYPE";
+    argv[n] = NULL;
+    pid = linux_spawn(argv, NULL, NULL, 0);
+    for (i = 0; pid > 0 && i < 100 && waitpid(pid, &status, WNOHANG) == 0; i++) SDL_Delay(20);
+    if (pid > 0 && i == 100) {                  /* 2 seconds: leave it */
+        kill(pid, SIGKILL);
+        waitpid(pid, &status, 0);
+    }
+}
+
 /* XenithOS's window is up on its X server: manage the windows apps open over it. */
 static void kiosk_begin(void)
 {
@@ -250,6 +276,7 @@ static void kiosk_begin(void)
     if (!SDL_GetWindowWMInfo(win, &info) || info.subsystem != SDL_SYSWM_X11 ||
         !kiosk_wm_start((unsigned long)info.info.x11.window))
         fprintf(stderr, "xenithos: can't manage windows on this X server\n");
+    kiosk_tell_dbus();
 }
 
 void plat_init(void)
@@ -918,6 +945,25 @@ static char **guest_env(int fd, char *fdvar, size_t fdvar_len)
     return env;
 }
 
+/* The guide's sounds. While a game or app has the sound, XenithOS's mixer is stopped (and, for
+ * a program of its own, its sound device closed). The guide starts them again for its own sounds
+ * (a sound server mixes them in with the game's), and back in the game, they stop again. */
+static int audio_close_needed;
+
+static void guide_sound_on(void)
+{
+    audio_close_needed = !audio_dev;
+    plat_audio_init();
+    if (hook_failed) hook_failed();
+}
+
+static void guide_sound_off(void)
+{
+    if (hook_before) hook_before();
+    if (audio_close_needed) audio_close();
+    audio_close_needed = 0;
+}
+
 /* The guide over an app inside XenithOS: its last frame behind the panel. */
 static int inside_guide(struct guest_shm *g, const char *path, uint32_t shown)
 {
@@ -927,7 +973,9 @@ static int inside_guide(struct guest_shm *g, const char *path, uint32_t shown)
     memcpy(guide_shot, g->pixels[shown % GUEST_FRAMES], sizeof guide_shot);
     gd.backdrop = guide_shot;
     gd.path = path;                              /* the guide looks its name up */
+    guide_sound_on();
     choice = guide_fn(&gd);
+    if (choice == GUIDE_RESUME) guide_sound_off();   /* the app's own sound again */
     if (choice == GUIDE_SWITCH) snprintf(next_launch, sizeof next_launch, "%s", gd.switch_to);
     return choice;
 }
@@ -1236,22 +1284,26 @@ static void ask_to_close(pid_t root)
  *   PAD_MOUSE  launchers and menus (Prism Launcher, Sober's first start): the left stick moves
  *              the pointer, A or RT clicks, B or LT right clicks, X middle clicks, the right
  *              stick scrolls, the d-pad sends the arrow keys, Y Enter, Start Esc, Back Tab.
- *   PAD_KEYS   a game played with a keyboard and mouse, laid out like Minecraft on a console:
- *              the left stick is W A S D (pressed: Ctrl, sprint), the right stick looks around
- *              (pressed: Shift, sneak), RT clicks, LT right clicks, A Space, B Q, X and Y E,
- *              LB and RB scroll the hotbar (so do d-pad left and right), d-pad up F5, down F,
- *              Start Esc, Back Tab.
+ *   PAD_KEYS   a game played with a keyboard and mouse, laid out like Minecraft on an Xbox
+ *              (Bedrock's default controls). Playing: the left stick is W A S D (pressed: Ctrl,
+ *              sprint), the right stick looks around (pressed: middle click, pick block), A
+ *              Space (jump), B Shift (sneak), X and Y E (crafting, inventory), RT left click
+ *              (break), LT right click (place), LB and RB the hotbar, d-pad up F5 (camera), down
+ *              Q (drop), left F (swap hands), right T (chat), Start Esc, Back Tab. In a menu
+ *              (the game shows its pointer): the left stick moves the pointer, A left clicks, X
+ *              right clicks, Y Shift-clicks, B and Start Esc, the right stick scrolls.
  * The guide switches between them and the game reading the controller itself. */
-enum { EK_W, EK_A, EK_S, EK_D, EK_SPACE, EK_SHIFT, EK_CTRL, EK_Q, EK_E, EK_F, EK_F5, EK_ESC, EK_TAB,
+enum { EK_W, EK_A, EK_S, EK_D, EK_SPACE, EK_SHIFT, EK_CTRL, EK_Q, EK_E, EK_F, EK_T, EK_F5, EK_ESC, EK_TAB,
        EK_RETURN, EK_UP, EK_DOWN, EK_LEFT, EK_RIGHT, EK_COUNT };
 static const unsigned long ek_sym[EK_COUNT] = {
-    0x77, 0x61, 0x73, 0x64, 0x20, 0xffe1, 0xffe3, 0x71, 0x65, 0x66, 0xffc2, 0xff1b, 0xff09,   /* X keysyms */
+    0x77, 0x61, 0x73, 0x64, 0x20, 0xffe1, 0xffe3, 0x71, 0x65, 0x66, 0x74, 0xffc2, 0xff1b, 0xff09,   /* X keysyms */
     0xff0d, 0xff52, 0xff54, 0xff51, 0xff53};
 static int emu_mode;                           /* PAD_MOUSE or PAD_KEYS while it's on, else 0 */
+static int emu_menu;                           /* PAD_KEYS: the game is showing a menu (pointer shown) */
 static int emu_key[EK_COUNT], emu_button[4];   /* what's held down now */
 static int emu_was[SDL_CONTROLLER_BUTTON_MAX];  /* buttons last time, for presses that step */
 static float emu_fx, emu_fy, emu_sx, emu_sy;
-static uint64_t emu_last;
+static uint64_t emu_last, emu_looked;
 
 static int emu_ready(void)
 {
@@ -1279,29 +1331,36 @@ static void emu_click(int button)
     kiosk_wm_pointer_button(button, 0);
 }
 
+/* Lets go of everything it's holding down. */
+static void emu_release(void)
+{
+    int none[EK_COUNT], up[4];
+    memset(none, 0, sizeof none);
+    memset(up, 0, sizeof up);
+    emu_send(none, up);
+}
+
 static void emu_start(int mode)
 {
     if (!emu_ready() || (mode != PAD_MOUSE && mode != PAD_KEYS)) return;
     emu_mode = mode;
+    emu_menu = 0;
     memset(emu_key, 0, sizeof emu_key);
     memset(emu_button, 0, sizeof emu_button);
     memset(emu_was, 0, sizeof emu_was);
     emu_fx = emu_fy = emu_sx = emu_sy = 0;
-    emu_last = 0;
+    emu_last = emu_looked = 0;
 }
 
-/* Lets go of everything it's holding down. */
 static void emu_stop(void)
 {
-    int none[EK_COUNT], up[4];
     if (!emu_mode) return;
-    memset(none, 0, sizeof none);
-    memset(up, 0, sizeof up);
-    emu_send(none, up);
+    emu_release();
     emu_mode = 0;
 }
 
-/* Tests have no controller: XENITHOS_TEST_STICK="x,y" (-100..100) holds the left stick there. */
+/* Tests have no controller: XENITHOS_TEST_STICK="x,y" (-100..100) holds the left stick there, and
+ * XENITHOS_TEST_BUTTON=a (or b, x, y) holds that button down. */
 static int test_stick(float *x, float *y)
 {
     const char *s = getenv("XENITHOS_TEST_STICK");
@@ -1310,6 +1369,18 @@ static int test_stick(float *x, float *y)
     *x = tx / 100.0f;
     *y = ty / 100.0f;
     return 1;
+}
+
+static int test_button(SDL_GameControllerButton b)
+{
+    const char *s = getenv("XENITHOS_TEST_BUTTON");
+    return s && ((b == SDL_CONTROLLER_BUTTON_A && *s == 'a') || (b == SDL_CONTROLLER_BUTTON_B && *s == 'b') ||
+                 (b == SDL_CONTROLLER_BUTTON_X && *s == 'x') || (b == SDL_CONTROLLER_BUTTON_Y && *s == 'y'));
+}
+
+static int pad_down(SDL_GameControllerButton b)
+{
+    return (pad_dev && SDL_GameControllerGetButton(pad_dev, b)) || test_button(b);
 }
 
 static float stick(SDL_GameControllerAxis a)
@@ -1333,25 +1404,38 @@ static void emu_step(uint64_t now)
 {
     int key[EK_COUNT], button[4], b, pressed[SDL_CONTROLLER_BUTTON_MAX], dx, dy;
     float dt, lx, ly, rx, ry, lt, rt, tx, ty;
-    int test = test_stick(&tx, &ty);
+    int test = test_stick(&tx, &ty) || getenv("XENITHOS_TEST_BUTTON");
     if (!emu_mode || (!pad_dev && !test)) return;
     dt = emu_last ? (float)(now - emu_last) / 1e6f : 0;
     if (dt > 0.05f) dt = 0.05f;
     emu_last = now;
     for (b = 0; b < SDL_CONTROLLER_BUTTON_MAX; b++) {
-        int down = SDL_GameControllerGetButton(pad_dev, (SDL_GameControllerButton)b);
+        int down = pad_down((SDL_GameControllerButton)b);
         pressed[b] = down && !emu_was[b];
         emu_was[b] = down;
     }
-    lx = test ? tx : stick(SDL_CONTROLLER_AXIS_LEFTX);
-    ly = test ? ty : stick(SDL_CONTROLLER_AXIS_LEFTY);
+    if (!test_stick(&lx, &ly)) {
+        lx = stick(SDL_CONTROLLER_AXIS_LEFTX);
+        ly = stick(SDL_CONTROLLER_AXIS_LEFTY);
+    }
     rx = stick(SDL_CONTROLLER_AXIS_RIGHTX);
     ry = stick(SDL_CONTROLLER_AXIS_RIGHTY);
     lt = axis(SDL_CONTROLLER_AXIS_TRIGGERLEFT) / 32767.0f;
     rt = axis(SDL_CONTROLLER_AXIS_TRIGGERRIGHT) / 32767.0f;
+    /* Keyboard and mouse: playing, or in one of the game's menus? Minecraft hides the pointer
+     * while you play and shows it in menus (the inventory, crafting, the pause menu). */
+    if (emu_mode == PAD_KEYS && now - emu_looked > 100000) {
+        int menu = kiosk_wm_pointer_hidden() == 0;
+        emu_looked = now;
+        if (menu != emu_menu) {
+            emu_release();                       /* nothing held over from the other way */
+            emu_menu = menu;
+            emu_fx = emu_fy = emu_sx = emu_sy = 0;
+        }
+    }
     memset(key, 0, sizeof key);
     memset(button, 0, sizeof button);
-#define DOWN(x) SDL_GameControllerGetButton(pad_dev, SDL_CONTROLLER_BUTTON_##x)
+#define DOWN(x) pad_down(SDL_CONTROLLER_BUTTON_##x)
     key[EK_ESC] = DOWN(START);
     key[EK_TAB] = DOWN(BACK);
     if (emu_mode == PAD_MOUSE) {
@@ -1367,24 +1451,37 @@ static void emu_step(uint64_t now)
         /* The right stick scrolls, up to 14 steps a second. */
         if (fabsf(ry) > 0.25f) emu_sy -= ry * 14 * dt; else emu_sy = 0;
         if (fabsf(rx) > 0.25f) emu_sx += rx * 14 * dt; else emu_sx = 0;
+    } else if (emu_menu) {
+        /* A menu, the way the console does them: the left stick moves the pointer, A picks up
+         * and puts down, X one at a time, Y moves a stack across (Shift-click), B closes. */
+        stick_speed(lx, ly, 90, 1600, dt, &emu_fx, &emu_fy);
+        if (fabsf(ry) > 0.25f) emu_sy -= ry * 14 * dt; else emu_sy = 0;
+        key[EK_ESC] = DOWN(START) || DOWN(B);
+        key[EK_SHIFT] = DOWN(Y);
+        button[1] = DOWN(A) || DOWN(Y) || rt > 0.5f;
+        button[3] = DOWN(X) || lt > 0.5f;
+        if (pressed[SDL_CONTROLLER_BUTTON_LEFTSHOULDER]) emu_sy += 1;
+        if (pressed[SDL_CONTROLLER_BUTTON_RIGHTSHOULDER]) emu_sy -= 1;
     } else {
+        /* Playing, with Minecraft's own Xbox layout (Bedrock's defaults) */
         stick_speed(rx, ry, 40, 1400, dt, &emu_fx, &emu_fy);        /* looking around */
         key[EK_W] = ly < -0.35f;
         key[EK_S] = ly > 0.35f;
         key[EK_A] = lx < -0.35f;
         key[EK_D] = lx > 0.35f;
-        /* Minecraft's own console layout */
-        key[EK_SPACE] = DOWN(A);                     /* jump */
-        key[EK_Q] = DOWN(B);                         /* drop */
-        key[EK_E] = DOWN(X) || DOWN(Y);              /* crafting, inventory */
         key[EK_CTRL] = DOWN(LEFTSTICK);              /* sprint */
-        key[EK_SHIFT] = DOWN(RIGHTSTICK);            /* sneak */
+        key[EK_SPACE] = DOWN(A);                     /* jump */
+        key[EK_SHIFT] = DOWN(B);                     /* sneak */
+        key[EK_E] = DOWN(X) || DOWN(Y);              /* crafting, inventory */
         key[EK_F5] = DOWN(DPAD_UP);                  /* camera */
-        key[EK_F] = DOWN(DPAD_DOWN);                 /* swap hands */
+        key[EK_Q] = DOWN(DPAD_DOWN);                 /* drop */
+        key[EK_F] = DOWN(DPAD_LEFT);                 /* (emote on a console) swap hands */
+        key[EK_T] = DOWN(DPAD_RIGHT);                /* chat */
         button[1] = rt > 0.5f;                       /* attack, break */
+        button[2] = DOWN(RIGHTSTICK);                /* pick the block you're looking at */
         button[3] = lt > 0.5f;                       /* use, place */
-        if (pressed[SDL_CONTROLLER_BUTTON_LEFTSHOULDER] || pressed[SDL_CONTROLLER_BUTTON_DPAD_LEFT]) emu_sy += 1;
-        if (pressed[SDL_CONTROLLER_BUTTON_RIGHTSHOULDER] || pressed[SDL_CONTROLLER_BUTTON_DPAD_RIGHT]) emu_sy -= 1;
+        if (pressed[SDL_CONTROLLER_BUTTON_LEFTSHOULDER]) emu_sy += 1;    /* the hotbar */
+        if (pressed[SDL_CONTROLLER_BUTTON_RIGHTSHOULDER]) emu_sy -= 1;
     }
 #undef DOWN
     dx = (int)emu_fx;
@@ -1460,7 +1557,9 @@ static int other_guide(void)
     g.pad_mode = pad_mode;
     emu_stop();                                /* nothing held down while the panel is up */
     kiosk_wm_hold(1);
+    guide_sound_on();
     choice = guide_fn(&g);
+    if (choice == GUIDE_RESUME) guide_sound_off();   /* otherwise XenithOS keeps its sound */
     if (g.pad_mode != pad_mode) other.manual = 1;
     pad_mode = g.pad_mode;
     kbd_drain();

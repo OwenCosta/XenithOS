@@ -18,6 +18,8 @@ enum {
     SFX_BOOT,       /* the start-up chime */
     SFX_SPARK,      /* VOLT */
     SFX_CRASH,      /* VOLT */
+    SFX_GUIDE_OPEN, /* the guide sliding in over a game */
+    SFX_GUIDE_CLOSE,
     SFX_COUNT
 };
 
