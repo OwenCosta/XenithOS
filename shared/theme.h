@@ -29,6 +29,6 @@
 
 /* Where XenithOS itself lives, so apps can return to it. */
 #define XENITH_SHELL_PATH "uda:/xenon.elf"
-#define XENITH_VERSION "0.5.6"
+#define XENITH_VERSION "0.5.7"
 
 #endif

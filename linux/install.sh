@@ -72,7 +72,7 @@ say "Installing packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 PKGS="build-essential libsdl2-dev zlib1g-dev curl ca-certificates tar"
-[ "$DESKTOP" = 1 ] && PKGS="$PKGS xserver-xorg xinit xfce4 xfce4-terminal dbus-x11"
+[ "$DESKTOP" = 1 ] && PKGS="$PKGS xserver-xorg xinit xfce4 xfce4-terminal dbus-x11 libxtst6"
 # shellcheck disable=SC2086
 apt-get install -y $PKGS
 # DOOM's free game data (Freedoom: Phase 1 and 2, in /usr/share/games/doom). Not every
