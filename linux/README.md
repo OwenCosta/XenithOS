@@ -74,3 +74,17 @@ linux/xenithos             # in a window, when run from a desktop
 
 For testing without a screen: `SDL_VIDEODRIVER=offscreen XENITHOS_SHOT=home.png XENITHOS_SHOT_FRAME=200
 linux/xenithos` saves frame 200 and quits. `XENITHOS_DATA` changes the data folder.
+
+`linux/test-in-window.sh volt` (or `doom`) runs the whole thing in a virtual display (needs `xvfb xdotool
+x11-apps imagemagick`): it boots XenithOS, starts the app, leaves it, and moves around the home screen,
+taking screenshots through each switch and recording the sound to a file. It prints how bright every
+screenshot is (0 would be a black screen) and how loud each quarter second was, so a black gap or missing
+sound after coming back shows up straight away.
+
+## Apps inside XenithOS
+
+Apps are their own programs, but XenithOS starts each one with `XENITHOS_GUEST_FD` pointing at shared
+memory: the app draws its frames and queues its sound there, and XenithOS shows them in its own window,
+plays the sound and passes the controller and keyboard on. The screen and the sound device never change
+hands, so switching doesn't go black. Hold Guide for two seconds, or press Ctrl+Alt+Backspace, to close an
+app that has stopped responding. An app started on its own (outside XenithOS) opens its own window as before.
