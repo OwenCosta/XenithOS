@@ -111,7 +111,7 @@ ONLINE_WINDOW = 15 * 60        # "online now": seen in the last 15 minutes
 PUBLIC_ADDR_RE = re.compile(r"^[A-Za-z0-9.-]{1,64}:[0-9]{1,5}$")
 PIN_RE = re.compile(r"^[0-9]{4,8}$")
 STATIC_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}\.(png|js|css|svg|ico|webp|wav)$")
-KINDS = {"app", "data", "system"}
+KINDS = {"app", "data", "system", "pc"}      # pc: XenithOS's source, which PCs and Pis build themselves
 RESERVED = {"admin", "administrator", "xenith", "xenithos", "system", "guest", "player", "moderator",
             "support", "server", "root", "sim"}
 CTYPES = {"png": "image/png", "js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8",
@@ -1277,9 +1277,13 @@ def selftest():
         f.write(b"XIMGthumb")
     with open(os.path.join(store_dir, "gamedata.wad"), "wb") as f:
         f.write(b"IWAD" + bytes(range(256)) * 40)
+    with open(os.path.join(store_dir, "xenithos-pc.tar.gz"), "wb") as f:
+        f.write(b"\x1f\x8b" + bytes(range(256)) * 4)
     store_list = [{"id": "game", "kind": "app", "name": "Game|X", "version": "1.0", "file": "game.elf32",
                    "description": "line\nbreak", "needs": ["gamedata", "missing", "../bad", "game"]},
                   {"id": "gamedata", "kind": "data", "name": "Game data", "version": "1", "file": "gamedata.wad"},
+                  {"id": "xenithos-pc", "kind": "pc", "name": "XenithOS update", "version": "9.9",
+                   "file": "xenithos-pc.tar.gz"},
                   {"id": "../evil", "kind": "app", "file": "game.elf32"},
                   {"id": "missing", "kind": "app", "file": "nope.bin"},
                   {"id": "weird", "kind": "exe", "file": "game.elf32"}]
@@ -1376,7 +1380,8 @@ else:
     f = rows.get("game", [])
     with open(os.path.join(store_dir, "game.elf32"), "rb") as fh:
         payload = fh.read()
-    check("store lists only valid items", code == 200 and sorted(rows) == ["game", "gamedata"])
+    check("store lists only valid items", code == 200 and sorted(rows) == ["game", "gamedata", "xenithos-pc"])
+    check("store lists the PC update as kind pc", rows.get("xenithos-pc", ["", ""])[1] == "pc")
     check("store lines have 8 fields", all(len(r) == 8 for r in rows.values()))
     check("store needs: only data that's in the Store", req("GET", "/v1/store/needs") == (200, b"game|gamedata\n"))
     check("store pipe cleaned from name", f[2] == "Game X")
@@ -1478,6 +1483,7 @@ else:
                                        "README.txt"} <= names and cfg_text.startswith("server=127.0.0.1:"))
     check("xbox zip has the game data its apps need, stored as is", data_info is not None
           and data_info.compress_type == zipfile.ZIP_STORED and "apps/gamedata.elf32" not in names)
+    check("xbox zip leaves the PC update out", not any("xenithos-pc" in n for n in names))
     check("xbox zip comes from the cache", req("GET", "/download/xenithos-xbox360.zip") == (200, body))
     store_list[0]["version"] = "1.1"
     with open(os.path.join(store_dir, "store.json"), "w") as f:

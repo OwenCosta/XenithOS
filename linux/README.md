@@ -62,7 +62,18 @@ In the on-screen keyboard you can type on the real keyboard: letters type, Backs
 | `~/.local/share/xenithos/uda:/` | your settings, profile, game data and saves (same layout as the Xbox's USB stick) |
 | `~/.config/xenithos/` | the mode file and logs |
 
-The Store only offers game data here: apps come with XenithOS on PCs and Pis.
+The Store offers game data and XenithOS updates here (the apps come with XenithOS on PCs and Pis).
+
+## Updates
+
+**XenithOS update** in the Store downloads the new version's source from XenithOS Cloud (it's in the
+Store as `xenithos-pc`, kind `pc`, with its SHA-256 checked like everything else), unpacks it in
+`~/.cache/xenithos-update`, and runs the `linux/update.sh` that comes with it. That builds XenithOS and
+the apps and puts them in place of the old ones in `/usr/lib/xenithos`, which `install.sh` makes yours so
+no sudo is needed, then copies the apps' names and thumbnails into the data folder. XenithOS then restarts
+into the new program. If the build fails, nothing is replaced, and the build's output is in
+`update.log` in `uda:/xenith`. Machines installed before 0.5.3 have a root-owned `/usr/lib/xenithos`:
+run the install command once more and the Store takes over after that.
 
 ## Building by hand
 

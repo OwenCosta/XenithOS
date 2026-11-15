@@ -60,11 +60,19 @@ static int item_dest(struct item *it)
         snprintf(path, sizeof path, "uda:/data/%s", it->file);
     } else if (!strcmp(it->kind, "system")) {
         snprintf(path, sizeof path, "%s", XENITH_SHELL_PATH);
+    } else if (!strcmp(it->kind, "pc") && plat_kind() == PLAT_PC) {
+        snprintf(path, sizeof path, "uda:/xenith/xenithos-update.tar.gz");   /* the source; built here */
     } else {
         return 0;
     }
     memcpy(it->dest, path, sizeof path);
     return 1;
+}
+
+/* A new version of XenithOS itself: xenon.elf on the Xbox, the source to build on a PC. */
+static int is_update(const struct item *it)
+{
+    return !strcmp(it->kind, "system") || !strcmp(it->kind, "pc");
 }
 
 static int file_size(const char *path)
@@ -76,7 +84,7 @@ static int file_size(const char *path)
 static int own_state(const struct item *it)
 {
     int have = file_size(it->dest);
-    if (!strcmp(it->kind, "system"))
+    if (is_update(it))
         return !strcmp(it->version, XENITH_VERSION) ? ST_INSTALLED : ST_UPDATE;
     return have < 0 ? ST_NEW : have == it->size ? ST_INSTALLED : ST_UPDATE;
 }
@@ -166,9 +174,10 @@ static int load_store(void)
             snprintf(it->sha, sizeof it->sha, "%s", f[5]);
             snprintf(it->file, sizeof it->file, "%s", f[6]);
             snprintf(it->desc, sizeof it->desc, "%s", f[7]);
-            /* The Store's apps and system updates are Xbox programs. On a PC or Pi the apps
-             * come with XenithOS itself, so only game data is offered there. */
-            int fits = plat_kind() == PLAT_XBOX || !strcmp(it->kind, "data");
+            /* The Store's apps and "system" updates are Xbox programs. On a PC or Pi the apps
+             * come with XenithOS itself, so it offers game data and the "pc" update there. */
+            int fits = plat_kind() == PLAT_XBOX ? strcmp(it->kind, "pc") != 0
+                                                : !strcmp(it->kind, "data") || !strcmp(it->kind, "pc");
             if (fits && it->size > 0 && strlen(it->sha) == 64 && item_dest(it)) nitems++;
         }
         line = next;
@@ -299,12 +308,58 @@ static int fetch(struct item *it, int step, int steps)
     return 1;
 }
 
+/* While a PC update builds: what it's doing, and for how long. */
+static const char *pc_version;
+static void pc_step(const char *what, int seconds)
+{
+    static uint64_t drawn;
+    char title[64], detail[96];
+    uint64_t now = ui_ms();
+    if (now - drawn < 30) return;
+    drawn = now;
+    snprintf(title, sizeof title, "Updating XenithOS to %s", pc_version);
+    if (seconds >= 3) snprintf(detail, sizeof detail, "%s: %d s (about a minute on a PC, a few on a Raspberry Pi)", what, seconds);
+    else snprintf(detail, sizeof detail, "%s", what);
+    ui_loading_progress(title, detail, 0, 0);
+}
+
+/* The Store's "XenithOS update" on a PC: download the source, build it here, restart into it. */
+static void install_pc_update(struct item *it)
+{
+    char body[200], why[200];
+    int ok;
+    snprintf(body, sizeof body, "XenithOS %s builds itself here from its source: about a minute on a PC, a few on a Raspberry Pi. The current version stays if anything goes wrong.", it->version);
+    if (!ui_confirm("Update XenithOS?", body, "Update", "Cancel")) return;
+    if (!fetch(it, 1, 1)) {
+        update_states();
+        return;
+    }
+    pc_version = it->version;
+    ok = plat_install_update(it->dest, pc_step, why, sizeof why);
+    remove(it->dest);
+    if (!ok) {
+        update_states();
+        sfx(SFX_ERROR);
+        ui_message("The update didn't install", why);
+        return;
+    }
+    it->state = it->own = ST_INSTALLED;          /* XENITH_VERSION is still the old one until the restart */
+    sfx(SFX_SUCCESS);
+    snprintf(body, sizeof body, "XenithOS %s is installed. Restart now to use it?", it->version);
+    if (ui_confirm("XenithOS updated", body, "Restart now", "Later"))
+        ui_launch(XENITH_SHELL_PATH, "XenithOS", "Restarting");
+}
+
 static void install(struct item *it)
 {
     struct item *todo[1 + MAX_NEEDS];
     char q[96], body[200], list[120], sz[24];
     int n = 0, i, bytes = 0;
 
+    if (!strcmp(it->kind, "pc")) {
+        install_pc_update(it);
+        return;
+    }
     if (!strcmp(it->kind, "system")) {
         if (!ui_confirm("Update XenithOS?", "This replaces xenon.elf on your USB stick with the version from the Store.", "Update", "Cancel")) return;
         todo[n++] = it;
@@ -354,7 +409,7 @@ static const char *kind_label(const char *k)
 {
     if (!strcmp(k, "app")) return "App";
     if (!strcmp(k, "data")) return "Game data";
-    if (!strcmp(k, "system")) return "System update";
+    if (!strcmp(k, "system") || !strcmp(k, "pc")) return "System update";
     return k;
 }
 
@@ -409,7 +464,7 @@ void screen_store(void)
         hl = ui_ease(hl, (float)(sel - first), 0.4f);
 
         ui_bg();
-        ui_header("Store", plat_kind() == PLAT_XBOX ? "Apps, games and updates from XenithOS Cloud" : "Game data from XenithOS Cloud. Apps come with XenithOS here.");
+        ui_header("Store", plat_kind() == PLAT_XBOX ? "Apps, games and updates from XenithOS Cloud" : "Updates and game data from XenithOS Cloud. Apps come with XenithOS here.");
         if (!nview) {
             gfx_str(FONT_LABEL, M, top + 10, C_TEXT, "The Store is empty");
         } else {

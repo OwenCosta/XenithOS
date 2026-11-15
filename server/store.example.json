@@ -10,6 +10,8 @@
   "description": "Free game data for DOOM, laid out like the original episodes. BSD license."},
  {"id": "freedoom2", "kind": "data", "name": "Freedoom: Phase 2", "version": "0.13.0", "file": "freedoom2.wad",
   "description": "Free DOOM II style game data with 32 levels. BSD license."},
- {"id": "xenith", "kind": "system", "name": "XenithOS update", "version": "0.5.2", "file": "xenith.elf32",
-  "description": "Updates XenithOS itself on your USB stick."}
+ {"id": "xenith", "kind": "system", "name": "XenithOS update", "version": "0.5.3", "file": "xenith.elf32",
+  "description": "Updates XenithOS itself on your USB stick."},
+ {"id": "xenithos-pc", "kind": "pc", "name": "XenithOS update", "version": "0.5.3", "file": "xenithos-pc.tar.gz",
+  "description": "XenithOS for PCs and Raspberry Pis. It builds itself on your machine from its source."}
 ]

@@ -454,6 +454,22 @@ void plat_set_launch_progress(void (*fn)(int done, int total))
     launch_progress = fn;
 }
 
+/* A PC's Store update, acted out: a few seconds of "Building", then XSIM_UPDATE=fail says why
+ * it didn't work, anything else succeeds. */
+int plat_install_update(const char *tarball, void (*step)(const char *what, int seconds), char *why, int why_len)
+{
+    const char *u = getenv("XSIM_UPDATE");
+    int i;
+    fprintf(stderr, "sim: install update %s\n", tarball);
+    for (i = 0; i < 240; i++)
+        if (step) step(i < 30 ? "Unpacking" : "Building", i / 60);
+    if (u && !strcmp(u, "fail")) {
+        snprintf(why, why_len, "It didn't build. What went wrong is in update.log in XenithOS's data folder.");
+        return 0;
+    }
+    return 1;
+}
+
 int plat_launch(const char *path)
 {
     struct stat s;

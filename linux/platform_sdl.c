@@ -24,6 +24,7 @@
 #endif
 #include <SDL.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -51,6 +52,7 @@ static SDL_AudioDeviceID audio_dev;
 static int windowed, frames, shot_frame = -1;
 static const char *shot_path;
 static char data_dir[600];
+static char self_path[600];                  /* this program, to restart into an update */
 
 static void (*hook_before)(void), (*hook_failed)(void);
 static void (*launch_progress)(int done, int total);
@@ -166,8 +168,13 @@ static void quit_now(int code)
 void plat_init(void)
 {
     const char *s;
+    ssize_t n;
     signal(SIGPIPE, SIG_IGN);
     if (guest_attach()) return;              /* an app inside XenithOS: no screen of its own */
+    /* Where this program is, before an update can replace the file (after that,
+     * /proc/self/exe reads "... (deleted)"). */
+    n = readlink("/proc/self/exe", self_path, sizeof self_path - 1);
+    self_path[n > 0 ? n : 0] = 0;
     /* In a desktop, a window; on the bare console (or when asked), the whole screen. */
     windowed = (getenv("DISPLAY") || getenv("WAYLAND_DISPLAY")) && !getenv("XENITHOS_FULLSCREEN");
     if (getenv("XENITHOS_WINDOW")) windowed = 1;
@@ -908,13 +915,27 @@ static int run_inside(const char *path, int *status)
 
 /* Apps are programs in uda:/apps, shown inside XenithOS's window (run_inside). Only if that
  * can't be set up does XenithOS hand the screen and sound over and take them back after. */
+/* XenithOS starts again as the program now at self_path: the new version after an update. */
+static void restart_self(void)
+{
+    char *argv[2];
+    argv[0] = self_path;
+    argv[1] = NULL;
+    if (audio_dev) SDL_CloseAudioDevice(audio_dev);
+    audio_dev = 0;
+    SDL_Quit();
+    execv(self_path, argv);
+    /* If that failed, quitting lets xenithos-session start it again. */
+}
+
 int plat_launch(const char *path)
 {
     pid_t pid;
     int status = 0, ok;
     const char *slash = strrchr(path, '/');
-    if (slash && !strcmp(slash + 1, "xenon.elf")) {       /* "back to XenithOS" from an app */
+    if (slash && !strcmp(slash + 1, "xenon.elf")) {       /* an app: back to XenithOS; XenithOS: restart */
         if (hook_before) hook_before();
+        if (!guest && self_path[0]) restart_self();
         quit_now(0);
     }
     if (guest) return 0;                                  /* apps don't start other apps */
@@ -944,6 +965,89 @@ int plat_launch(const char *path)
     open_first_pad();
     if (hook_failed) hook_failed();               /* starts the sound again */
     return ok;
+}
+
+/* ------------------------------------------------------------ Store updates */
+
+/* Run a program (absolute path), its output appended to log if there is one, calling step()
+ * while it works. Returns its exit code, or -1 if it couldn't start. Only exec-safe calls
+ * after fork(), since the sound threads are running. */
+static int spawn_wait(char *const argv[], const char *log, void (*step)(const char *, int), const char *what,
+                      uint64_t start)
+{
+    int st;
+    pid_t pid = fork(), r;
+    if (pid == 0) {
+        if (log) {
+            int fd = open(log, O_WRONLY | O_CREAT | O_APPEND, 0644);
+            if (fd >= 0) { dup2(fd, 1); dup2(fd, 2); close(fd); }
+        }
+        execv(argv[0], argv);
+        _exit(127);
+    }
+    if (pid < 0) return -1;
+    for (;;) {
+        r = waitpid(pid, &st, WNOHANG);
+        if (r == pid) return WIFEXITED(st) ? WEXITSTATUS(st) : 128;
+        if (r < 0 && errno != EINTR) return -1;
+        if (step) step(what, (int)((plat_time_us() - start) / 1000000));
+        else plat_sleep_us(20000);
+    }
+}
+
+/* The Store's "XenithOS update" on a PC: unpack the new source in ~/.cache/xenithos-update and
+ * run the update.sh that comes with it, which builds everything and puts the programs in
+ * place of the old ones (install.sh made /usr/lib/xenithos the user's for this). The old
+ * version stays unless the new one built. */
+int plat_install_update(const char *tarball, void (*step)(const char *what, int seconds), char *why, int why_len)
+{
+    char work[640], src[660], script[700], log[700], tar_abs[700];
+    const char *home = getenv("HOME"), *cache = getenv("XDG_CACHE_HOME");
+    uint64_t start = plat_time_us();
+    int code;
+
+    if (guest) {
+        snprintf(why, why_len, "Only XenithOS itself can update.");
+        return 0;
+    }
+    if (cache && *cache) snprintf(work, sizeof work, "%s/xenithos-update", cache);
+    else snprintf(work, sizeof work, "%s/.cache/xenithos-update", home && *home ? home : "/tmp");
+    snprintf(src, sizeof src, "%s/src", work);
+    snprintf(script, sizeof script, "%s/linux/update.sh", src);
+    snprintf(log, sizeof log, "%s/uda:/xenith/update.log", data_dir);
+    if (tarball[0] == '/') snprintf(tar_abs, sizeof tar_abs, "%s", tarball);
+    else snprintf(tar_abs, sizeof tar_abs, "%s/%s", data_dir, tarball);
+    remove(log);
+    {
+        char *rm[] = {"/bin/rm", "-rf", work, NULL};
+        spawn_wait(rm, NULL, step, "Getting ready", start);
+    }
+    mkdirs(src);
+    {
+        char *tar[] = {"/bin/tar", "-xzf", tar_abs, "-C", src, "--strip-components=1", NULL};
+        if (spawn_wait(tar, log, step, "Unpacking", start) != 0) {
+            snprintf(why, why_len, "The download didn't unpack. Try again.");
+            return 0;
+        }
+    }
+    if (access(script, R_OK) != 0) {
+        snprintf(why, why_len, "That version can't install itself here.");
+        return 0;
+    }
+    {
+        char *build[] = {"/bin/bash", script, data_dir, NULL};
+        code = spawn_wait(build, log, step, "Building", start);
+    }
+    if (code == 0) {
+        char *rm[] = {"/bin/rm", "-rf", work, NULL};
+        spawn_wait(rm, NULL, NULL, NULL, start);
+        return 1;
+    }
+    if (code == 3)
+        snprintf(why, why_len, "XenithOS can't replace itself yet. Run the install command once more, and updates come from the Store after that.");
+    else
+        snprintf(why, why_len, "It didn't build. What went wrong is in update.log in XenithOS's data folder.");
+    return 0;
 }
 
 static void run(const char *const argv[])

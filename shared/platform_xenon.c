@@ -394,6 +394,14 @@ int plat_launch(const char *path)
     return 0;
 }
 
+int plat_install_update(const char *tarball, void (*step)(const char *what, int seconds), char *why, int why_len)
+{
+    (void)tarball;
+    (void)step;
+    snprintf(why, why_len, "The Xbox updates by replacing xenon.elf.");
+    return 0;
+}
+
 void plat_text_input(int on) { (void)on; }
 int plat_text_take(char *out, int n) { (void)out; (void)n; return 0; }
 

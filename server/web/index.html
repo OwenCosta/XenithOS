@@ -248,6 +248,7 @@
       <li>Restart. You're in <b>console mode</b>: XenithOS full screen, with a controller or the keyboard (arrows, Enter, Escape).</li>
       <li><b>Desktop mode</b> is in XenithOS's power menu: the full Linux desktop, for a browser and everything else.</li>
       <li><b>Return to XenithOS</b> in the desktop's menu goes back to console mode.</li>
+      <li><b>Updates</b> come from the Store: pick <b>XenithOS update</b>, and it builds the new version on your machine and restarts into it.</li>
     </ol>
     <p class="muted">Add <code>--no-desktop</code> to skip desktop mode, or run it again with <code>--uninstall</code> to undo it. More in <a href="https://github.com/OwenCosta/XenithOS/blob/main/linux/README.md">linux/README.md</a>.</p>
   </div>
@@ -257,6 +258,8 @@
   <div class="wrap">
     <h2>Build log</h2>
     <ul class="log">
+      <li><b>0.5.3</b><time datetime="2026-11-15">Nov 15, 2026</time>
+        <p>PCs and Raspberry Pis update from the Store, like the Xbox: XenithOS update downloads the new version's source, builds it on the machine, puts it in place and restarts into it. If the build fails, the current version stays. Machines installed before 0.5.3 need the install command once more first.</p></li>
       <li><b>0.5.2</b><time datetime="2026-11-15">Nov 15, 2026</time>
         <p>On PCs and Raspberry Pis, apps now run inside XenithOS's own window, so starting or leaving one never blanks the screen, the "Starting" screen stays up until the app is ready, and XenithOS's sound still works after you leave an app. Holding Guide for two seconds, or Ctrl+Alt+Backspace, closes an app that stops responding. Everywhere, a button still held when you switch (the A that starts an app, or BACK held to leave DOOM) no longer counts as a press in the next program, and quick key taps on a PC are no longer missed.</p></li>
       <li><b>0.5.1</b><time datetime="2026-11-15">Nov 15, 2026</time>
@@ -399,7 +402,7 @@ async function refresh() {
       board.appendChild(tr);
     });
 
-    const KIND = { app: "App", data: "Game data", system: "System update" };
+    const KIND = { app: "App", data: "Game data", system: "System update", pc: "Update for PCs" };
     const items = $("items");
     items.replaceChildren();
     rows(it).forEach(([id, kind, name, ver, size, sha]) => {

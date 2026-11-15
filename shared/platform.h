@@ -74,6 +74,13 @@ int  plat_kind(void);
  * PC: the app runs as its own process and this returns 1 once it quits, or 0 if it couldn't
  * start. Asking for XenithOS from inside an app just quits the app. */
 int  plat_launch(const char *path);
+
+/* PCs and Pis: build a downloaded XenithOS source (.tar.gz) and put it in place of the
+ * installed version, as the user (the Store's "XenithOS update"). step() is called many
+ * times a second with what's happening and the seconds so far, for the screen. Returns 1
+ * when the new version is in place (plat_launch(XENITH_SHELL_PATH) restarts into it), or 0
+ * with why[] set. Not used on the Xbox, where the update is xenon.elf itself. */
+int  plat_install_update(const char *tarball, void (*step)(const char *what, int seconds), char *why, int why_len);
 /* fn(done, total) is called as plat_launch reads the program (Xbox), for a progress bar.
  * NULL turns it off. */
 void plat_set_launch_progress(void (*fn)(int done, int total));

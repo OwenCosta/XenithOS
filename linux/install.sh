@@ -104,6 +104,9 @@ make -C "$SRC/linux" -j"$(nproc)"
 say "Installing"
 install -d /usr/lib/xenithos /usr/share/xenithos/apps "$STATE"
 install -m 755 "$SRC/linux/xenithos" "$SRC/linux/volt" "$SRC/linux/doom" "$SRC/linux/tube" /usr/lib/xenithos/
+# The programs belong to the XenithOS user, so the Store's "XenithOS update" can build a new
+# version and put it in place without sudo (linux/update.sh). They only ever run as that user.
+chown -R "$USER_NAME": /usr/lib/xenithos
 install -m 755 "$SRC/linux/xenithos-session" "$SRC/linux/xenithos-console" /usr/bin/
 install -m 644 "$SRC/linux/xenithos-console.desktop" "$SRC/linux/xenithos.desktop" /usr/share/applications/
 for app in volt doom tube; do
