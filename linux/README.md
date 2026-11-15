@@ -71,8 +71,9 @@ In the on-screen keyboard you can type on the real keyboard: letters type, Backs
 | `/usr/lib/xenithos/` | XenithOS and its apps |
 | `~/.local/share/xenithos/uda:/` | your settings, profile, game data and saves (same layout as the Xbox's USB stick) |
 | `~/.config/xenithos/` | the mode file and logs |
+| `~/.local/share/xenithos/hostmc/` | HostMC's Minecraft server, its world, Java and backups |
 
-XenithOS's own apps (VOLT, DOOM, Tube, Photos) come with it on PCs and Pis. The Store has three sections here
+XenithOS's own apps (VOLT, DOOM, Tube, Photos, and HostMC on PCs) come with it on PCs and Pis. The Store has three sections here
 (LB and RB switch between them): **Apps** from Flathub, **Steam**, and **XenithOS** (updates and game data).
 
 ## Apps from Flathub, and Steam
@@ -125,6 +126,37 @@ Minecraft won't start from Prism Launcher, its own log is in
 Apps get XenithOS's environment minus its own SDL settings, under both SDL names: where SDL2 is sdl2-compat
 on top of SDL3, `SDL_VIDEODRIVER=kmsdrm` is also copied to `SDL_VIDEO_DRIVER`, which sent SDL3 programs
 (Sober) to the bare console in 0.5.4 and made them stop with "no video subsystem".
+
+## HostMC: a Minecraft server
+
+HostMC (in Apps) runs a Minecraft: Java Edition server on the PC. Start it, and Minecraft on the same PC
+(Prism Launcher) joins at `localhost`, friends at home join at the PC's address on the network, which
+HostMC shows, and with playit.gg turned on in its Internet page, friends anywhere join at the address
+playit.gg gives it. Its pages: Server (start, stop, where to join, who's on), Console (the server's output,
+and commands), Players (operators, kicks, bans, the whitelist), Settings (`server.properties`: message,
+game mode, difficulty, max players, whitelist, seed, online mode, port, and the server's memory), Version
+(Minecraft or Paper, the latest release or an earlier one), World (backups, putting one back, a new world)
+and Internet (playit.gg).
+
+- The server keeps running after you leave HostMC, so you can go and play on it, and HostMC picks it up
+  again next time. It's started in a session of its own; `server/hostmc.pid` holds its PID and start time,
+  and HostMC checks the process is still that server, running in its folder, before it signals it.
+  Commands reach it through `server/console.in`, a named pipe that's its standard input.
+- Before the first start HostMC shows Minecraft's EULA (https://aka.ms/MinecraftEULA) and starts the server
+  only once you agree. It writes your answer into `eula.txt`.
+- The first start downloads the server from Mojang (or Paper from PaperMC) and the Java it needs:
+  Minecraft 26.x needs Java 25, 1.20.5 to 1.21.x need 21, and Debian 12 only packages 17. So HostMC
+  downloads Eclipse Temurin's runtime from Adoptium (about 60 MB) into its own folder, where nothing else
+  uses it. It says what it's about to download first, and checks each download against the checksum its
+  source publishes. Downloads go through `curl`, which the installer puts in.
+- playit.gg is off unless you turn it on. Then HostMC downloads playit's agent (playitd, about 9 MB) from
+  playit's releases on GitHub, checked against the SHA-256 GitHub publishes, and shows a link and a QR code
+  to approve it with your playit.gg account. The agent's key stays in `playit/playit.toml`, readable by you
+  only, and the agent runs while the server does. HostMC asks playit.gg for a Minecraft tunnel to the
+  server, and shows its address.
+- In `~/.local/share/xenithos/hostmc/`: `server/` (the server, its world, `server.properties` and
+  `console.log`), `java/`, `backups/` (the newest 20, as `.tar.gz`), `playit/` and `cache/` (version lists).
+  `HOSTMC_JAVA` points it at another `java` (the simulator uses a stand-in).
 
 ## Updates
 

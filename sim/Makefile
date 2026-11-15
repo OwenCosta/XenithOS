@@ -19,8 +19,9 @@ DOOMFLAGS := -O1 -g -std=gnu11 -w -fsanitize=address -fno-omit-frame-pointer -I.
 
 TUBE    := $(wildcard ../apps/tube/source/*.c) $(SHARED) platform_sim.c net_sim.c
 PHOTOS  := ../apps/photos/source/photos.c $(SHARED) platform_sim.c net_sim.c
+HOSTMC  := $(wildcard ../apps/hostmc/source/*.c) $(SHARED) platform_sim.c net_sim.c
 
-all: xsim xvolt xdoom xtube xphotos
+all: xsim xvolt xdoom xtube xphotos xhostmc
 
 # stb_image is checked for memory errors only (it does its own careful casting).
 xtube: $(TUBE) $(HDRS)
@@ -32,6 +33,11 @@ comma := ,
 xphotos: $(PHOTOS) $(HDRS)
 	$(CC) $(filter-out -fsanitize=address$(comma)undefined,$(CFLAGS)) -fsanitize=address $(PHOTOS) -o $@ $(LDLIBS)
 
+# HostMC runs real programs (the server, curl, tar), so a script for it runs in real time
+# (XSIM_THREAD=1); see sim/scripts/hostmc.txt.
+xhostmc: $(HOSTMC) $(HDRS) $(wildcard ../apps/hostmc/source/*.h)
+	$(CC) $(CFLAGS) -I../apps/hostmc/source $(HOSTMC) -o $@ $(LDLIBS)
+
 xsim: $(SRC) $(HDRS)
 	$(CC) $(CFLAGS) $(SRC) -o $@ $(LDLIBS)
 
@@ -42,4 +48,4 @@ xdoom: $(DOOM) $(HDRS)
 	$(CC) $(DOOMFLAGS) $(DOOM) -o $@ $(LDLIBS)
 
 clean:
-	rm -f xsim xvolt xdoom xtube xphotos
+	rm -f xsim xvolt xdoom xtube xphotos xhostmc

@@ -36,6 +36,10 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
   even the Xbox can play. Needs a XenithOS profile.
 - Photos: your pictures (JPEG, PNG, BMP, GIF) from a `photos` folder on the USB stick, or `~/Pictures` on a
   PC, as a grid of thumbnails. Full screen with zoom, turning and slideshows.
+- HostMC (PCs and Pis): a Minecraft: Java Edition server for you and your friends, Minecraft's own or Paper.
+  Start and stop it, see who's on, type commands, change its settings, back the world up, and with
+  [playit.gg](https://playit.gg) turned on, let friends join from anywhere. It keeps running after you leave
+  HostMC, so you can play on it. See [linux/README.md](linux/README.md#hostmc-a-minecraft-server).
 
 | DOOM control | |
 |---|---|
@@ -191,7 +195,7 @@ shared/avatar.c          the avatar renderer (server/web/static/avatar.js is the
 shared/startlog.c        start-up timing for System info
 shared/net_*.c           HTTP client: lwIP on the Xbox (linux/net_posix.c and sim/net_sim.c elsewhere)
 apps/volt, doom, tube,   the apps
-  photos
+  photos, hostmc         (hostmc is for PCs only: it has no Xbox Makefile)
 linux/apps_linux.c       apps from Flathub (Flatpak) and Steam's library, on PCs
 linux/kiosk.c            console mode's window manager: apps' windows over XenithOS on its own X server
 shared/picture.c         JPEG, PNG, BMP and GIF through stb_image
@@ -203,8 +207,9 @@ tools/                   font and thumbnail generators
 
 Copy `apps/volt`, rename the folder, and edit `source/`. Use `platform.h`, `gfx.h`, `ui.h` and `theme.h` so it
 looks and sounds like the rest of the system, and call `plat_launch(XENITH_SHELL_PATH)` to go back. `build.sh`
-picks up every folder in `apps/`; add `app.txt` (name, version) and `art/thumbs/<name>.ximg` for its tile, and
-a target in `linux/Makefile` for PCs.
+picks up every folder in `apps/` that has a Makefile; add `app.txt` (name, version) and `art/thumbs/<name>.ximg`
+for its tile, a target in `linux/Makefile` for PCs, and its name to the lists in `linux/install.sh` and
+`linux/update.sh`. An app for PCs only (like HostMC) leaves the Makefile out.
 
 ## License
 
@@ -222,7 +227,10 @@ XenithOS is licensed under the **GNU GPL v3.0**, see [LICENSE](LICENSE).
 - Apps from Flathub and Steam aren't part of XenithOS: Flatpak downloads them from Flathub on your machine,
   under their own licenses. Sober is a VinegarHQ project, not affiliated with Roblox.
 - Freedoom (served by the Store, not included here) is BSD licensed, see [freedoom.github.io](https://freedoom.github.io).
+- What HostMC downloads isn't part of XenithOS either: the Minecraft server (Mojang's, under Minecraft's EULA,
+  which you agree to in HostMC first), Paper, Eclipse Temurin and playit.gg's agent come from their makers to
+  your machine, under their own licenses.
 
-Not affiliated with or endorsed by Microsoft, Google, YouTube, id Software, Valve or Roblox. Xbox and Xbox 360
-are trademarks of Microsoft, YouTube of Google, DOOM of id Software, Steam of Valve, and Roblox of Roblox
-Corporation.
+Not affiliated with or endorsed by Microsoft, Mojang, Google, YouTube, id Software, Valve, Roblox or playit.gg.
+Xbox and Xbox 360 are trademarks of Microsoft, Minecraft of Mojang, YouTube of Google, DOOM of id Software,
+Steam of Valve, and Roblox of Roblox Corporation.

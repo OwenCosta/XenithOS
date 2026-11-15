@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+"""A stand-in for `java -Xmx... -jar server.jar nogui`, so HostMC can be tried in the simulator
+(sim/run.sh with XSIM_HOSTMC=1) with nothing downloaded and no Java.
+
+It says what a Minecraft server says, in the same log format: starting up, Done, two players
+joining (Steve, then Alex, who leaves after a while), a line of chat, and answers to the commands
+HostMC sends through its standard input (list, say, save-all, op, whitelist, stop and more).
+It keeps ops.json and whitelist.json like the server does, makes a small world folder, refuses
+to start without eula=true in eula.txt, and saves and stops on "stop" or SIGTERM.
+
+HOSTMC_FAKE_PLAYERS="Steve,Alex" changes who joins ("" for nobody).
+"""
+import json
+import os
+import signal
+import sys
+import threading
+import time
+
+lock = threading.Lock()
+stopping = threading.Event()
+online = []
+start = time.time()
+
+
+def log(level, msg, thread="Server thread"):
+    with lock:
+        print("[%s] [%s/%s]: %s" % (time.strftime("%H:%M:%S"), thread, level, msg), flush=True)
+
+
+def say(msg):
+    """What the server tells everyone: Minecraft 26 logs it as "System chat: ..."."""
+    log("INFO", "System chat: " + msg)
+
+
+def props():
+    out = {}
+    try:
+        with open("server.properties", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    out[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return out
+
+
+def names_file(path, change):
+    try:
+        with open(path, encoding="utf-8") as f:
+            entries = json.load(f)
+    except (OSError, ValueError):
+        entries = []
+    entries = change(entries)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(entries, f, indent=2)
+
+
+def entry(name):
+    return {"uuid": "00000000-0000-4000-8000-%012d" % (abs(hash(name)) % 10 ** 12), "name": name}
+
+
+def leave(name, why="Disconnected"):
+    if name in online:
+        online.remove(name)
+        log("INFO", "%s lost connection: %s" % (name, why))
+        say("%s left the game" % name)
+
+
+def command(cmd):
+    p = props()
+    words = cmd.split()
+    if not words:
+        return
+    verb, rest = words[0].lower(), words[1:]
+    if verb == "stop":
+        stopping.set()
+    elif verb == "list":
+        say("There are %d of a max of %s players online: %s" % (len(online), p.get("max-players", "20"), ", ".join(online)))
+    elif verb == "say":
+        log("INFO", "[Server] " + " ".join(rest))
+    elif verb == "save-all":
+        say("Saving the game (this may take a moment!)")
+        time.sleep(0.3)
+        say("Saved the game")
+    elif verb == "save-off":
+        say("Automatic saving is now disabled")
+    elif verb == "save-on":
+        say("Automatic saving is now enabled")
+    elif verb == "time" and rest[:2] == ["set", "day"]:
+        say("Set the time to 1000")
+    elif verb == "weather" and rest:
+        say("Set the weather to " + rest[0])
+    elif verb == "difficulty" and rest:
+        say("The difficulty has been set to " + rest[0].capitalize())
+    elif verb == "defaultgamemode" and rest:
+        say("The default game mode is now " + rest[0].capitalize() + " Mode")
+    elif verb in ("op", "deop") and rest:
+        name = rest[0]
+        names_file("ops.json", (lambda e: e + [dict(entry(name), level=4, bypassesPlayerLimit=False)]) if verb == "op"
+                   else (lambda e: [x for x in e if x["name"] != name]))
+        say(("Made %s a server operator" if verb == "op" else "Made %s no longer a server operator") % name)
+    elif verb == "whitelist" and rest:
+        if rest[0] in ("on", "off"):
+            say("Whitelist is now turned " + rest[0])
+        elif rest[0] == "reload":
+            say("Reloaded the whitelist")
+        elif rest[0] in ("add", "remove") and len(rest) > 1:
+            name = rest[1]
+            names_file("whitelist.json", (lambda e: e + [entry(name)]) if rest[0] == "add"
+                       else (lambda e: [x for x in e if x["name"] != name]))
+            say(("Added %s to the whitelist" if rest[0] == "add" else "Removed %s from the whitelist") % name)
+    elif verb in ("kick", "ban") and rest:
+        name = rest[0]
+        if verb == "ban":
+            say("Banned %s: Banned by an operator." % name)
+        else:
+            say("Kicked %s: Kicked by an operator" % name)
+        leave(name, "Kicked by an operator")
+    else:
+        log("INFO", "Unknown or incomplete command, see below for error")
+        log("INFO", cmd + "<--[HERE]")
+
+
+def console():
+    for line in sys.stdin:
+        line = line.strip()
+        if line:
+            command(line)
+    # HostMC keeps the pipe open for writing too, so this only ends if it's gone.
+
+
+def main():
+    signal.signal(signal.SIGTERM, lambda *_: stopping.set())
+    log("INFO", "Environment: Environment[sessionHost=https://sessionserver.mojang.com, name=PROD]", "ServerMain")
+    try:
+        with open("eula.txt", encoding="utf-8") as f:
+            agreed = "eula=true" in f.read()
+    except OSError:
+        agreed = False
+    if not agreed:
+        log("INFO", "You need to agree to the EULA in order to run the server. Go to eula.txt for more info.", "ServerMain")
+        return 0
+    p = props()
+    port = p.get("server-port", "25565")
+    time.sleep(0.6)
+    log("INFO", "Starting minecraft server version 26.3")
+    log("INFO", "Loading properties")
+    log("INFO", "Default game type: " + p.get("gamemode", "survival").upper())
+    log("INFO", "Generating keypair")
+    log("INFO", "Starting Minecraft server on *:" + port)
+    log("INFO", "Using epoll channel type", "Server thread")
+    level = p.get("level-name", "world") or "world"
+    os.makedirs(os.path.join(level, "region"), exist_ok=True)
+    for name, size in (("level.dat", 1500), (os.path.join("region", "r.0.0.mca"), 24576)):
+        path = os.path.join(level, name)
+        if not os.path.exists(path):
+            with open(path, "wb") as f:
+                f.write(os.urandom(size))
+    log("INFO", 'Preparing level "%s"' % level)
+    for pct in (0, 34, 71, 100):
+        time.sleep(0.4)
+        log("INFO", "Preparing spawn area: %d%%" % pct, "Worker-Main-1")
+    log("INFO", 'Done (%.3fs)! For help, type "help"' % (time.time() - start))
+    threading.Thread(target=console, daemon=True).start()
+
+    players = [n for n in os.environ.get("HOSTMC_FAKE_PLAYERS", "Steve,Alex").split(",") if n]
+    plan = []
+    for i, name in enumerate(players):
+        plan.append((3.0 + 3.0 * i, "join", name))
+    if players:
+        plan.append((9.0, "chat", players[0]))
+    if len(players) > 1:
+        plan.append((60.0, "leave", players[1]))
+    plan.sort()
+    ready = time.time()
+    while not stopping.is_set():
+        t = time.time() - ready
+        while plan and plan[0][0] <= t:
+            _, what, name = plan.pop(0)
+            if what == "join":
+                log("INFO", "UUID of player %s is %s" % (name, entry(name)["uuid"]), "User Authenticator #1")
+                log("INFO", "%s[/192.168.1.24:5%04d] logged in with entity id %d at (8.5, 70.0, -3.5)" % (name, len(online), 112 + len(online)))
+                online.append(name)
+                say("%s joined the game" % name)
+            elif what == "chat":
+                log("INFO", "<%s> hi! the server works" % name)
+            elif what == "leave":
+                leave(name)
+        stopping.wait(0.1)
+
+    say("Stopping the server")
+    log("INFO", "Stopping server")
+    log("INFO", "Saving players")
+    for name in list(online):
+        leave(name, "Server closed")
+    log("INFO", "Saving worlds")
+    time.sleep(0.4)
+    log("INFO", "Saving chunks for level 'ServerLevel[%s]'/minecraft:overworld" % level)
+    log("INFO", "ThreadedAnvilChunkStorage (%s): All chunks are saved" % level)
+    log("INFO", "ThreadedAnvilChunkStorage: All dimensions are saved")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

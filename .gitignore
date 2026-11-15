@@ -13,8 +13,10 @@ sim/out/
 sim/xdoom
 sim/xtube
 sim/xphotos
+sim/xhostmc
 linux/xenithos
 linux/volt
 linux/doom
 linux/tube
 linux/photos
+linux/hostmc

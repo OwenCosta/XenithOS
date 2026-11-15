@@ -35,6 +35,11 @@ More switches:
   (`|` is Enter).
 - `XSIM_BIN=xdoom XSIM_WAD=path/to/freedoom1.wad` runs DOOM (`sim/scripts/doom.txt`), and `XSIM_BIN=xtube`
   runs Tube against a XenithOS Cloud with yt-dlp and ffmpeg (`sim/scripts/tube.txt`, use `XSIM_THREAD=1`).
+- `XSIM_BIN=xhostmc XSIM_KIND=pc XSIM_THREAD=1 XSIM_HOSTMC=1` runs HostMC with a stand-in for the Minecraft
+  server (`sim/hostmc/java`, which talks like one: starting up, players joining, answers to commands) and
+  what it would have downloaded already in `hostmc/` (`sim/hostmc/data`), so nothing is downloaded
+  (`sim/scripts/hostmc.txt`). It runs in real time, since the stand-in does. Without `XSIM_HOSTMC`, HostMC
+  downloads Java and a real server and runs it. A server a script leaves running is stopped afterwards.
 
 ## Scripts
 

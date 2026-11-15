@@ -113,13 +113,14 @@ make -C "$SRC/linux" -j"$(nproc)"
 
 say "Installing"
 install -d /usr/lib/xenithos /usr/share/xenithos/apps "$STATE"
-install -m 755 "$SRC/linux/xenithos" "$SRC/linux/volt" "$SRC/linux/doom" "$SRC/linux/tube" "$SRC/linux/photos" /usr/lib/xenithos/
+install -m 755 "$SRC/linux/xenithos" "$SRC/linux/volt" "$SRC/linux/doom" "$SRC/linux/tube" "$SRC/linux/photos" \
+    "$SRC/linux/hostmc" /usr/lib/xenithos/
 # The programs belong to the XenithOS user, so the Store's "XenithOS update" can build a new
 # version and put it in place without sudo (linux/update.sh). They only ever run as that user.
 chown -R "$USER_NAME": /usr/lib/xenithos
 install -m 755 "$SRC/linux/xenithos-session" "$SRC/linux/xenithos-console" /usr/bin/
 install -m 644 "$SRC/linux/xenithos-console.desktop" "$SRC/linux/xenithos.desktop" /usr/share/applications/
-for app in volt doom tube photos; do
+for app in volt doom tube photos hostmc; do
     if [ -f "$SRC/art/thumbs/$app.ximg" ]; then install -m 644 "$SRC/art/thumbs/$app.ximg" /usr/share/xenithos/apps/; fi
     if [ -f "$SRC/apps/$app/app.txt" ]; then install -m 644 "$SRC/apps/$app/app.txt" "/usr/share/xenithos/apps/$app.txt"; fi
 done
@@ -129,7 +130,7 @@ fi
 
 say "Setting up $USER_NAME"
 sudo -u "$USER_NAME" mkdir -p "$DATA/uda:/apps" "$DATA/uda:/xenith" "$HOME_DIR/.config/xenithos"
-for app in volt doom tube photos; do
+for app in volt doom tube photos hostmc; do
     sudo -u "$USER_NAME" ln -sfn "/usr/lib/xenithos/$app" "$DATA/uda:/apps/$app.elf32"
     for ext in ximg txt; do
         if [ -f "/usr/share/xenithos/apps/$app.$ext" ]; then

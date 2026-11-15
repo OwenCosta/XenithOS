@@ -1,0 +1,78 @@
+# HostMC with a stand-in server (sim/hostmc/java): the EULA, starting, players joining, a
+# command, the pages, a backup while it runs, and stopping. Nothing is downloaded. It runs in
+# real time, since the stand-in does:
+#   XSIM_BIN=xhostmc XSIM_KIND=pc XSIM_THREAD=1 XSIM_HOSTMC=1 XSIM_TYPE="say Hello from HostMC|" \
+#     sim/run.sh sim/scripts/hostmc.txt hostmc
+wait 60
+shot server_stopped
+press a
+wait 10
+shot server_page
+# Start: the EULA comes first
+press a
+wait 40
+shot eula
+press a
+wait 40
+shot starting
+wait 420
+shot running
+# Console: a command typed (XSIM_TYPE)
+press b
+press down
+wait 20
+shot console
+press a
+press a
+wait 90
+shot console_command
+press b
+# Players
+press down
+wait 30
+shot players
+# Settings: difficulty to Normal
+press down
+wait 10
+press a
+press down
+press down
+press right
+wait 20
+shot settings
+press b
+# Version
+press down
+wait 10
+press a
+wait 40
+shot version
+press b
+# World: a backup while it runs
+press down
+wait 10
+press a
+press a
+wait 240
+shot world
+press b
+# Internet (off)
+press down
+wait 30
+shot internet
+# Back to Server and stop it
+press up
+press up
+press up
+press up
+press up
+press up
+wait 10
+press a
+press a
+wait 240
+shot stopped
+press b
+press b
+wait 40
+quit

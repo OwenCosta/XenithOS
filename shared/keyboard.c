@@ -42,9 +42,12 @@ static void layout(int mode)
         add(3, 2, 1, K_DONE, "Done");
         nrows = 4;
     } else {
-        static const char *const rows[] = {"1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm"};
-        int r, i;
-        for (r = 0; r < 4; r++) {
+        static const char *const text_rows[] = {"1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm"};
+        /* KB_LINE: the symbols Minecraft's names, commands and chat use most. */
+        static const char *const line_rows[] = {"1234567890", "qwertyuiop", "asdfghjkl_", "zxcvbnm-.,", ":@~!?'#=[]"};
+        const char *const *rows = mode == KB_LINE ? line_rows : text_rows;
+        int r, i, nr = mode == KB_LINE ? 5 : 4;
+        for (r = 0; r < nr; r++) {
             int n = (int)strlen(rows[r]);
             float off = (10 - n) / 2.0f;
             for (i = 0; i < n; i++) {
@@ -52,11 +55,11 @@ static void layout(int mode)
                 add(r, off + i, 1, rows[r][i], l);
             }
         }
-        add(4, 0, 2, K_SHIFT, "Shift");
-        add(4, 2, 4, K_SPACE, "Space");
-        add(4, 6, 2, K_DEL, "Delete");
-        add(4, 8, 2, K_DONE, "Done");
-        nrows = 5;
+        add(nr, 0, 2, K_SHIFT, "Shift");
+        add(nr, 2, 4, K_SPACE, "Space");
+        add(nr, 6, 2, K_DEL, "Delete");
+        add(nr, 8, 2, K_DONE, "Done");
+        nrows = nr + 1;
     }
 }
 
@@ -77,11 +80,11 @@ static int find_near(int row, float cx)
 int keyboard(const char *title, const char *hint, char *buf, int maxlen, int mode)
 {
     int sel = 0, shift = 1, i;
-    float unit = mode == KB_PIN ? 104.0f : 70.0f, kh = mode == KB_PIN ? 72.0f : 58.0f, gap = 10;
+    float unit = mode == KB_PIN ? 104.0f : 70.0f, kh = mode == KB_PIN ? 72.0f : mode == KB_LINE ? 50.0f : 58.0f, gap = 10;
     float hx = 0, hy = 0;
 
     layout(mode);
-    if (mode == KB_TEXT && buf[0]) shift = 0;
+    if ((mode == KB_TEXT && buf[0]) || mode == KB_LINE) shift = 0;
     ui_fade_in();
     plat_text_input(1);
 
@@ -101,7 +104,8 @@ int keyboard(const char *title, const char *hint, char *buf, int maxlen, int mod
             len = (int)strlen(buf);
             if (c == '\n') { sfx(SFX_SELECT); plat_text_input(0); return 1; }
             if (c == '\b') { if (len) buf[len - 1] = 0; sfx(SFX_KEY); continue; }
-            if (mode == KB_PIN ? !isdigit((unsigned char)c) : !(isalnum((unsigned char)c) || c == ' ')) continue;
+            if (mode == KB_PIN ? !isdigit((unsigned char)c)
+                : mode == KB_LINE ? (c < ' ' || c > '~') : !(isalnum((unsigned char)c) || c == ' ')) continue;
             if (c == ' ' && (!len || buf[len - 1] == ' ')) continue;
             if (len < maxlen) { buf[len] = c; buf[len + 1] = 0; sfx(SFX_KEY); }
             else sfx(SFX_ERROR);
@@ -133,7 +137,7 @@ int keyboard(const char *title, const char *hint, char *buf, int maxlen, int mod
                 char c = (char)k->code;
                 buf[len] = shift ? (char)toupper((unsigned char)c) : c;
                 buf[len + 1] = 0;
-                if (shift && mode == KB_TEXT) shift = 0;
+                if (shift && mode != KB_PIN) shift = 0;
                 sfx(SFX_KEY);
             } else {
                 sfx(SFX_ERROR);
@@ -142,14 +146,14 @@ int keyboard(const char *title, const char *hint, char *buf, int maxlen, int mod
             if (!len && PRESSED(b)) { sfx(SFX_BACK); plat_text_input(0); return 0; }
             if (len) buf[len - 1] = 0;
             sfx(SFX_KEY);
-        } else if (PRESSED(y) && mode == KB_TEXT) {
+        } else if (PRESSED(y) && mode != KB_PIN) {
             if (len && len < maxlen && buf[len - 1] != ' ') { buf[len] = ' '; buf[len + 1] = 0; }
             sfx(SFX_KEY);
         } else if (PRESSED(start)) {
             sfx(SFX_SELECT);
             plat_text_input(0);
             return 1;
-        } else if (PRESSED(lb) && mode == KB_TEXT) {
+        } else if (PRESSED(lb) && mode != KB_PIN) {
             shift = !shift;
             sfx(SFX_KEY);
         }
@@ -159,7 +163,7 @@ int keyboard(const char *title, const char *hint, char *buf, int maxlen, int mod
         ui_header(title, hint);
         {
             int fw = mode == KB_PIN ? 360 : 640, fx = (SCR_W - fw) / 2, tx = fx + 22;
-            char shown[64];
+            char shown[256];
             gfx_fill_rrect((float)fx, (float)fy, (float)fw, 68, 14, C_SURFACE, 255);
             gfx_stroke_rrect((float)fx, (float)fy, (float)fw, 68, 14, 2, C_ACCENT, 255);
             if (mode == KB_PIN) {
@@ -167,7 +171,10 @@ int keyboard(const char *title, const char *hint, char *buf, int maxlen, int mod
                 for (i = 0; i < n; i++) gfx_circle(tx + 14.0f + i * 34, fy + 34.0f, 8, C_TEXT, 255);
                 tx += n * 34;
             } else {
-                snprintf(shown, sizeof shown, "%s", buf);
+                /* Longer than the field (a command): its end, where the typing is. */
+                const char *from = buf;
+                while (*from && gfx_str_w(FONT_LABEL, from) > fw - 60) from++;
+                snprintf(shown, sizeof shown, "%s", from);
                 tx += gfx_str_vc(FONT_LABEL, tx, fy + 34, C_TEXT, shown);
                 if (!buf[0]) gfx_str_vc(FONT_LABEL, fx + 22, fy + 34, C_DIM, "Type here");
             }

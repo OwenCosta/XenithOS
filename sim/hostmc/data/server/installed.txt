@@ -1,0 +1,4 @@
+type=vanilla
+version=26.3
+build=
+java=25

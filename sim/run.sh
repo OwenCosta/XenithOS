@@ -54,6 +54,14 @@ if [ -n "$XSIM_WAD" ]; then
     # shellcheck disable=SC2086
     for w in $XSIM_WAD; do cp "$w" "$work/uda:/doom/"; done
 fi
+# XSIM_HOSTMC=1: HostMC with a stand-in for the Minecraft server (sim/hostmc/java) and what it
+# would have downloaded already in place (sim/hostmc/data), so nothing is downloaded
+if [ -n "$XSIM_HOSTMC" ]; then
+    mkdir -p "$work/hostmc"
+    cp -r "$here/hostmc/data/." "$work/hostmc/"
+    echo "stand-in" > "$work/hostmc/server/server.jar"
+    export HOSTMC_JAVA="$here/hostmc/java"
+fi
 
 bin="${XSIM_BIN:-xsim}"
 make -s -C "$here" "$bin"
@@ -61,8 +69,21 @@ cd "$work"
 # XSIM_ARGS: arguments for the program, e.g. "xenithos-handoff from=volt" to start XenithOS as
 # if coming back from an app (shared/handoff.h). It comes from the environment.
 # shellcheck disable=SC2086,SC2153
-XSIM_SCRIPT="$script" XSIM_OUT="$work/out" ASAN_OPTIONS=detect_leaks=0 "$here/$bin" $XSIM_ARGS
+status=0
+XSIM_SCRIPT="$script" XSIM_OUT="$work/out" ASAN_OPTIONS=detect_leaks=0 "$here/$bin" $XSIM_ARGS || status=$?
+
+# A server HostMC left running (a script that didn't stop it): stopped, once its PID is
+# checked to be the process running in that server folder.
+pidfile="$work/hostmc/server/hostmc.pid"
+if [ -f "$pidfile" ]; then
+    pid=$(grep '^pid=' "$pidfile" | cut -d= -f2)
+    if [ -n "$pid" ] && [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "$(realpath "$work/hostmc/server")" ]; then
+        echo "stopping the server HostMC left running (pid $pid)"
+        kill "$pid" || true
+    fi
+fi
 
 mkdir -p "$here/out/$name"
 cp "$work"/out/* "$here/out/$name/"
 echo "results in sim/out/$name"
+exit "$status"

@@ -27,6 +27,8 @@ fi
 
 for app in apps/*/; do
     name=$(basename "$app")
+    # Apps without a Makefile are for PCs only (HostMC runs a Minecraft server): linux/Makefile builds them.
+    [ -f "$app/Makefile" ] || continue
     echo "== $name"
     make --no-print-directory -C "$app"
     cp "$app/$name.elf32" "usb/apps/$name.elf32"

@@ -22,14 +22,19 @@ DOOM_CFLAGS := $(OPT) -std=gnu11 -w -I../apps/doom/doomgeneric -I../shared $(SDL
 
 TUBE_SRC    := $(wildcard ../apps/tube/source/*.c) $(SHARED) $(PLATFORM)
 PHOTOS_SRC  := ../apps/photos/source/photos.c $(SHARED) $(PLATFORM)
+HOSTMC_SRC  := $(wildcard ../apps/hostmc/source/*.c) $(SHARED) $(PLATFORM)
 
-all: xenithos volt doom tube photos
+all: xenithos volt doom tube photos hostmc
 
 tube: $(TUBE_SRC) $(HEADERS)
 	$(CC) $(CFLAGS_ALL) -I../apps/tube/source $(TUBE_SRC) -o $@ $(LIBS)
 
 photos: $(PHOTOS_SRC) $(HEADERS)
 	$(CC) $(CFLAGS_ALL) $(PHOTOS_SRC) -o $@ $(LIBS)
+
+# HostMC is for PCs only (a Minecraft server), so it has no Xbox build.
+hostmc: $(HOSTMC_SRC) $(HEADERS) $(wildcard ../apps/hostmc/source/*.h)
+	$(CC) $(CFLAGS_ALL) -I../apps/hostmc/source $(HOSTMC_SRC) -o $@ $(LIBS)
 
 xenithos: $(SHELL_SRC) $(HEADERS)
 	$(CC) $(CFLAGS_ALL) $(SHELL_SRC) -o $@ $(LIBS)
@@ -41,6 +46,6 @@ doom: $(DOOM_SRC) $(HEADERS)
 	$(CC) $(DOOM_CFLAGS) $(DOOM_SRC) -o $@ $(LIBS)
 
 clean:
-	rm -f xenithos volt doom tube photos
+	rm -f xenithos volt doom tube photos hostmc
 
 .PHONY: all clean

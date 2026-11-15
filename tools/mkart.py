@@ -2,6 +2,7 @@
 """Draw XenithOS Store thumbnails (flat style) and write them as PNG and XIMG.
 
     python3 tools/mkart.py            -> art/thumbs/<id>.png and art/thumbs/<id>.ximg
+    python3 tools/mkart.py hostmc     -> only the ones named
 
 Besides XenithOS's own apps, it draws a card for every app in server/flathub.example.json and
 every game in server/steam.example.json: the name on a flat colour, and what it is under it.
@@ -12,6 +13,7 @@ XIMG is the console's thumbnail format; see shared/img.h.
 import json
 import os
 import struct
+import sys
 import zlib
 
 from PIL import Image, ImageDraw, ImageFont
@@ -154,6 +156,14 @@ def photos():
     return img
 
 
+def hostmc():
+    img = Image.new("RGB", (W, H), BG_DARK)
+    d = ImageDraw.Draw(img)
+    d.text((22, 34), "HostMC", font=font("Black", 64), fill=TEXT)
+    d.text((26, 128), "Your Minecraft server", font=font("Medium", 20), fill=SUB)
+    return img
+
+
 def xenith():
     img = Image.new("RGB", (W, H), BG_DARK)
     d = ImageDraw.Draw(img)
@@ -229,20 +239,25 @@ def catalog_art():
 
 
 def main():
+    only = set(sys.argv[1:])
     os.makedirs(OUT, exist_ok=True)
     art = {
         "volt": volt(),
         "doom": doom(),
         "tube": tube(),
         "photos": photos(),
+        "hostmc": hostmc(),
         "freedoom1": freedoom(1, (19, 32, 26), (143, 181, 154)),
         "freedoom2": freedoom(2, (35, 20, 20), (214, 160, 143)),
         "xenith": xenith(),
         "xenithos-pc": xenith(),
     }
     art.update(catalog_art())
-    logo_files()
+    if not only:
+        logo_files()
     for name, img in art.items():
+        if only and name not in only:
+            continue
         img.save(os.path.join(OUT, f"{name}.png"))
         write_ximg(img, os.path.join(OUT, f"{name}.ximg"))
         print(f"{name}: {os.path.getsize(os.path.join(OUT, name + '.ximg'))} bytes")
