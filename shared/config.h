@@ -6,10 +6,14 @@
  *   xenith/config.txt    written by you or build.sh: server address, console key
  *   xenith/settings.txt  written by XenithOS: volume, sounds, inbox position
  *   xenith/profile.txt   written by XenithOS: the signed-in account
+ *   xenith/route.txt     written by XenithOS: XenithOS Cloud's address on this network, when
+ *                        the console is on the network it runs on (cloud_route_check)
  */
 
 struct xenith_config {
-    char server[32];          /* "a.b.c.d:port" */
+    char server[32];          /* "a.b.c.d:port": where requests go (server_main, or the route) */
+    char server_main[32];     /* the address in config.txt */
+    char route_id[24];        /* XenithOS Cloud's id, while server is its home-network address */
     char name[16];            /* legacy leaderboard name, used when nobody is signed in */
     char key[72];             /* console key for reading the inbox */
     int loaded;
@@ -36,7 +40,9 @@ extern struct xenith_config cfg;
 extern struct xenith_settings st;
 extern struct xenith_profile prof;
 
-void config_load(void);       /* needs storage */
+void config_load(void);       /* needs storage; takes the route in route.txt when it's for this server */
+void route_save(const char *lan, const char *id);   /* use lan from now on, and remember it */
+void route_forget(void);                             /* back to server_main */
 void settings_load(void);
 void settings_save(void);
 void profile_load(void);
@@ -47,5 +53,6 @@ void profile_clear(void);
 #define XENITH_CONFIG_PATH   "uda:/xenith/config.txt"
 #define XENITH_SETTINGS_PATH "uda:/xenith/settings.txt"
 #define XENITH_PROFILE_PATH  "uda:/xenith/profile.txt"
+#define XENITH_ROUTE_PATH    "uda:/xenith/route.txt"
 
 #endif

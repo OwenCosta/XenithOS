@@ -1,0 +1,19 @@
+# The home-network route. Started against XenithOS Cloud's public address, XenithOS asks for its
+# address on its own network (/v1/lan), checks it answers there as the same server, and uses it
+# from then on (route.txt). Then the Store, in one request, and Settings says "Connected at home".
+#   XSIM_KIND=pc sim/run.sh sim/scripts/store_route.txt store_route <public a.b.c.d:port>
+wait 200
+shot route_home
+press right
+press a
+wait 60
+shot route_store
+press b
+wait 30
+press right
+press right
+press right
+press a
+wait 40
+shot route_settings
+quit

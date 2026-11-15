@@ -212,84 +212,16 @@ static void build_view(void)
         }
 }
 
-/* Apps from Flathub: id|name|flathub id|processors|download MB|shared MB|arguments|description */
-static void load_flathub(void)
+/* XenithOS's own: id|kind|name|version|size|sha256|file|description */
+static void add_store_rows(char *body)
 {
-    struct http_resp r;
     char *line;
-    if (cloud_get("/v1/store/flathub", 64 * 1024, &r) == 200) {
-        for (line = r.body; line && *line && nitems < MAX_ITEMS; ) {
-            char *next = strchr(line, '\n'), *f[8];
-            if (next) *next++ = 0;
-            if (split_fields(line, f, 8) == 8) {
-                struct item *it = &items[nitems];
-                memset(it, 0, sizeof *it);
-                snprintf(it->id, sizeof it->id, "%s", f[0]);
-                snprintf(it->kind, sizeof it->kind, "flathub");
-                snprintf(it->name, sizeof it->name, "%s", f[1]);
-                snprintf(it->ref, sizeof it->ref, "%s", f[2]);
-                snprintf(it->arches, sizeof it->arches, "%s", f[3]);
-                it->mb = atoi(f[4]);
-                it->shared_mb = atoi(f[5]);
-                snprintf(it->args, sizeof it->args, "%s", f[6]);
-                snprintf(it->desc, sizeof it->desc, "%s", f[7]);
-                it->unavailable = !arch_fits(it->arches);
-                /* Steam is only worth listing where it runs. */
-                if (it->ref[0] && item_dest(it) && !(is_steam_app(it) && it->unavailable)) nitems++;
-            }
-            line = next;
-        }
-    }
-    http_free(&r);
-}
-
-/* Games on Steam: id|name|Steam app id|1 if free to play|description */
-static void load_steam(void)
-{
-    struct http_resp r;
-    char *line;
-    if (cloud_get("/v1/store/steam", 64 * 1024, &r) == 200) {
-        for (line = r.body; line && *line && nitems < MAX_ITEMS; ) {
-            char *next = strchr(line, '\n'), *f[5];
-            if (next) *next++ = 0;
-            if (split_fields(line, f, 5) == 5) {
-                struct item *it = &items[nitems];
-                memset(it, 0, sizeof *it);
-                snprintf(it->id, sizeof it->id, "%s", f[0]);
-                snprintf(it->kind, sizeof it->kind, "steam");
-                snprintf(it->name, sizeof it->name, "%s", f[1]);
-                it->appid = atoi(f[2]);
-                it->free_game = atoi(f[3]) == 1;
-                snprintf(it->desc, sizeof it->desc, "%s", f[4]);
-                if (item_dest(it)) nitems++;
-            }
-            line = next;
-        }
-    }
-    http_free(&r);
-}
-
-static int load_store(void)
-{
-    struct http_resp r;
-    char *line, path[96];
-    int code, i;
-
-    free_items();
-    ui_busy_begin("Opening the Store", NULL);
-    code = cloud_get("/v1/store", 64 * 1024, &r);
-    if (code != 200) {
-        ui_busy_end();
-        sfx(SFX_ERROR);
-        ui_message("The Store didn't load", cloud_error_text(&r, code));
-        http_free(&r);
-        return 0;
-    }
-    for (line = r.body; line && *line && nitems < MAX_ITEMS; ) {
+    for (line = body; line && *line && nitems < MAX_ITEMS; ) {
         char *next = strchr(line, '\n'), *f[8];
         if (next) *next++ = 0;
         if (split_fields(line, f, 8) == 8) {
             struct item *it = &items[nitems];
+            int fits;
             memset(it, 0, sizeof *it);
             snprintf(it->id, sizeof it->id, "%s", f[0]);
             snprintf(it->kind, sizeof it->kind, "%s", f[1]);
@@ -301,50 +233,196 @@ static int load_store(void)
             snprintf(it->desc, sizeof it->desc, "%s", f[7]);
             /* The Store's apps and "system" updates are Xbox programs. On a PC or Pi the apps
              * come with XenithOS itself, so it offers game data and the "pc" update there. */
-            int fits = plat_kind() == PLAT_XBOX ? strcmp(it->kind, "pc") != 0
-                                                : !strcmp(it->kind, "data") || !strcmp(it->kind, "pc");
+            fits = plat_kind() == PLAT_XBOX ? strcmp(it->kind, "pc") != 0
+                                            : !strcmp(it->kind, "data") || !strcmp(it->kind, "pc");
             if (fits && it->size > 0 && strlen(it->sha) == 64 && item_dest(it)) nitems++;
         }
         line = next;
     }
-    http_free(&r);
+}
 
-    /* Game data that comes with an app (Freedoom with DOOM) is installed along with it, so
-     * it isn't listed by itself. On a PC the apps aren't listed, and the data stays. */
-    if (cloud_get("/v1/store/needs", 8 * 1024, &r) == 200) {
-        for (line = r.body; line && *line; ) {
-            char *next = strchr(line, '\n'), *f[2];
-            if (next) *next++ = 0;
-            if (split_fields(line, f, 2) == 2) link_needs(f[0], f[1]);
-            line = next;
-        }
+/* Game data that comes with an app (Freedoom with DOOM) is installed along with it, so it
+ * isn't listed by itself. On a PC the apps aren't listed, and the data stays.
+ * id|data_id,data_id */
+static void add_needs(char *body)
+{
+    char *line;
+    for (line = body; line && *line; ) {
+        char *next = strchr(line, '\n'), *f[2];
+        if (next) *next++ = 0;
+        if (split_fields(line, f, 2) == 2) link_needs(f[0], f[1]);
+        line = next;
     }
-    http_free(&r);
+}
 
-    /* PCs: apps from Flathub, and games on Steam where Steam runs. */
-    has_tabs = plat_kind() == PLAT_PC;
-    if (has_tabs) {
-        load_flathub();
-        if (!strcmp(plat_arch(), "x86_64")) {
+/* Apps from Flathub: id|name|flathub id|processors|download MB|shared MB|arguments|description */
+static void add_flathub(char *body)
+{
+    char *line;
+    for (line = body; line && *line && nitems < MAX_ITEMS; ) {
+        char *next = strchr(line, '\n'), *f[8];
+        if (next) *next++ = 0;
+        if (split_fields(line, f, 8) == 8) {
+            struct item *it = &items[nitems];
+            memset(it, 0, sizeof *it);
+            snprintf(it->id, sizeof it->id, "%s", f[0]);
+            snprintf(it->kind, sizeof it->kind, "flathub");
+            snprintf(it->name, sizeof it->name, "%s", f[1]);
+            snprintf(it->ref, sizeof it->ref, "%s", f[2]);
+            snprintf(it->arches, sizeof it->arches, "%s", f[3]);
+            it->mb = atoi(f[4]);
+            it->shared_mb = atoi(f[5]);
+            snprintf(it->args, sizeof it->args, "%s", f[6]);
+            snprintf(it->desc, sizeof it->desc, "%s", f[7]);
+            it->unavailable = !arch_fits(it->arches);
+            /* Steam is only worth listing where it runs. */
+            if (it->ref[0] && item_dest(it) && !(is_steam_app(it) && it->unavailable)) nitems++;
+        }
+        line = next;
+    }
+}
+
+/* Games on Steam: id|name|Steam app id|1 if free to play|description */
+static void add_steam(char *body)
+{
+    char *line;
+    for (line = body; line && *line && nitems < MAX_ITEMS; ) {
+        char *next = strchr(line, '\n'), *f[5];
+        if (next) *next++ = 0;
+        if (split_fields(line, f, 5) == 5) {
+            struct item *it = &items[nitems];
+            memset(it, 0, sizeof *it);
+            snprintf(it->id, sizeof it->id, "%s", f[0]);
+            snprintf(it->kind, sizeof it->kind, "steam");
+            snprintf(it->name, sizeof it->name, "%s", f[1]);
+            it->appid = atoi(f[2]);
+            it->free_game = atoi(f[3]) == 1;
+            snprintf(it->desc, sizeof it->desc, "%s", f[4]);
+            if (item_dest(it)) nitems++;
+        }
+        line = next;
+    }
+}
+
+static void set_icon(struct item *it, const char *data, int len)
+{
+    if (it->icon_raw || len <= 0 || !img_load_mem(&it->icon, data, len)) return;
+    it->icon_raw = malloc(len);
+    if (it->icon_raw) {
+        memcpy(it->icon_raw, data, len);
+        it->icon_len = len;
+    }
+}
+
+/* /v1/store/all: the lists and every thumbnail in one reply. Asking for each on its own cost a
+ * trip through the relay apiece (most of a second), 47 of them for a PC's Store. "XSTORE 1",
+ * then sections of "<name> <length>\n" and that many bytes, "end 0" last (store_bundle in
+ * xenith_cloud.py). Returns 0, having added nothing, when the reply isn't one. */
+#define MAX_ICONS (MAX_ITEMS * 2)
+static int load_bundle(char *b, int n)
+{
+    static const char *const names[4] = {"store", "needs", "flathub", "steam"};
+    struct { char *id, *data; int len; } icon[MAX_ICONS];
+    char *p = b + 9, *end = b + n, *text[4] = {NULL, NULL, NULL, NULL};
+    int nicon = 0, ended = 0, i, j;
+
+    if (!b || n < 9 || memcmp(b, "XSTORE 1\n", 9)) return 0;
+    while (p < end) {
+        char *nl = memchr(p, '\n', end - p), *sp;
+        long len;
+        if (!nl) break;
+        *nl = 0;
+        if (!(sp = strrchr(p, ' '))) break;
+        *sp = 0;
+        len = strtol(sp + 1, NULL, 10);
+        if (len < 0 || len > end - (nl + 1)) break;
+        if (!strcmp(p, "end")) { ended = 1; break; }
+        for (i = 0; i < 4; i++)
+            if (!strcmp(p, names[i]) && !text[i] && (text[i] = malloc(len + 1)) != NULL) {
+                memcpy(text[i], nl + 1, len);
+                text[i][len] = 0;
+            }
+        if (!strncmp(p, "icon:", 5) && nicon < MAX_ICONS) {
+            icon[nicon].id = p + 5;
+            icon[nicon].data = nl + 1;
+            icon[nicon].len = (int)len;
+            nicon++;
+        }
+        p = nl + 1 + len;
+    }
+    ended = ended && text[0];
+    if (ended) {
+        add_store_rows(text[0]);
+        if (text[1]) add_needs(text[1]);
+        if (has_tabs && text[2]) add_flathub(text[2]);
+        if (has_tabs && text[3] && !strcmp(plat_arch(), "x86_64")) {
             plat_sync_apps();                         /* which Steam games are installed */
-            load_steam();
+            add_steam(text[3]);
+        }
+        for (i = 0; i < nitems; i++)
+            for (j = 0; j < nicon; j++)
+                if (!strcmp(items[i].id, icon[j].id)) { set_icon(&items[i], icon[j].data, icon[j].len); break; }
+    }
+    for (i = 0; i < 4; i++) free(text[i]);
+    return ended;
+}
+
+/* Servers before /v1/store/all: each list and thumbnail on its own. */
+static int load_separately(void)
+{
+    struct http_resp r;
+    char path[96];
+    int code, i;
+
+    code = cloud_get("/v1/store", 64 * 1024, &r);
+    if (code != 200) {
+        ui_busy_end();
+        sfx(SFX_ERROR);
+        ui_message("The Store didn't load", cloud_error_text(&r, code));
+        http_free(&r);
+        return 0;
+    }
+    add_store_rows(r.body);
+    http_free(&r);
+    if (cloud_get("/v1/store/needs", 8 * 1024, &r) == 200) add_needs(r.body);
+    http_free(&r);
+    if (has_tabs) {                                   /* PCs: Flathub, and Steam where it runs */
+        if (cloud_get("/v1/store/flathub", 64 * 1024, &r) == 200) add_flathub(r.body);
+        http_free(&r);
+        if (!strcmp(plat_arch(), "x86_64")) {
+            plat_sync_apps();
+            if (cloud_get("/v1/store/steam", 64 * 1024, &r) == 200) add_steam(r.body);
+            http_free(&r);
         }
     }
+    for (i = 0; i < nitems; i++) {
+        snprintf(path, sizeof path, "/v1/store/icon/%s.ximg", items[i].id);
+        if (cloud_get(path, 512 * 1024, &r) == 200) set_icon(&items[i], r.body, r.body_len);
+        http_free(&r);
+    }
+    return 1;
+}
+
+static int load_store(void)
+{
+    struct http_resp r;
+    int code, i, ok;
+
+    free_items();
+    has_tabs = plat_kind() == PLAT_PC;
+    ui_busy_begin("Opening the Store", NULL);
+    code = cloud_get(has_tabs ? "/v1/store/all?pc=1" : "/v1/store/all", 1024 * 1024, &r);
+    ok = code == 200 && load_bundle(r.body, r.body_len);
+    http_free(&r);
+    if (!ok && code < 0) {                    /* not reachable: asking again the old way won't help */
+        ui_busy_end();
+        sfx(SFX_ERROR);
+        ui_message("The Store didn't load", cloud_error_text(NULL, code));
+        return 0;
+    }
+    if (!ok && !load_separately()) return 0;
     for (i = 0; i < nitems; i++) items[i].tab = has_tabs ? item_tab(&items[i]) : 0;
     update_states();
-
-    for (i = 0; i < nitems; i++) {
-        struct http_resp ir;
-        snprintf(path, sizeof path, "/v1/store/icon/%s.ximg", items[i].id);
-        if (cloud_get(path, 512 * 1024, &ir) == 200 && img_load_mem(&items[i].icon, ir.body, ir.body_len)) {
-            items[i].icon_raw = malloc(ir.body_len);
-            if (items[i].icon_raw) {
-                memcpy(items[i].icon_raw, ir.body, ir.body_len);
-                items[i].icon_len = ir.body_len;
-            }
-        }
-        http_free(&ir);
-    }
     ui_busy_end();
 
     /* Start in Apps, or in XenithOS when there's an update for it. */

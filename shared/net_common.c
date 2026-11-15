@@ -139,3 +139,43 @@ void http_free(struct http_resp *r)
     free(r->raw_);
     memset(r, 0, sizeof *r);
 }
+
+/* ---------------------------------------------------------------- the home-network route */
+static char *route_active;
+static int route_size;
+static char route_lan[64], route_main[64];
+
+void net_set_lan_route(char *active, int active_size, const char *main_addr)
+{
+    route_active = active && main_addr && main_addr[0] ? active : NULL;
+    route_size = active_size;
+    snprintf(route_lan, sizeof route_lan, "%s", route_active ? active : "");
+    snprintf(route_main, sizeof route_main, "%s", route_active ? main_addr : "");
+}
+
+int net_lan_route_on(void)
+{
+    return route_active && route_lan[0];
+}
+
+int http_request(const char *host, const char *method, const char *path,
+                 const char *body, int body_len, int max_bytes,
+                 net_progress_fn progress, void *ctx, struct http_resp *out)
+{
+    char main_addr[64];
+    int status;
+    if (!host || !net_lan_route_on() || strcmp(host, route_lan))
+        return net_http_once(host, method, path, body, body_len, max_bytes, progress, ctx, out, NET_CONNECT_MS);
+    status = net_http_once(host, method, path, body, body_len, max_bytes, progress, ctx, out, NET_LAN_CONNECT_MS);
+    if (status != NE_CONNECT) return status;
+    /* Not on that network any more: the public address, now and from now on. */
+    snprintf(main_addr, sizeof main_addr, "%s", route_main);
+    if (!strcmp(route_active, route_lan)) snprintf(route_active, route_size, "%s", main_addr);
+    route_lan[0] = 0;
+    return net_http_once(main_addr, method, path, body, body_len, max_bytes, progress, ctx, out, NET_CONNECT_MS);
+}
+
+int http_probe(const char *host, const char *path, int connect_ms, int max_bytes, struct http_resp *out)
+{
+    return net_http_once(host, "GET", path, NULL, 0, max_bytes, NULL, NULL, out, connect_ms);
+}

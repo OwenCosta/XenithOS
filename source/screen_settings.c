@@ -94,7 +94,8 @@ static void system_info(void)
             snprintf(vals[2], 64, "%d x %d", SCR_W, SCR_H);
             snprintf(vals[3], 64, "%s", plat_cpu_name());
             snprintf(vals[4], 64, "%s", net_is_up() ? net_ip() : "Not connected");
-            snprintf(vals[5], 64, "%s", !cfg.server[0] ? "Not set up" : net_is_up() ? "Connected" : "Offline");
+            snprintf(vals[5], 64, "%s", !cfg.server[0] ? "Not set up" : !net_is_up() ? "Offline"
+                                        : net_lan_route_on() ? "Connected at home" : "Connected");
             for (i = 0; i < 6; i++, y += 44) {
                 gfx_str(FONT_BODY, M + w + 48, y, C_SUB, k[i]);
                 gfx_str_fit(FONT_BODY_SB, M + 2 * w - gfx_str_w(FONT_BODY_SB, vals[i]) < M + w + 230 ? M + w + 230 : M + 2 * w - gfx_str_w(FONT_BODY_SB, vals[i]), y, C_TEXT, vals[i], M + 2 * w - (M + w + 230));
@@ -199,7 +200,7 @@ static void about(void)
         if (PRESSED(b) || PRESSED(a)) { sfx(SFX_BACK); return; }
         ui_bg();
         ui_header("About", NULL);
-        ui_brand(M, y, FONT_HEAD, FONT_BODY_SB, 0);
+        ui_brand(M, y, FONT_HEAD, 0);
         y += gfx_line_h(FONT_HEAD) + 20;
         gfx_str(FONT_LABEL, M, y, C_TEXT, "Version " XENITH_VERSION);
         y += 50;

@@ -8,6 +8,9 @@ Public
   GET  /                              the XenithOS website (web/index.html)
   GET  /static/<file>                 website files (web/static/)
   GET  /v1/ping                       pong
+  GET  /v1/lan                        key=value: id (this server's), and lan, its address on its
+                                      own network when XENITH_LAN_ADDR is set. Consoles there use
+                                      that instead, once it answers with the same id.
   GET  /v1/status                     key=value server stats (does not log a console)
   GET  /v1/hello?name=Owen&ver=0.5    key=value: motd, players, online now (logs the console)
   GET  /v1/news                       id|unix_time|text   (newest first), XenithOS news
@@ -17,6 +20,8 @@ Public
                                       apps from Flathub, for PCs and Raspberry Pis (flathub.json)
   GET  /v1/store/steam                id|name|steam app id|1 if free to play|description
                                       games on Steam, for PCs (steam.json)
+  GET  /v1/store/all[?pc=1]           all of the above lists and the .ximg thumbnails in one
+                                      reply (store_bundle), for 0.5.7 consoles
   GET  /v1/store/file/<id>            the file bytes
   GET  /v1/store/icon/<id>.ximg|.png  the item's thumbnail
   GET  /v1/scores/<game>              rank|name|score|avatar
@@ -70,6 +75,8 @@ Environment
   XENITH_CONSOLE_KEY when set, the old /v1/inbox route needs ?key=<this>
   XENITH_PUBLIC_ADDR the "ip:port" consoles should use (goes into downloads); default: the
                      address each download was requested from
+  XENITH_LAN_ADDR    the private "a.b.c.d:port" consoles on this server's own network can reach
+                     it at directly, skipping the relay (/v1/lan). Off when unset.
   XENITH_DOWNLOAD_DIR default ./downloads   (install.sh, xenithos-source.tar.gz)
   XENITH_YTDLP, XENITH_FFMPEG  paths for Tube (default: found on PATH); Tube is off without them
   XENITH_TUBE_STREAMS default 3: videos playing at once, across everyone
@@ -119,6 +126,7 @@ AVATAR_COUNTS_V1 = [8, 8, 8, 5, 5, 4, 10, 6, 8]                   # "1" + 9 digi
 AVATAR_COUNTS = [10, 14, 13, 8, 10, 8, 12, 11, 12, 6, 5, 5, 3]     # "2" + 13 digits (shared/avatar.c)
 ONLINE_WINDOW = 15 * 60        # "online now": seen in the last 15 minutes
 PUBLIC_ADDR_RE = re.compile(r"^[A-Za-z0-9.-]{1,64}:[0-9]{1,5}$")
+LAN_ADDR_RE = re.compile(r"^([0-9]{1,3}(?:\.[0-9]{1,3}){3}):([0-9]{1,5})$")
 PIN_RE = re.compile(r"^[0-9]{4,8}$")
 STATIC_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}\.(png|js|css|svg|ico|webp|wav)$")
 KINDS = {"app", "data", "system", "pc"}      # pc: XenithOS's source, which PCs and Pis build themselves
@@ -947,6 +955,67 @@ def xbox_zip(store, addr):
         return _zip_cache["data"]
 
 
+# ---------------------------------------------------------------------- the Store's lists
+
+
+def store_rows(items):
+    return "".join(f"{i['id']}|{i['kind']}|{i['name']}|{i['version']}|{i['size']}|"
+                   f"{i['sha256']}|{i['file']}|{i['description']}\n" for i in items)
+
+
+def needs_rows(needs):
+    return "".join(f"{iid}|{','.join(ns)}\n" for iid, ns in needs.items())
+
+
+def flathub_rows(apps):
+    return "".join(f"{a['id']}|{a['name']}|{a['ref']}|{','.join(a['arches'])}|{a['mb']}|{a['shared_mb']}|"
+                   f"{a['args']}|{a['description']}\n" for a in apps)
+
+
+def steam_rows(games):
+    return "".join(f"{g['id']}|{g['name']}|{g['appid']}|{1 if g['free'] else 0}|{g['description']}\n"
+                   for g in games)
+
+
+def store_bundle(store, pc):
+    """/v1/store/all: what the Store screen needs, in one reply instead of one per list and
+    thumbnail (each is a trip through the relay). "XSTORE 1\\n", then sections of
+    "<name> <length>\\n" followed by that many bytes: store, needs, flathub and steam (with pc),
+    then "icon:<id>" for each .ximg thumbnail, and "end 0\\n" last."""
+    items = store.items()
+    apps, games = (store.flathub(), store.steam()) if pc else ([], [])
+    out = [b"XSTORE 1\n"]
+
+    def section(name, data):
+        if isinstance(data, str):
+            data = data.encode("ascii", "replace")
+        out.append(f"{name} {len(data)}\n".encode() + data)
+
+    section("store", store_rows(items))
+    section("needs", needs_rows(store.needs(items)))
+    if pc:
+        section("flathub", flathub_rows(apps))
+        section("steam", steam_rows(games))
+    for iid in dict.fromkeys([i["id"] for i in items] + [a["id"] for a in apps] + [g["id"] for g in games]):
+        path = os.path.join(store.dir, f"{iid}.ximg")
+        if os.path.isfile(path):
+            with open(path, "rb") as f:
+                section(f"icon:{iid}", f.read())
+    out.append(b"end 0\n")
+    return b"".join(out)
+
+
+def lan_addr_ok(addr):
+    """XENITH_LAN_ADDR: a private IPv4 address and port (the Xbox has no DNS)."""
+    m = LAN_ADDR_RE.match(addr or "")
+    if not m or not 0 < int(m.group(2)) < 65536:
+        return False
+    try:
+        return ipaddress.ip_address(m.group(1)).is_private
+    except ValueError:
+        return False
+
+
 # ---------------------------------------------------------------------- http
 
 
@@ -955,7 +1024,7 @@ def kv(d):
 
 
 def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=None, public="",
-                 downloads="downloads"):
+                 downloads="downloads", lan="", server_id=""):
     last_score = {}
     last_score_lock = threading.Lock()
     creates = RateLimit(CREATE_PER_HOUR, 3600)
@@ -1011,6 +1080,9 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
 
             if parts == ["v1", "ping"]:
                 return self.reply(200, "pong\n")
+
+            if parts == ["v1", "lan"]:
+                return self.reply(200, kv({"id": server_id, **({"lan": lan} if lan else {})}), cache="no-store")
 
             if parts == ["v1", "status"]:
                 lines = {"motd": state.data["motd"], "server": "XENITHOS CLOUD " + VERSION,
@@ -1101,24 +1173,22 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                                                for m in state.data["inbox"]))
 
             if parts == ["v1", "store"]:
-                return self.reply(200, "".join(
-                    f"{i['id']}|{i['kind']}|{i['name']}|{i['version']}|{i['size']}|"
-                    f"{i['sha256']}|{i['file']}|{i['description']}\n" for i in store.items()))
+                return self.reply(200, store_rows(store.items()))
+
+            if parts == ["v1", "store", "all"]:
+                return self.reply(200, store_bundle(store, q.get("pc", [""])[0] == "1"),
+                                  "application/octet-stream", "no-store")
 
             if parts == ["v1", "store", "flathub"]:
                 # Their own routes: consoles that don't know these kinds never see them.
-                return self.reply(200, "".join(
-                    f"{a['id']}|{a['name']}|{a['ref']}|{','.join(a['arches'])}|{a['mb']}|{a['shared_mb']}|"
-                    f"{a['args']}|{a['description']}\n" for a in store.flathub()))
+                return self.reply(200, flathub_rows(store.flathub()))
 
             if parts == ["v1", "store", "steam"]:
-                return self.reply(200, "".join(
-                    f"{g['id']}|{g['name']}|{g['appid']}|{1 if g['free'] else 0}|{g['description']}\n"
-                    for g in store.steam()))
+                return self.reply(200, steam_rows(store.steam()))
 
             if parts == ["v1", "store", "needs"]:
                 # Its own route: a 9th field on /v1/store would end up in older consoles' descriptions.
-                return self.reply(200, "".join(f"{iid}|{','.join(ns)}\n" for iid, ns in store.needs().items()))
+                return self.reply(200, needs_rows(store.needs()))
 
             if len(parts) == 4 and parts[:3] == ["v1", "store", "file"]:
                 item = store.find(parts[3])
@@ -1353,6 +1423,15 @@ def serve():
                 int(os.environ.get("XENITH_TUBE_STREAMS", "3")), deno, plugins if os.path.isdir(plugins) else "")
     public = os.environ.get("XENITH_PUBLIC_ADDR", "")
     downloads = os.environ.get("XENITH_DOWNLOAD_DIR", "downloads")
+    lan = os.environ.get("XENITH_LAN_ADDR", "").strip()
+    if lan and not lan_addr_ok(lan):
+        log(f"XENITH_LAN_ADDR must be a private a.b.c.d:port, not {lan!r}; consoles won't be told one")
+        lan = ""
+    with state.lock:                          # tells this server apart from another at that address
+        if not state.data.get("server_id"):
+            state.data["server_id"] = secrets.token_hex(8)
+            state.save()
+        server_id = state.data["server_id"]
 
     def reaper():
         while True:
@@ -1360,7 +1439,7 @@ def serve():
             tube.reap()
     threading.Thread(target=reaper, daemon=True).start()
 
-    handler = make_handler(state, store, admin_key, web_dir, console_key, tube, public, downloads)
+    handler = make_handler(state, store, admin_key, web_dir, console_key, tube, public, downloads, lan, server_id)
     httpd = ThreadingHTTPServer(("0.0.0.0", port), handler)
     httpd.daemon_threads = True
     if proxy_port:
@@ -1370,7 +1449,8 @@ def serve():
     tube_mode = ("on, Deno and PO tokens when needed" if tube.deno and tube.plugins else
                  "on, Deno when needed" if tube.deno else "on") if tube.available() else "off"
     print(f"XenithOS Cloud {VERSION} on :{port}{f' (relay on :{proxy_port})' if proxy_port else ''} "
-          f"(admin routes {'on' if admin_key else 'off'}, Tube {tube_mode})", flush=True)
+          f"(admin routes {'on' if admin_key else 'off'}, Tube {tube_mode}"
+          f"{', consoles on its network use ' + lan if lan else ''})", flush=True)
     httpd.serve_forever()
 
 
@@ -1473,7 +1553,7 @@ else:
     store = Store(store_dir)
     tube = Tube(fake_ytdlp, fake_ffmpeg, 3, deno=fake_ytdlp, plugins=tmp)   # the stand-in never runs "Deno"
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state, store, "k3y", web_dir, "c0nsole",
-                                                               tube, "", dl_dir))
+                                                               tube, "", dl_dir, "192.168.1.20:8795", "5e4e1d"))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{httpd.server_address[1]}"
 
@@ -1534,6 +1614,39 @@ else:
     check("flathub icon served", req("GET", "/v1/store/icon/kodi.ximg") == (200, b"XIMGkodi"))
     check("steam lists only valid games",
           req("GET", "/v1/store/steam") == (200, b"cs2|Counter-Strike 2|730|1|Free\nportal2|Portal 2|620|0|Paid\n"))
+
+    def unbundle(b):
+        if not b.startswith(b"XSTORE 1\n"):
+            return None
+        pos, out = 9, {}
+        while True:
+            nl = b.index(b"\n", pos)
+            name, n = b[pos:nl].decode().rsplit(" ", 1)
+            pos = nl + 1
+            if name == "end":
+                return out if pos == len(b) else None
+            out[name] = b[pos:pos + int(n)]
+            pos += int(n)
+
+    code, body = req("GET", "/v1/store/all?pc=1")
+    pc = unbundle(body) if code == 200 else None
+    check("store bundle: the same lists as their own routes", pc is not None
+          and pc.get("store") == req("GET", "/v1/store")[1] and pc.get("needs") == req("GET", "/v1/store/needs")[1]
+          and pc.get("flathub") == req("GET", "/v1/store/flathub")[1]
+          and pc.get("steam") == req("GET", "/v1/store/steam")[1])
+    check("store bundle: thumbnails for listed items only",
+          pc is not None and pc.get("icon:game") == b"XIMGthumb" and pc.get("icon:kodi") == b"XIMGkodi"
+          and not any(k.startswith("icon:") and k[5:] not in ("game", "gamedata", "xenithos-pc", "kodi", "cs2", "portal2")
+                      for k in pc))
+    xbox = unbundle(req("GET", "/v1/store/all")[1])
+    check("store bundle for the Xbox: no Flathub or Steam",
+          xbox is not None and "flathub" not in xbox and "steam" not in xbox and "icon:kodi" not in xbox
+          and xbox.get("icon:game") == b"XIMGthumb")
+    code, body = req("GET", "/v1/lan")
+    check("lan: this server's id and its home address", code == 200 and kvparse(body) == {"id": "5e4e1d", "lan": "192.168.1.20:8795"})
+    check("lan address must be private and numeric",
+          lan_addr_ok("192.168.50.145:8795") and lan_addr_ok("10.0.0.2:80") and not lan_addr_ok("37.1.2.3:8795")
+          and not lan_addr_ok("keystone:8795") and not lan_addr_ok("192.168.1.2") and not lan_addr_ok("192.168.1.2:0"))
 
     # Accounts
     code, body = req("POST", "/v1/accounts/create", "name=Owen&pin=1234&avatar=1202001000")

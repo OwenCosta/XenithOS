@@ -84,9 +84,9 @@ static int open_socket(const char *host, int *fd_out)
     return 0;
 }
 
-int http_request(const char *host, const char *method, const char *path,
-                 const char *body, int body_len, int max_bytes,
-                 net_progress_fn progress, void *ctx, struct http_resp *out)
+int net_http_once(const char *host, const char *method, const char *path,
+                  const char *body, int body_len, int max_bytes,
+                  net_progress_fn progress, void *ctx, struct http_resp *out, int connect_ms)
 {
     int fd, req_len, sent = 0, len = 0, cap = 16 * 1024, idle = 0, header_end = -1, cl = -1, err;
     char *req, *buf;
@@ -100,7 +100,7 @@ int http_request(const char *host, const char *method, const char *path,
     for (;;) {                                   /* wait for the connection */
         int r = wait_fd(fd, POLLOUT, &idle), e = 0;
         socklen_t el = sizeof e;
-        if (r < 0 || idle > IDLE_TIMEOUT_MS) { close(fd); free(req); return out->status = NE_CONNECT; }
+        if (r < 0 || idle > connect_ms) { close(fd); free(req); return out->status = NE_CONNECT; }
         if (r == 0) continue;
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &e, &el);
         if (e) { close(fd); free(req); return out->status = NE_CONNECT; }

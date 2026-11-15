@@ -226,26 +226,15 @@ void ui_logo(float cx, float cy, float size, float arms, float dot, int alpha)
     if (dot > 0) gfx_circle(cx, cy, size * 0.055f * dot, C_ACCENT, alpha);
 }
 
-/* The wordmark as the site sets its own: the mark, the name in bold, and a small spaced-out
- * label. Returns its width; measure_only draws nothing. */
-int ui_brand(int x, int y, int font, int label_font, int measure_only)
+/* The wordmark: the mark, then the name in bold. Returns its width; measure_only draws nothing. */
+int ui_brand(int x, int y, int font, int measure_only)
 {
-    static const char label[] = "CONSOLE";
-    int lh = gfx_cap_h(font), mark = lh * 3 / 2, gap = lh / 2, w, i, lx;
-    int ly = y + font_table[font].ascent - font_table[label_font].ascent;
-    char c[2] = {0, 0};
-    w = gfx_str_w(font, "XenithOS");
+    int lh = gfx_cap_h(font), mark = lh * 3 / 2, gap = lh / 2;
     if (!measure_only) {
         ui_logo(x + mark * 0.42f, y + font_table[font].ascent - lh / 2.0f, (float)mark, 1, 1, 255);
         gfx_str(font, x + mark + gap, y, C_TEXT, "XenithOS");
     }
-    lx = x + mark + gap + w + gap;
-    for (i = 0; label[i]; i++) {
-        c[0] = label[i];
-        if (!measure_only) gfx_str(label_font, lx, ly, C_SUB, c);
-        lx += gfx_str_w(label_font, c) + 3;
-    }
-    return lx - x;
+    return mark + gap + gfx_str_w(font, "XenithOS");
 }
 
 void ui_profile_chip(int right_x, int cy)

@@ -52,6 +52,39 @@ const char *cloud_error_text(struct http_resp *r, int status)
     return msg;
 }
 
+/* Consoles on the network XenithOS Cloud runs on talk to it there: a few milliseconds a request
+ * instead of a trip out to the relay and back (most of a second each). The server says what that
+ * address is (/v1/lan), and it's only used once it answers there as the same server. Once a
+ * start-up; apps take it from route.txt (config_load). */
+void cloud_route_check(void)
+{
+    static int done;
+    struct http_resp r;
+    char id[24], lan[32], got[24];
+    unsigned char ip[4];
+    int port;
+
+    if (done || !cfg.server_main[0] || !net_is_up()) return;
+    done = 1;
+    if (cfg.route_id[0]) {                   /* route.txt: still on that network? */
+        int ok = http_probe(cfg.server, "/v1/lan", NET_LAN_CONNECT_MS, 1024, &r) == 200;
+        if (ok) kv_get(r.body, "id", got, sizeof got);
+        http_free(&r);
+        if (ok && !strcmp(got, cfg.route_id)) return;
+        route_forget();
+    }
+    if (cloud_get("/v1/lan", 1024, &r) != 200) { http_free(&r); return; }   /* an older server */
+    kv_get(r.body, "id", id, sizeof id);
+    kv_get(r.body, "lan", lan, sizeof lan);
+    http_free(&r);
+    if (!id[0] || !lan[0] || !strcmp(lan, cfg.server_main) || !net_parse_host(lan, ip, &port)) return;
+    if (http_probe(lan, "/v1/lan", NET_LAN_CONNECT_MS, 1024, &r) == 200) {
+        kv_get(r.body, "id", got, sizeof got);
+        if (!strcmp(got, id)) route_save(lan, id);
+    }
+    http_free(&r);
+}
+
 int cloud_ready(const char *title)
 {
     (void)title;
@@ -60,7 +93,7 @@ int cloud_ready(const char *title)
         ui_message("XenithOS Cloud isn't set up", "This copy of XenithOS doesn't have the XenithOS Cloud address. Download XenithOS again from its website, which includes it.");
         return 0;
     }
-    if (net_is_up()) return 1;
+    if (net_is_up()) { cloud_route_check(); return 1; }
     ui_loading_frame("Connecting", "Getting an address from your router");
     audio_prepare_stall();
     if (!net_up()) {
@@ -71,6 +104,7 @@ int cloud_ready(const char *title)
             ui_message("No network", "This machine isn't connected to the internet. Connect it, then try again.");
         return 0;
     }
+    cloud_route_check();
     return 1;
 }
 

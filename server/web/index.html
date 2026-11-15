@@ -321,7 +321,7 @@
 const $ = (id) => document.getElementById(id);
 
 /* The XenithOS logo: two chevrons that make an X which doesn't quite meet, a red point where it
-   would, then the name (and, big, CONSOLE under it). Same numbers as the console's ui_logo. */
+   would, then the name. Same numbers as the console's ui_logo. */
 function logo(svg, big) {
   const ns = "http://www.w3.org/2000/svg", add = (tag, attrs, text) => {
     const el = document.createElementNS(ns, tag);
@@ -338,10 +338,8 @@ function logo(svg, big) {
                   "stroke-width": m * 0.12, "stroke-linecap": "round" }));
   add("circle", { cx, cy, r: m * 0.055, fill: "#e50914" });
   const font = "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
-  add("text", { x: m * 0.95, y: big ? cy + 12 : cy + 7.5, fill: "#f1f3f6", "font-family": font, "font-weight": 700,
+  add("text", { x: m * 0.95, y: big ? cy + 16.5 : cy + 7.5, fill: "#f1f3f6", "font-family": font, "font-weight": 700,
                 "font-size": big ? 46 : 20, "letter-spacing": "-0.02em" }, "XenithOS");
-  if (big) add("text", { x: m * 0.95 + 2, y: cy + 38, fill: "#8b93a0", "font-family": font, "font-weight": 600,
-                         "font-size": 12, "letter-spacing": "0.32em" }, "CONSOLE");
 }
 logo($("logo"), true);
 logo($("navlogo"), false);

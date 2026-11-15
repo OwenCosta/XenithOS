@@ -22,6 +22,8 @@ mkdir -p "$work/uda:/xenith"
     [ -n "$XSIM_KEY" ] && echo "key=$XSIM_KEY"
 } > "$work/uda:/xenith/config.txt"
 [ -n "$XSIM_PROFILE" ] && cp "$XSIM_PROFILE" "$work/uda:/xenith/profile.txt"
+# XSIM_ROUTE: a route.txt to start with (the home-network route, shared/config.c)
+[ -n "$XSIM_ROUTE" ] && cp "$XSIM_ROUTE" "$work/uda:/xenith/route.txt"
 # XSIM_APPS: that many more (empty) apps, for rows that have to scroll
 if [ -n "$XSIM_APPS" ]; then
     for i in $(seq 1 "$XSIM_APPS"); do

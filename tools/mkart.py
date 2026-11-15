@@ -126,11 +126,9 @@ def logo_files():
     wide = Image.new("RGB", (1600 * k, 480 * k), (7, 8, 10))
     d = ImageDraw.Draw(wide)
     mark(d, 330 * k, 240 * k, 260 * k)
-    d.text((500 * k, 150 * k), "XenithOS", font=font("Bold", 150 * k), fill=TEXT)
-    x = 506 * k
-    for ch in "CONSOLE":                            # spaced out, like the wordmark on the console
-        d.text((x, 340 * k), ch, font=font("SemiBold", 40 * k), fill=SUB)
-        x += d.textlength(ch, font=font("SemiBold", 40 * k)) + 12 * k
+    name = font("Bold", 150 * k)
+    top, bottom = d.textbbox((0, 0), "XenithOS", font=name)[1::2]
+    d.text((500 * k, 240 * k - (top + bottom) / 2), "XenithOS", font=name, fill=TEXT)   # level with the mark
     wide.resize((1600, 480), Image.LANCZOS).save(os.path.join(ROOT, "art", "logo-wide.png"))
 
 

@@ -37,6 +37,26 @@ int http_request(const char *host, const char *method, const char *path,
                  net_progress_fn progress, void *ctx, struct http_resp *out);
 void http_free(struct http_resp *r);
 
+/* A GET to one address that gives up connecting after connect_ms, never taking the route. */
+int http_probe(const char *host, const char *path, int connect_ms, int max_bytes, struct http_resp *out);
+
+/* The home-network route (config.c, route.txt): *active (cfg.server) holds XenithOS Cloud's
+ * address on the network it runs on, which answers in milliseconds where the public address
+ * takes a trip out to the relay and back. A request there that can't connect within
+ * NET_LAN_CONNECT_MS goes to main_addr instead, and so does everything after it (*active
+ * becomes main_addr): the console has left that network. NULL turns the route off. */
+void net_set_lan_route(char *active, int active_size, const char *main_addr);
+int net_lan_route_on(void);
+
+#define NET_CONNECT_MS     10000
+#define NET_LAN_CONNECT_MS 700
+
+/* What each network stack provides: one request, giving up on connecting after connect_ms.
+ * NE_CONNECT always means nothing was sent. */
+int net_http_once(const char *host, const char *method, const char *path,
+                  const char *body, int body_len, int max_bytes,
+                  net_progress_fn progress, void *ctx, struct http_resp *out, int connect_ms);
+
 const char *net_error(int status);  /* readable text for a negative status */
 void net_escape(const char *in, char *out, int out_size);   /* form / query escaping */
 

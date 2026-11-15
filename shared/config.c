@@ -6,8 +6,9 @@
 
 #include "avatar.h"
 #include "config.h"
+#include "net.h"
 
-struct xenith_config cfg = {"", "PLAYER", "", 0};
+struct xenith_config cfg = {.name = "PLAYER"};
 struct xenith_settings st = {80, 1, 1, 1, 0, ""};
 struct xenith_profile prof;
 
@@ -61,9 +62,56 @@ static void on_config(const char *k, const char *v)
     }
 }
 
+/* ---------------------------------------------------------------- route.txt */
+
+static FILE *open_write(const char *path);
+static char route_for[32], route_lan[32], route_id[24];
+
+static void on_route(const char *k, const char *v)
+{
+    if (!strcmp(k, "for")) snprintf(route_for, sizeof route_for, "%s", v);
+    else if (!strcmp(k, "lan")) snprintf(route_lan, sizeof route_lan, "%s", v);
+    else if (!strcmp(k, "id")) copy_alnum(route_id, sizeof route_id, v, 0);
+}
+
+static void route_use(const char *lan, const char *id)
+{
+    snprintf(cfg.server, sizeof cfg.server, "%s", lan);
+    snprintf(cfg.route_id, sizeof cfg.route_id, "%s", id);
+    net_set_lan_route(cfg.server, sizeof cfg.server, cfg.server_main);
+}
+
 void config_load(void)
 {
+    unsigned char ip[4];
+    int port;
     cfg.loaded = read_kv(XENITH_CONFIG_PATH, on_config);
+    snprintf(cfg.server_main, sizeof cfg.server_main, "%s", cfg.server);
+    cfg.route_id[0] = route_for[0] = route_lan[0] = route_id[0] = 0;
+    /* The dashboard checked this route when it came online (cloud_route_check), so the apps it
+     * starts take it as it is. If the console has moved since, the first request finds out. */
+    if (cfg.server[0] && read_kv(XENITH_ROUTE_PATH, on_route) && !strcmp(route_for, cfg.server_main)
+            && route_id[0] && net_parse_host(route_lan, ip, &port))
+        route_use(route_lan, route_id);
+}
+
+void route_save(const char *lan, const char *id)
+{
+    FILE *f;
+    route_use(lan, id);
+    f = open_write(XENITH_ROUTE_PATH);
+    if (!f) return;
+    fprintf(f, "# Written by XenithOS: XenithOS Cloud's address on this network.\nfor=%s\nlan=%s\nid=%s\n",
+            cfg.server_main, cfg.server, cfg.route_id);
+    fclose(f);
+}
+
+void route_forget(void)
+{
+    snprintf(cfg.server, sizeof cfg.server, "%s", cfg.server_main);
+    cfg.route_id[0] = 0;
+    net_set_lan_route(NULL, 0, NULL);
+    remove(XENITH_ROUTE_PATH);
 }
 
 /* ----------------------------------------------------------- settings.txt */

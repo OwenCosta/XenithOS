@@ -31,9 +31,9 @@ static int wait_fd(int fd, short ev, int *idle_ms)
     return 1;
 }
 
-int http_request(const char *host, const char *method, const char *path,
-                 const char *body, int body_len, int max_bytes,
-                 net_progress_fn progress, void *ctx, struct http_resp *out)
+int net_http_once(const char *host, const char *method, const char *path,
+                  const char *body, int body_len, int max_bytes,
+                  net_progress_fn progress, void *ctx, struct http_resp *out, int connect_ms)
 {
     unsigned char ip[4];
     int port, fd, req_len, sent = 0, len = 0, cap = 16 * 1024, idle = 0, header_end = -1, cl = -1;
@@ -58,7 +58,7 @@ int http_request(const char *host, const char *method, const char *path,
     for (;;) {                                   /* wait for the connection */
         int r = wait_fd(fd, POLLOUT, &idle), err = 0;
         socklen_t el = sizeof err;
-        if (r < 0 || idle > IDLE_TIMEOUT_MS) { close(fd); free(req); return out->status = NE_CONNECT; }
+        if (r < 0 || idle > connect_ms) { close(fd); free(req); return out->status = NE_CONNECT; }
         if (r == 0) continue;
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el);
         if (err) { close(fd); free(req); return out->status = NE_CONNECT; }

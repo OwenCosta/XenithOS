@@ -70,19 +70,10 @@ static void boot_frame(float t)
         float q = span(t, 1080, 820);
         gfx_ring(cx, cy, size * (0.12f + 1.25f * ease_out(q)), 2 + size * 0.03f * (1 - q), C_TEXT, (int)(150 * (1 - q)));
     }
-    /* 4. the name comes in beside it, then the label and the version */
+    /* 4. the name comes in beside it, then the version */
     if (slide > 0) {
         int x = (int)(cx + mark_w / 2 + gap + 24 * (1 - slide)), ty = (int)cy - font_table[FONT_BIG].ascent + gfx_cap_h(FONT_BIG) / 2;
-        int a = (int)(255 * slide), lx = x, k;
-        const char *label = "CONSOLE";
-        char c[2] = {0, 0};
-        gfx_str_a(FONT_BIG, x, ty, C_TEXT, a, "XenithOS");
-        a = (int)(255 * span(t, 1900, 400));
-        for (k = 0; a > 0 && label[k]; k++) {
-            c[0] = label[k];
-            gfx_str_a(FONT_BODY_SB, lx + 2, ty + gfx_line_h(FONT_BIG) + 2, C_SUB, a, c);
-            lx += gfx_str_w(FONT_BODY_SB, c) + 5;
-        }
+        gfx_str_a(FONT_BIG, x, ty, C_TEXT, (int)(255 * slide), "XenithOS");
     }
     if (t > 2100) {
         int va = (int)(255 * span(t, 2100, 400));
@@ -176,7 +167,7 @@ static void draw_home(void)
     else snprintf(sub, sizeof sub, "Offline");
     gfx_circle(M + asz + 24.0f, 92, 4, net_is_up() ? C_OK : C_DIM, 255);
     gfx_str(FONT_SMALL, M + asz + 36, 81, C_SUB, sub);
-    ui_brand(SCR_W - M - ui_brand(0, 0, FONT_LABEL, FONT_SMALL, 1), 46, FONT_LABEL, FONT_SMALL, 0);
+    ui_brand(SCR_W - M - ui_brand(0, 0, FONT_LABEL, 1), 46, FONT_LABEL, 0);
 
     /* Tiles */
     tw = (SCR_W - 2 * M - gap * (T_COUNT - 1)) / T_COUNT;
@@ -245,17 +236,17 @@ static void draw_home(void)
 /* Bring the network up after the first home frame, then sync the profile and inbox. */
 static void go_online(void)
 {
-    if (!cfg.server[0] || net_is_up()) return;
-    status_line = "Connecting...";
-    draw_home();
-    ui_end_frame();
-    audio_prepare_stall();
-    if (net_up()) {
-        status_line = NULL;
-        cloud_sync(1);
-    } else {
+    if (!cfg.server[0]) return;
+    if (!net_is_up()) {                     /* the Xbox asks for an address; a PC already has one */
+        status_line = "Connecting...";
+        draw_home();
+        ui_end_frame();
+        audio_prepare_stall();
+        if (!net_up()) { status_line = NULL; return; }
         status_line = NULL;
     }
+    cloud_route_check();
+    cloud_sync(1);
 }
 
 /* Returns 1 to leave XenithOS (back to XeLL on the Xbox). */

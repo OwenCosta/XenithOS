@@ -73,6 +73,7 @@ struct conn {
     int len, cap, max;
     int header_end, content_length;
     int done, err;
+    int connected;               /* the request went out: errors after this aren't NE_CONNECT */
     uint64_t last_activity;
     const char *req;
     int req_len;
@@ -127,13 +128,15 @@ static void on_err(void *arg, err_t err)
     struct conn *c = arg;
     c->pcb = NULL;               /* lwIP already freed it */
     if (body_complete(c)) c->done = 1;
-    else if (!c->done) c->err = (err == ERR_RST || err == ERR_ABRT) ? NE_RESET : NE_CONNECT;
+    else if (!c->done) c->err = c->connected ? NE_RESET : NE_CONNECT;
+    (void)err;
 }
 
 static err_t on_connected(void *arg, struct tcp_pcb *pcb, err_t err)
 {
     struct conn *c = arg;
     if (err != ERR_OK) { c->err = NE_CONNECT; return err; }
+    c->connected = 1;
     if (tcp_write(pcb, c->req, c->req_len, TCP_WRITE_FLAG_COPY) != ERR_OK) {
         c->err = NE_MEMORY;
         return ERR_OK;
@@ -143,9 +146,9 @@ static err_t on_connected(void *arg, struct tcp_pcb *pcb, err_t err)
     return ERR_OK;
 }
 
-int http_request(const char *host, const char *method, const char *path,
-                 const char *body, int body_len, int max_bytes,
-                 net_progress_fn progress, void *ctx, struct http_resp *out)
+int net_http_once(const char *host, const char *method, const char *path,
+                  const char *body, int body_len, int max_bytes,
+                  net_progress_fn progress, void *ctx, struct http_resp *out, int connect_ms)
 {
     struct conn c;
     unsigned char ipb[4];
@@ -190,7 +193,8 @@ int http_request(const char *host, const char *method, const char *path,
     while (!c.done && !c.err) {
         network_poll();
         net_idle();
-        if (tb_diff_msec(mftb(), c.last_activity) > IDLE_TIMEOUT_MS) c.err = NE_TIMEOUT;
+        if (!c.connected && tb_diff_msec(mftb(), c.last_activity) > connect_ms) c.err = NE_CONNECT;
+        else if (tb_diff_msec(mftb(), c.last_activity) > IDLE_TIMEOUT_MS) c.err = NE_TIMEOUT;
     }
 
     if (c.pcb) {                         /* detach callbacks before closing */
