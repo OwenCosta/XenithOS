@@ -58,6 +58,10 @@ Command line
 
 Environment
   XENITH_PORT        default 8795
+  XENITH_PROXY_PORT  a second port for a relay (server/xenith-relay.py) that starts every
+                     connection with a PROXY protocol v1 line naming the console's own address,
+                     so XenithOS Cloud can run behind a home connection while consoles keep a
+                     public address. Off when unset; only the relay should reach this port.
   XENITH_STATE_DIR   default ./state      (state.json lives here)
   XENITH_STORE_DIR   default ./store      (store.json + the files it lists, flathub.json, steam.json,
                                           and <id>.ximg / <id>.png thumbnails)
@@ -77,6 +81,7 @@ Environment
 import hashlib
 import hmac
 import io
+import ipaddress
 import json
 import os
 import re
@@ -1292,8 +1297,47 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
     return Handler
 
 
+# A relay (server/xenith-relay.py) passes consoles on with this first: "PROXY TCP4 <console>
+# <relay> <console port> <relay port>" (PROXY protocol version 1).
+PROXY_LINE = re.compile(rb"^PROXY (TCP4|TCP6) (\S{2,45}) (\S{2,45}) (\d{1,5}) (\d{1,5})\r\n$")
+
+
+def proxied(handler):
+    """handler, for connections from a relay (XENITH_PROXY_PORT): each starts with a PROXY
+    line, and the console address in it is used as client_address (logs, rate limits, who's
+    online). A connection without a good one is closed unanswered."""
+    class Proxied(handler):
+        timeout = 300                         # a relay connection that stalls doesn't keep its thread
+
+        def setup(self):
+            super().setup()
+            self.proxy_ok = False
+            try:
+                line = self.rfile.readline(108)
+            except OSError:
+                return
+            m = PROXY_LINE.match(line)
+            if not m:
+                return
+            try:
+                ip = ipaddress.ip_address(m.group(2).decode("ascii"))
+            except ValueError:
+                return
+            if (m.group(1) == b"TCP4") != (ip.version == 4) or not 0 < int(m.group(4)) < 65536:
+                return
+            self.client_address = (str(ip), int(m.group(4)))
+            self.proxy_ok = True
+
+        def handle(self):
+            if self.proxy_ok:
+                super().handle()
+
+    return Proxied
+
+
 def serve():
     port = int(os.environ.get("XENITH_PORT", "8795"))
+    proxy_port = int(os.environ.get("XENITH_PROXY_PORT", "0") or 0)
     state = State(os.environ.get("XENITH_STATE_DIR", "state"))
     store = Store(os.environ.get("XENITH_STORE_DIR", "store"))
     admin_key = os.environ.get("XENITH_ADMIN_KEY", "")
@@ -1316,13 +1360,17 @@ def serve():
             tube.reap()
     threading.Thread(target=reaper, daemon=True).start()
 
-    httpd = ThreadingHTTPServer(("0.0.0.0", port),
-                                make_handler(state, store, admin_key, web_dir, console_key, tube, public, downloads))
+    handler = make_handler(state, store, admin_key, web_dir, console_key, tube, public, downloads)
+    httpd = ThreadingHTTPServer(("0.0.0.0", port), handler)
     httpd.daemon_threads = True
+    if proxy_port:
+        relayed = ThreadingHTTPServer(("0.0.0.0", proxy_port), proxied(handler))
+        relayed.daemon_threads = True
+        threading.Thread(target=relayed.serve_forever, daemon=True).start()
     tube_mode = ("on, Deno and PO tokens when needed" if tube.deno and tube.plugins else
                  "on, Deno when needed" if tube.deno else "on") if tube.available() else "off"
-    print(f"XenithOS Cloud {VERSION} on :{port} (admin routes {'on' if admin_key else 'off'}, "
-          f"Tube {tube_mode})", flush=True)
+    print(f"XenithOS Cloud {VERSION} on :{port}{f' (relay on :{proxy_port})' if proxy_port else ''} "
+          f"(admin routes {'on' if admin_key else 'off'}, Tube {tube_mode})", flush=True)
     httpd.serve_forever()
 
 
@@ -1677,6 +1725,36 @@ else:
     check("tube stop ends a slow ask", slow and not slow.helper and time.monotonic() - t0 < 3
           and req("GET", f"/v1/tube/chunk?s={sid}&off=0")[0] == 410)
     check("tube thumb bad id", req("GET", "/v1/tube/thumb/..x.jpg")[0] == 404)
+
+    # A relay's connections (XENITH_PROXY_PORT): the PROXY line names the console
+    import socket
+    relayed = ThreadingHTTPServer(("127.0.0.1", 0), proxied(httpd.RequestHandlerClass))
+    relayed.daemon_threads = True
+    threading.Thread(target=relayed.serve_forever, daemon=True).start()
+
+    def raw(data):
+        with socket.create_connection(("127.0.0.1", relayed.server_address[1]), timeout=5) as sock:
+            sock.sendall(data)
+            out = b""
+            while True:
+                part = sock.recv(65536)
+                if not part:
+                    return out
+                out += part
+
+    out = raw(b"PROXY TCP4 203.0.113.7 10.0.0.2 51000 8795\r\nGET /v1/hello?name=RELAYED&ver=0.5 HTTP/1.0\r\n\r\n")
+    check("relay: PROXY line accepted", out.startswith(b"HTTP/1.0 200") and b"motd=" in out)
+    check("relay: the console's own address is recorded",
+          state.data["consoles"].get("RELAYED", {}).get("ip") == "203.0.113.7")
+    check("relay: IPv6 accepted",
+          raw(b"PROXY TCP6 2001:db8::7 2001:db8::1 51000 8795\r\nGET /v1/ping HTTP/1.0\r\n\r\n").endswith(b"pong\n"))
+    check("relay: no PROXY line, no answer", raw(b"GET /v1/ping HTTP/1.0\r\n\r\n") == b"")
+    check("relay: bad address, no answer",
+          raw(b"PROXY TCP4 999.1.1.1 10.0.0.2 1 2\r\nGET /v1/ping HTTP/1.0\r\n\r\n") == b"")
+    check("relay: family must match the address",
+          raw(b"PROXY TCP6 203.0.113.7 ::1 1 2\r\nGET /v1/ping HTTP/1.0\r\n\r\n") == b"")
+    check("relay: the direct port ignores PROXY lines", req("GET", "/v1/ping") == (200, b"pong\n"))
+    relayed.shutdown()
 
     reloaded = State(os.path.join(tmp, "state"))
     check("state persists", reloaded.data["motd"] == "Game night 9PM"

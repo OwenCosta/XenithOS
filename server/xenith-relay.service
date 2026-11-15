@@ -1,0 +1,34 @@
+# XenithOS Cloud's public console address, passed on to the machine that really runs XenithOS
+# Cloud through the SSH tunnel it keeps open to here (see xenith-relay.py).
+#   install -D -m 644 xenith-relay.py /opt/xenith-relay/xenith-relay.py
+#   install -m 644 xenith-relay.service /etc/systemd/system/ && systemctl enable --now xenith-relay
+[Unit]
+Description=XenithOS Cloud relay (consoles on :8795, passed down the tunnel to XenithOS Cloud)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 -I /opt/xenith-relay/xenith-relay.py
+Environment=XENITH_RELAY_LISTEN=0.0.0.0:8795
+Environment=XENITH_RELAY_TO=127.0.0.1:18795
+Restart=always
+RestartSec=2
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target
