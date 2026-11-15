@@ -420,6 +420,13 @@ TUBE_CHUNK = 256 * 1024
 TUBE_IDLE_S = 60               # a stream nobody has asked for in this long is dropped
 TUBE_SEARCHES_PER_MIN = 10     # per profile
 TUBE_STARTS_PER_10MIN = 30     # per profile
+TUBE_BLOCKED = "YouTube is turning XenithOS Cloud away right now. Try again later."
+
+
+def tube_blocked(stderr):
+    """YouTube rate-limits and bot-checks server addresses; yt-dlp says so on stderr."""
+    text = (stderr or b"").decode("utf-8", "replace")
+    return "429" in text or "not a bot" in text
 
 
 class TubeStream:
@@ -496,6 +503,8 @@ class Tube:
             return hit[1]
         out = subprocess.run([self.ytdlp, "--flat-playlist", "-J", "--no-warnings", "--no-cache-dir", f"ytsearch16:{query}"],
                              capture_output=True, timeout=40)
+        if out.returncode != 0 and tube_blocked(out.stderr):
+            raise RuntimeError(TUBE_BLOCKED)
         data = json.loads(out.stdout or b"{}")
         rows = []
         for e in data.get("entries") or []:
@@ -556,6 +565,8 @@ class Tube:
         try:
             out = subprocess.run([self.ytdlp, "-j", "--no-warnings", "--no-cache-dir", "--no-playlist", "-f", TUBE_FORMAT, "--",
                                   f"https://www.youtube.com/watch?v={vid}"], capture_output=True, timeout=60)
+            if out.returncode != 0 and tube_blocked(out.stderr):
+                raise RuntimeError(TUBE_BLOCKED)
             info = json.loads(out.stdout)
         except (subprocess.TimeoutExpired, ValueError):
             raise RuntimeError("YouTube didn't hand over that video. Try another one.")
@@ -876,6 +887,8 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                         return self.error(429, "That's a lot of searching. Wait a minute.")
                     try:
                         rows = tube.search(query)
+                    except RuntimeError as e:
+                        return self.error(503, str(e))
                     except (subprocess.TimeoutExpired, ValueError, OSError):
                         return self.error(502, "YouTube didn't answer. Try again.")
                     return self.reply(200, "".join(f"{v}|{t}|{c}|{d}\n" for v, t, c, d in rows))
