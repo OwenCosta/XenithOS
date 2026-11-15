@@ -35,4 +35,13 @@ int linux_steam_game_running(int appid);
  * line (1); 0 when it's empty. In plain ASCII, for XenithOS's font. */
 int  linux_log_reason(const char *log, char *out, int n);
 
+/* Console mode's window manager (kiosk.c): XenithOS runs on its own X server and manages the
+ * windows apps open over it. start() takes XenithOS's own window, after it's on screen; 0 if
+ * another window manager is running (a desktop). poll() handles what's waiting. */
+int  kiosk_wm_start(unsigned long self_window);
+int  kiosk_wm_running(void);
+void kiosk_wm_poll(void);
+int  kiosk_wm_windows(void);                 /* apps' windows on screen now */
+void kiosk_wm_show_self(void);               /* XenithOS's window on top with the keyboard again */
+
 #endif

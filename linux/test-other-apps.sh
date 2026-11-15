@@ -74,7 +74,7 @@ ms() { echo $(( ($(date +%s%N) - start) / 1000000 )); }
 press() { xdotool keydown "$1"; sleep 0.08; xdotool keyup "$1"; }
 shot() { xwd -root -silent | convert xwd:- "$T/shots/$1.png"; printf "%6d ms  %-14s brightness %s\n" "$(ms)" "$1" "$(convert "$T/shots/$1.png" -colorspace Gray -format '%[fx:int(mean*255)]' info:)"; }
 if [ "$MODE" = console ]; then
-    export XENITHOS_FULLSCREEN=1 XENITHOS_CAGE="$T/bin/cage"
+    export XENITHOS_FULLSCREEN=1 XENITHOS_BARE=1 XENITHOS_CAGE="$T/bin/cage"
 else
     export XENITHOS_WINDOW=1
 fi

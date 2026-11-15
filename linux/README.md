@@ -28,13 +28,22 @@ that started on a graphical login screen are set to start in text mode instead, 
 
 ## Console mode and desktop mode
 
-- Console mode is XenithOS full screen, drawn straight to the display with no desktop underneath.
+- Console mode is XenithOS full screen with no desktop underneath. Since 0.5.5 XenithOS starts its own X
+  server for it (with startx, like desktop mode) and is its only program, so apps from Flathub and Steam can
+  open their windows over XenithOS's (see below). On machines without an X server (installed with
+  `--no-desktop`) it draws straight to the display, as before.
 - Desktop mode: XenithOS power menu, **Switch to desktop mode**.
 - Back to XenithOS: **Return to XenithOS** in the desktop's application menu, or log out.
 
 The mode is kept in `~/.config/xenithos/mode`. If XenithOS can't start (no usable graphics driver, say), the
 session falls back to desktop mode, or a plain shell when there's no desktop. What it printed is in
-`~/.config/xenithos/xenithos.log`. In desktop mode you can also run XenithOS in a window from the menu.
+`~/.config/xenithos/xenithos.log`, and the X server's own log in `~/.local/share/xorg/`. In desktop mode
+you can also run XenithOS in a window from the menu.
+
+If console mode's X server doesn't get as far as XenithOS, the next start draws straight to the display
+instead and leaves `~/.config/xenithos/kiosk-failed` (holding the version), so a broken X server can't stop
+XenithOS from starting; it tries X again after the next update. Delete that file to try again sooner, or
+set `XENITHOS_KIOSK=0` to never use it.
 
 ## Controls
 
@@ -82,9 +91,12 @@ args=
 ```
 
 It's on the home screen and in Apps like the rest. These apps aren't drawn inside XenithOS's window, so
-they get the screen: in console mode XenithOS hands the display and the sound over and the app runs under
-**cage**, a kiosk compositor that shows one app full screen (with Xwayland for apps that need X11); in
-desktop mode XenithOS's window steps aside. **Hold Guide for three seconds** (or press
+they open their own. In console mode they open over XenithOS on its X server: XenithOS manages their
+windows itself (linux/kiosk.c), so an app's window fills the screen, dialogs and windows that can't be
+resized (installers, say) are centred, the newest has the keyboard, and XenithOS's "Starting" screen
+stays up until the app's window shows. Nothing goes black in between. Without an X server, XenithOS
+hands the display over and the app runs under **cage**, a kiosk compositor. In desktop mode XenithOS's
+window steps aside. **Hold Guide for three seconds** (or press
 Ctrl+Alt+Backspace) to close the app and come back to XenithOS; the app is asked to close first, so it
 can save. X on an installed app in the Store updates or removes it (its settings stay in
 `~/.var/app`). Apps removed some other way (from the desktop, say) disappear from the home screen too.
@@ -105,9 +117,14 @@ Launcher) need a keyboard and mouse.
 Your own: any `.app` file with `name=` and `exec=` (a program and its arguments, split at spaces, no
 shell) is started the same way.
 
-Machines installed before 0.5.4 need the install command once more for Flatpak and cage; the Store says
-so if they're missing. What Flatpak and the apps print goes to `flatpak.log` and `app.log` in
-`uda:/xenith`.
+Machines installed before 0.5.4 need the install command once more for Flatpak; the Store says so if
+it's missing. What Flatpak and the apps print goes to `flatpak.log` and `app.log` in `uda:/xenith`. If
+Minecraft won't start from Prism Launcher, its own log is in
+`~/.var/app/org.prismlauncher.PrismLauncher/data/PrismLauncher/instances/<name>/.minecraft/logs/latest.log`.
+
+Apps get XenithOS's environment minus its own SDL settings, under both SDL names: where SDL2 is sdl2-compat
+on top of SDL3, `SDL_VIDEODRIVER=kmsdrm` is also copied to `SDL_VIDEO_DRIVER`, which sent SDL3 programs
+(Sober) to the bare console in 0.5.4 and made them stop with "no video subsystem".
 
 ## Updates
 
@@ -134,6 +151,11 @@ linux/xenithos` saves frame 200 and quits. `XENITHOS_DATA` changes the data fold
 `linux/test-other-apps.sh` (or `linux/test-other-apps.sh console`) does the same for apps that take the
 screen, with stand-ins for Steam, cage and Flatpak: a Steam game on the home screen with its picture,
 Steam closed again when the game ends, and a failing app explained.
+
+`linux/test-console-mode.sh` checks console mode's X server and window manager in a 1920x1080 virtual
+display with a stand-in startx: xclock must fill the screen, a window that can't be resized must be
+centred, a slow app must leave the "Starting" screen moving, each must give the screen back when closed
+the way holding Guide does, and a startx that fails must fall back to drawing directly.
 
 `linux/test-in-window.sh volt` (or `doom`) runs the whole thing in a virtual display (needs `xvfb xdotool
 x11-apps imagemagick`): it boots XenithOS, starts the app, leaves it, and moves around the home screen,

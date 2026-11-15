@@ -91,8 +91,8 @@ XFCE Linux desktop) is in XenithOS's power menu; "Return to XenithOS" in the des
 keyboard controls and how to undo it are in [linux/README.md](linux/README.md).
 
 The Store on a PC also has apps from Flathub and Steam. They install through XenithOS's own screens, start from
-its home screen and get the whole screen (under cage, a kiosk compositor, in console mode); hold Guide for three
-seconds to come back. Games installed in Steam show up on the home screen too. Roblox comes through Sober, a
+its home screen and open full screen over XenithOS (console mode runs XenithOS on its own X server, which it
+manages itself); hold Guide for three seconds to come back. Games installed in Steam show up on the home screen too. Roblox comes through Sober, a
 community project that isn't made by Roblox, and only runs on x86-64 PCs; Steam needs a Steam account.
 
 ## XenithOS Cloud (the server)
@@ -193,6 +193,7 @@ shared/net_*.c           HTTP client: lwIP on the Xbox (linux/net_posix.c and si
 apps/volt, doom, tube,   the apps
   photos
 linux/apps_linux.c       apps from Flathub (Flatpak) and Steam's library, on PCs
+linux/kiosk.c            console mode's window manager: apps' windows over XenithOS on its own X server
 shared/picture.c         JPEG, PNG, BMP and GIF through stb_image
 server/                  XenithOS Cloud, its systemd unit, the admin helper, the website
 tools/                   font and thumbnail generators

@@ -22,6 +22,13 @@ mkdir -p "$work/uda:/xenith"
     [ -n "$XSIM_KEY" ] && echo "key=$XSIM_KEY"
 } > "$work/uda:/xenith/config.txt"
 [ -n "$XSIM_PROFILE" ] && cp "$XSIM_PROFILE" "$work/uda:/xenith/profile.txt"
+# XSIM_APPS: that many more (empty) apps, for rows that have to scroll
+if [ -n "$XSIM_APPS" ]; then
+    for i in $(seq 1 "$XSIM_APPS"); do
+        : > "$work/uda:/apps/game$i.elf32"
+        printf 'name=Game %s\nversion=1.0\n' "$i" > "$work/uda:/apps/game$i.txt"
+    done
+fi
 # XSIM_PHOTOS: a folder of pictures for Photos (copied to uda:/photos)
 if [ -n "$XSIM_PHOTOS" ]; then
     mkdir -p "$work/uda:/photos"
@@ -38,8 +45,8 @@ bin="${XSIM_BIN:-xsim}"
 make -s -C "$here" "$bin"
 cd "$work"
 # XSIM_ARGS: arguments for the program, e.g. "xenithos-handoff from=volt" to start XenithOS as
-# if coming back from an app (shared/handoff.h)
-# shellcheck disable=SC2086
+# if coming back from an app (shared/handoff.h). It comes from the environment.
+# shellcheck disable=SC2086,SC2153
 XSIM_SCRIPT="$script" XSIM_OUT="$work/out" ASAN_OPTIONS=detect_leaks=0 "$here/$bin" $XSIM_ARGS
 
 mkdir -p "$here/out/$name"

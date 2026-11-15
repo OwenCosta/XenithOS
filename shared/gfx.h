@@ -49,6 +49,8 @@ int  gfx_text(int x, int y, int s, uint32_t c, const char *str);
 int  gfx_text_w(int s, const char *str);
 #define GFX_TEXT_H(s) (7 * (s))
 int  gfx_brand(int x, int y, int s, uint32_t main_color, uint32_t os_color);
+/* The wordmark building itself up, t seconds after it starts (whole by about 1 s). */
+void gfx_brand_anim(int x, int y, int s, uint32_t main_color, uint32_t os_color, float t);
 #define GFX_BRAND_W(s) gfx_text_w((s), "XENITHOS")
 
 /* Images: 0xAARRGGBB pixels. id is unique per loaded or generated image (used for caching). */

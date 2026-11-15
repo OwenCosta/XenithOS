@@ -1,7 +1,9 @@
 /* platform.h on PCs and Raspberry Pis: Linux through SDL2.
  *
- * Console mode: xenithos-session starts XenithOS on the bare console (no desktop), where
- * SDL draws straight to the screen through KMS/DRM. Started from a desktop instead, it opens
+ * Console mode: xenithos-session starts XenithOS on the bare console (no desktop). XenithOS
+ * then starts its own X server and runs as its only program (see "console mode" below and
+ * kiosk.c), so apps from Flathub and Steam open over it. Without an X server it draws
+ * straight to the screen through KMS/DRM, as before. Started from a desktop instead, it opens
  * a window. The picture is drawn at 1280x720 and scaled to fit the screen.
  *
  * Files: the "uda:/..." paths the Xbox uses are kept. XenithOS changes into its data folder
@@ -24,6 +26,7 @@
 #define _GNU_SOURCE
 #endif
 #include <SDL.h>
+#include <SDL_syswm.h>
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -46,6 +49,7 @@
 
 #include "platform.h"
 #include "platform_linux.h"
+#include "theme.h"
 
 #define SCREEN_W 1280
 #define SCREEN_H 720
@@ -126,15 +130,26 @@ static int guest_attach(void)
 
 /* ------------------------------------------------------------------ video */
 
+static int in_kiosk;                          /* console mode on XenithOS's own X server */
+
 static void video_open(void)
 {
     Uint32 flags = windowed ? SDL_WINDOW_RESIZABLE : SDL_WINDOW_FULLSCREEN_DESKTOP;
+    int x = SDL_WINDOWPOS_CENTERED, y = SDL_WINDOWPOS_CENTERED, w = SCREEN_W, h = SCREEN_H;
+    SDL_DisplayMode dm;
     if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
         fprintf(stderr, "xenithos: no display: %s\n", SDL_GetError());
         exit(1);
     }
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
-    win = SDL_CreateWindow("XenithOS", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SCREEN_W, SCREEN_H, flags);
+    /* No window manager is running yet to make a window full screen: cover the screen. */
+    if (in_kiosk && SDL_GetDesktopDisplayMode(0, &dm) == 0) {
+        flags = SDL_WINDOW_BORDERLESS;
+        x = y = 0;
+        w = dm.w;
+        h = dm.h;
+    }
+    win = SDL_CreateWindow("XenithOS", x, y, w, h, flags);
     if (!win) {
         fprintf(stderr, "xenithos: can't open a window: %s\n", SDL_GetError());
         exit(1);
@@ -171,6 +186,71 @@ static void quit_now(int code)
     exit(code);
 }
 
+/* ------------------------------------------------------------- console mode
+ *
+ * Started by xenithos-session on the bare console, XenithOS starts its own X server with
+ * startx (as desktop mode does) and runs as its only program; kiosk.c manages the windows apps
+ * open over it. If that didn't get as far as XenithOS last time (a driver problem, say),
+ * XenithOS draws straight to the screen instead, until it's updated. XENITHOS_KIOSK=0 turns
+ * it off. The markers are in ~/.config/xenithos: kiosk-starting while X starts, kiosk-failed
+ * (with the version) when it didn't. */
+static void kiosk_path(char *out, int n, const char *name)
+{
+    const char *home = getenv("HOME");
+    snprintf(out, n, "%s/.config/xenithos/%s", home && *home ? home : "/tmp", name);
+}
+
+static void kiosk_maybe_start(void)
+{
+    char startx[256], marker[600], failed[600], seen[32] = "";
+    const char *k = getenv("XENITHOS_KIOSK");
+    FILE *f;
+    if (k && !strcmp(k, "1")) { in_kiosk = 1; return; }      /* this is XenithOS on its X server */
+    if ((k && !strcmp(k, "0")) || !getenv("XENITHOS_SESSION") || getenv("DISPLAY") || getenv("WAYLAND_DISPLAY") || !self_path[0])
+        return;
+    if (!linux_find_program("startx", startx, sizeof startx)) return;    /* no X server (--no-desktop) */
+    kiosk_path(marker, sizeof marker, "kiosk-starting");
+    kiosk_path(failed, sizeof failed, "kiosk-failed");
+    if ((f = fopen(failed, "r"))) {
+        if (!fgets(seen, sizeof seen, f)) seen[0] = 0;
+        fclose(f);
+        if (!strncmp(seen, XENITH_VERSION "\n", strlen(XENITH_VERSION) + 1)) return;   /* not again until an update */
+    }
+    if (access(marker, F_OK) == 0) {
+        rename(marker, failed);
+        fprintf(stderr, "xenithos: console mode's X server didn't start last time: drawing to the screen directly\n");
+        return;
+    }
+    if ((f = fopen(marker, "w"))) {
+        fprintf(f, "%s\n", XENITH_VERSION);
+        fclose(f);
+    }
+    setenv("XENITHOS_KIOSK", "1", 1);
+    unsetenv("SDL_VIDEODRIVER");
+    unsetenv("SDL_VIDEO_DRIVER");            /* sdl2-compat copies it under SDL3's name too */
+    {
+        /* -s 0 -dpms: a controller doesn't count as input to X, so never blank the screen. */
+        char *argv[] = {startx, self_path, "--", "-keeptty", "-s", "0", "-dpms", NULL};
+        execv(startx, argv);
+    }
+    remove(marker);                          /* startx couldn't even be run */
+    unsetenv("XENITHOS_KIOSK");
+}
+
+/* XenithOS's window is up on its X server: manage the windows apps open over it. */
+static void kiosk_begin(void)
+{
+    SDL_SysWMinfo info;
+    char marker[600];
+    if (!in_kiosk) return;
+    kiosk_path(marker, sizeof marker, "kiosk-starting");
+    remove(marker);                          /* X got as far as XenithOS */
+    SDL_VERSION(&info.version);
+    if (!SDL_GetWindowWMInfo(win, &info) || info.subsystem != SDL_SYSWM_X11 ||
+        !kiosk_wm_start((unsigned long)info.info.x11.window))
+        fprintf(stderr, "xenithos: can't manage windows on this X server\n");
+}
+
 void plat_init(void)
 {
     const char *s;
@@ -181,8 +261,10 @@ void plat_init(void)
      * /proc/self/exe reads "... (deleted)"). */
     n = readlink("/proc/self/exe", self_path, sizeof self_path - 1);
     self_path[n > 0 ? n : 0] = 0;
-    /* In a desktop, a window; on the bare console (or when asked), the whole screen. */
-    windowed = (getenv("DISPLAY") || getenv("WAYLAND_DISPLAY")) && !getenv("XENITHOS_FULLSCREEN");
+    kiosk_maybe_start();                     /* on the bare console this becomes startx */
+    /* In a desktop, a window; on the bare console, its own X server (or when asked), the
+     * whole screen. */
+    windowed = (getenv("DISPLAY") || getenv("WAYLAND_DISPLAY")) && !getenv("XENITHOS_FULLSCREEN") && !in_kiosk;
     if (getenv("XENITHOS_WINDOW")) windowed = 1;
     shot_path = getenv("XENITHOS_SHOT");
     if ((s = getenv("XENITHOS_SHOT_FRAME"))) shot_frame = atoi(s);
@@ -191,6 +273,7 @@ void plat_init(void)
         exit(1);
     }
     video_open();
+    kiosk_begin();
 }
 
 void plat_screen_size(int *w, int *h)
@@ -415,6 +498,7 @@ void plat_poll(struct pad *p)
         guest_poll(p);
         return;
     }
+    kiosk_wm_poll();
     while (SDL_PollEvent(&e))
         if (handle_event(&e, type_char)) {
             if (hook_before) hook_before();
@@ -853,6 +937,7 @@ static int run_inside(const char *path, int *status)
             if (want) SDL_StartTextInput();
             else SDL_StopTextInput();
         }
+        kiosk_wm_poll();
         while (SDL_PollEvent(&e)) {
             if (handle_event(&e, put_text)) {
                 closing = 1;
@@ -927,10 +1012,11 @@ static int run_inside(const char *path, int *status)
 /* ------------------------------------------------------------ other programs
  *
  * Programs that aren't XenithOS apps (apps from Flathub, Steam and its games, "exec=" ones)
- * can't draw into XenithOS's window, so they get the screen to themselves:
- *   on the bare console, XenithOS lets go of the display and the sound device and the program
- *   runs under cage, a kiosk Wayland compositor (one program, full screen, with Xwayland for
- *   the ones that still need X11);
+ * can't draw into XenithOS's window, so they open their own:
+ *   in console mode, on XenithOS's own X server, their windows open over XenithOS's (kiosk.c
+ *   makes them fill the screen), and XenithOS keeps its "Starting" screen moving until then;
+ *   on the bare console (no X server), XenithOS lets go of the display and the program runs
+ *   under cage, a kiosk Wayland compositor;
  *   in a desktop, XenithOS's window steps aside while the program opens its own.
  * Meanwhile XenithOS keeps watching the controller: Guide held for three seconds, or
  * Ctrl+Alt+Backspace, closes the program (asked first, then made to). A Steam game started
@@ -993,17 +1079,23 @@ static void kbd_close(void)
 }
 
 /* Our environment, minus XenithOS's own settings: SDL_VIDEODRIVER=kmsdrm would send SDL games
- * to the bare console instead of the compositor. */
+ * to the bare console instead of the screen they're given. On systems where SDL2 is sdl2-compat
+ * over SDL3, it's also copied under SDL3's names (SDL_VIDEO_DRIVER), which Sober and other
+ * SDL3 programs read: those go too. */
 static char **other_env(void)
 {
-    size_t n = 0, i, k = 0;
+    static const char *const drop[] = {"XENITHOS_", "SDL_VIDEODRIVER=", "SDL_VIDEO_DRIVER=", "SDL_AUDIODRIVER=",
+                                       "SDL_AUDIO_DRIVER=", "SDL2_COMPAT"};
+    size_t n = 0, i, k = 0, d;
     char **env;
     while (environ[n]) n++;
     if (!(env = malloc(sizeof *env * (n + 1)))) return NULL;
-    for (i = 0; i < n; i++)
-        if (strncmp(environ[i], "XENITHOS_", 9) && strncmp(environ[i], "SDL_VIDEODRIVER=", 16) &&
-            strncmp(environ[i], "SDL_AUDIODRIVER=", 16))
-            env[k++] = environ[i];
+    for (i = 0; i < n; i++) {
+        int keep = 1;
+        for (d = 0; d < sizeof drop / sizeof drop[0]; d++)
+            if (!strncmp(environ[i], drop[d], strlen(drop[d]))) keep = 0;
+        if (keep) env[k++] = environ[i];
+    }
     env[k] = NULL;
     return env;
 }
@@ -1058,7 +1150,9 @@ static void ask_to_close(pid_t root)
 static int run_other(struct linux_app *app)
 {
     char cage[256], log[700], reason[160], *argv[32], **env;
-    int console = !windowed, n = 0, i, status = 0, seen_running = 0, idle = 0, said, forced = 0;
+    /* XENITHOS_BARE=1: act as if on the bare console (tests, in a virtual display) */
+    int console = !in_kiosk && ((!getenv("DISPLAY") && !getenv("WAYLAND_DISPLAY")) || getenv("XENITHOS_BARE"));
+    int n = 0, i, status = 0, seen_running = 0, idle = 0, said, forced = 0;
     uint64_t start, now, guide_since = 0, close_at = 0, checked = 0, test_close;
     pid_t pid, r;
 
@@ -1085,7 +1179,7 @@ static int run_other(struct linux_app *app)
         video_close();                             /* and the screen */
     } else {
         SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");    /* Guide still counts */
-        SDL_MinimizeWindow(win);
+        if (!in_kiosk) SDL_MinimizeWindow(win);    /* in console mode the app's window covers ours */
     }
     pid = linux_spawn(argv, env, log, 1);
     free(env);
@@ -1095,7 +1189,11 @@ static int run_other(struct linux_app *app)
     test_close = getenv("XENITHOS_TEST_CLOSE") ? (uint64_t)atoi(getenv("XENITHOS_TEST_CLOSE")) * 1000000 : 0;
     while (pid > 0) {
         SDL_Event e;
-        while (SDL_PollEvent(&e)) handle_event(&e, type_char);    /* controllers coming and going */
+        kiosk_wm_poll();
+        while (SDL_PollEvent(&e)) {
+            handle_event(&e, type_char);            /* controllers coming and going */
+            if (in_kiosk && e.type == SDL_WINDOWEVENT) show_texture();   /* uncovered: our last frame again */
+        }
         open_first_pad();
         now = plat_time_us();
         guide_since = btn(SDL_CONTROLLER_BUTTON_GUIDE) ? (guide_since ? guide_since : now) : 0;
@@ -1122,7 +1220,10 @@ static int run_other(struct linux_app *app)
         if (close_at && now - close_at > 10000000 && forced == 1) { kill(-pid, SIGKILL); forced = 2; }
         r = waitpid(pid, &status, WNOHANG);
         if (r == pid || (r < 0 && errno != EINTR)) break;
-        SDL_Delay(20);
+        /* Console mode: until the app's window is up (or between its windows), XenithOS is
+         * what's on screen, so its "Starting" screen keeps moving. */
+        if (in_kiosk && !kiosk_wm_windows() && launch_progress) launch_progress(0, 0);
+        else SDL_Delay(20);
     }
     kbd_close();
     if (pid > 0) kill(-pid, SIGTERM);             /* anything it left behind */
@@ -1130,7 +1231,8 @@ static int run_other(struct linux_app *app)
     if (console) {
         video_open();
     } else {
-        SDL_RestoreWindow(win);
+        if (in_kiosk) kiosk_wm_show_self();
+        else SDL_RestoreWindow(win);
         SDL_RaiseWindow(win);
         SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "0");
     }

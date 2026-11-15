@@ -1,0 +1,35 @@
+# "Jump back in" with more apps than fit: it slides to keep the selected one in view.
+#   XSIM_APPS=8 sim/run.sh sim/scripts/home_row.txt home_row
+wait 200
+press down
+wait 20
+shot row_first
+press right
+press right
+press right
+press right
+press right
+wait 30
+shot row_sixth
+press right
+press right
+press right
+press right
+press right
+press right
+wait 30
+shot row_last
+press left
+press left
+press left
+press left
+press left
+press left
+press left
+press left
+press left
+press left
+press left
+wait 30
+shot row_back_first
+quit

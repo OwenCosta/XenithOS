@@ -448,7 +448,7 @@ int gfx_str_w(int font, const char *s)
 int gfx_str_a(int font, int x, int y, uint32_t c, int a, const char *s)
 {
     const struct font *f = F(font);
-    int pen = x << 6, base = y + f->ascent;
+    int pen = x * 64, base = y + f->ascent;    /* x can be off the left edge (a row sliding by) */
     for (; *s; s++) {
         const struct font_glyph *g = G(f, *s);
         int gx = ((pen + 32) >> 6) + g->x, gy = base + g->y, i, j;
@@ -583,6 +583,31 @@ int gfx_brand(int x, int y, int s, uint32_t main_color, uint32_t os_color)
 {
     int w = gfx_text(x, y, s, main_color, "XENITH") + s;
     return w + gfx_text(x + w, y, s, os_color, "OS");
+}
+
+/* The wordmark building itself up, t seconds in: each square of each letter grows from its
+ * middle, top row first, one letter after the other. It's whole by about 1 s. */
+void gfx_brand_anim(int x, int y, int s, uint32_t main_color, uint32_t os_color, float t)
+{
+    static const char word[] = "XENITHOS";
+    int i, row, col;
+    for (i = 0; word[i]; i++) {
+        const uint8_t *g = pix[(unsigned char)word[i]];
+        uint32_t c = i >= 6 ? os_color : main_color;
+        int lx = x + i * 6 * s;
+        for (row = 0; row < 7; row++)
+            for (col = 0; col < 5; col++) {
+                float k = (t - (i * 0.075f + row * 0.03f + col * 0.01f)) / 0.22f, sz;
+                if (!(g[row] & (0x10 >> col)) || k <= 0) continue;
+                if (k >= 1) {
+                    gfx_rect(lx + col * s, y + row * s, s, s, c);
+                    continue;
+                }
+                k = 1 - (1 - k) * (1 - k) * (1 - k);
+                sz = s * k;
+                gfx_fill_rrect(lx + col * s + (s - sz) / 2, y + row * s + (s - sz) / 2, sz, sz, 0, c, 255);
+            }
+    }
 }
 
 /* --------------------------------------------------------------------- images */

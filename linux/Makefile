@@ -8,10 +8,10 @@ SDL_CFLAGS  := $(shell sdl2-config --cflags)
 SDL_LIBS    := $(shell sdl2-config --libs)
 OPT         ?= -O2 -g
 CFLAGS_ALL  := $(OPT) -std=gnu11 -Wall -Wno-format-truncation -I../shared -I../source $(SDL_CFLAGS) -DXENITH_LINUX
-LIBS        := $(SDL_LIBS) -lz -lm -lpthread
+LIBS        := $(SDL_LIBS) -lX11 -lz -lm -lpthread
 
 SHARED      := $(filter-out ../shared/platform_xenon.c ../shared/net_xenon.c, $(wildcard ../shared/*.c))
-PLATFORM    := platform_sdl.c apps_linux.c net_posix.c
+PLATFORM    := platform_sdl.c apps_linux.c kiosk.c net_posix.c
 HEADERS     := $(wildcard ../shared/*.h ../source/*.h) platform_linux.h
 
 SHELL_SRC   := $(wildcard ../source/*.c) $(SHARED) $(PLATFORM)

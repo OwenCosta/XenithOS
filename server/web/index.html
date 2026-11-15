@@ -219,7 +219,7 @@
         <tr><td>Profiles, Cloud, avatars</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">needs the Ethernet cable on the Xbox; no Wi-Fi driver</td></tr>
         <tr><td>VOLT, DOOM, Tube, Photos</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">DOOM comes with Freedoom and has sound effects; no music yet</td></tr>
         <tr><td>PCs and Raspberry Pis</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">0.5.2 runs apps inside XenithOS's window: no black screen between them</td></tr>
-        <tr><td>Apps from Flathub, Steam</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">PCs only; tested with stand-ins and Flatpak on Linux, not yet on a real console-mode PC</td></tr>
+        <tr><td>Apps from Flathub, Steam</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">PCs only; 0.5.5 opens them over XenithOS on its own X server, tested in a virtual display</td></tr>
         <tr><td>XenithOS Cloud and this site</td><td class="yes" data-k="Builds">yes</td><td class="live" data-k="On the Xbox">live</td><td class="note">you're on it</td></tr>
       </tbody>
     </table>
@@ -269,6 +269,8 @@
   <div class="wrap">
     <h2>Build log</h2>
     <ul class="log">
+      <li><b>0.5.5</b><time datetime="2026-11-15">Nov 15, 2026</time>
+        <p>A start-up animation: the XenithOS wordmark builds itself up square by square. The Jump back in row on the home screen scrolls to keep the selected app in view. On PCs, console mode now runs XenithOS on its own X server, so apps from Flathub and Steam open full screen over XenithOS instead of the screen going black, installers and dialogs are centred, and XenithOS's "Starting" screen stays up until the app is ready. Apps no longer inherit XenithOS's own display setting, which made Sober (Roblox) stop with "no video subsystem" on newer systems. Machines without an X server keep the 0.5.4 way.</p></li>
       <li><b>0.5.4</b><time datetime="2026-11-15">Nov 15, 2026</time>
         <p>The Store on PCs has apps from Flathub: Roblox (through Sober, a community project not made by Roblox), Minecraft through Prism Launcher, Kodi, Firefox, Spotify, Discord, Moonlight, emulators and games. They install behind XenithOS's own screens, start from the home screen and get the whole screen to themselves; hold Guide for three seconds to come back. Steam is there too, opening in Big Picture, with a section of games on Steam, and every game installed in Steam shows up on XenithOS's home screen with its picture. When a Steam game ends, XenithOS closes Steam and comes back. New everywhere: Photos, for your pictures, with zoom, turning and slideshows. On a PC, run the install command once more to add what apps need.</p></li>
       <li><b>0.5.3</b><time datetime="2026-11-15">Nov 15, 2026</time>
