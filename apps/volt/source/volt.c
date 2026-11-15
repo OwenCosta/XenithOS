@@ -17,6 +17,7 @@
 #include "gfx.h"
 #include "net.h"
 #include "platform.h"
+#include "handoff.h"
 #include "startlog.h"
 #include "theme.h"
 #include "ui.h"
@@ -236,14 +237,14 @@ static void draw(void)
 static void back_to_shell(void)
 {
     plat_rumble(0, 0);
-    ui_loading_frame("Returning to XenithOS", NULL);
-    plat_launch(XENITH_SHELL_PATH);
+    ui_back_to_xenithos("volt");
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     int uploaded = 0, started = 0;
 
+    handoff_args(argc, argv);
     startlog_mark("start");
     plat_init();
     startlog_mark("video");

@@ -68,10 +68,15 @@ enum { PLAT_XBOX, PLAT_PC };
 int  plat_kind(void);
 
 /* Start another program (an app, or XENITH_SHELL_PATH for XenithOS itself).
- * Xbox: the program replaces this one, so this only returns (0) if loading failed.
+ * Xbox: the program replaces this one, so this only returns (0) if loading failed. It gets
+ * what handoff_set() was given (handoff.h), plus the screen mode, so it can keep the
+ * picture as it is instead of setting the TV up again.
  * PC: the app runs as its own process and this returns 1 once it quits, or 0 if it couldn't
  * start. Asking for XenithOS from inside an app just quits the app. */
 int  plat_launch(const char *path);
+/* fn(done, total) is called as plat_launch reads the program (Xbox), for a progress bar.
+ * NULL turns it off. */
+void plat_set_launch_progress(void (*fn)(int done, int total));
 void plat_reboot(void);
 void plat_power_off(void);
 int  plat_can_exit_to_loader(void);          /* Xbox: back to XeLL by returning from main */

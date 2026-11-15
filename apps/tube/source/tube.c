@@ -25,6 +25,7 @@
 #include "keyboard.h"
 #include "net.h"
 #include "platform.h"
+#include "handoff.h"
 #include "startlog.h"
 #include "theme.h"
 #include "ui.h"
@@ -81,7 +82,7 @@ static void clock_text(int s, char *out, int n)
 static void back_to_shell(void)
 {
     plat_rumble(0, 0);
-    plat_launch(XENITH_SHELL_PATH);
+    ui_back_to_xenithos("tube");
 }
 
 /* ---------------------------------------------------------------- results */
@@ -547,9 +548,10 @@ static void ask_search(void)
     if (keyboard("Search YouTube", "Type what you want to watch", q, 48, KB_TEXT) && q[0]) search(q);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     int started = 0;
+    handoff_args(argc, argv);
     startlog_mark("start");
     plat_init();
     startlog_mark("video");

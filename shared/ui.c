@@ -8,8 +8,10 @@
 #include "avatar.h"
 #include "config.h"
 #include "gfx.h"
+#include "handoff.h"
 #include "icons.h"
 #include "net.h"
+#include "platform.h"
 #include "theme.h"
 #include "ui.h"
 
@@ -240,14 +242,55 @@ void ui_spinner(int cx, int cy, int r, uint32_t color)
 
 /* ---------------------------------------------------- full-screen states */
 
-void ui_loading_frame(const char *title, const char *detail)
+void ui_loading_progress(const char *title, const char *detail, int done, int total)
 {
-    int cy = SCR_H / 2;
+    int cy = SCR_H / 2, w = 240, x = (SCR_W - w) / 2;
     ui_bg();
     ui_spinner(SCR_W / 2, cy - 44, 24, C_ACCENT);
     gfx_str_c(FONT_LABEL, SCR_W / 2, cy + 6, C_TEXT, title);
     if (detail) gfx_str_c(FONT_BODY, SCR_W / 2, cy + 46, C_SUB, detail);
+    if (total > 0) {
+        float f = (float)done / total;
+        if (f > 1) f = 1;
+        gfx_fill_rrect((float)x, cy + 96.0f, (float)w, 4, 2, C_SURFACE2, 255);
+        if (f > 0) gfx_fill_rrect((float)x, cy + 96.0f, w * f, 4, 2, C_ACCENT, 255);
+    }
     ui_end_frame();
+}
+
+void ui_loading_frame(const char *title, const char *detail)
+{
+    ui_loading_progress(title, detail, 0, 0);
+}
+
+static const char *launch_title, *launch_detail;
+static uint64_t launch_drawn;
+
+static void launch_frame(int done, int total)
+{
+    uint64_t now = ui_ms();
+    if (now - launch_drawn < 30 && done < total) return;
+    launch_drawn = now;
+    ui_loading_progress(launch_title, launch_detail, done, total);
+}
+
+int ui_launch(const char *path, const char *title, const char *detail)
+{
+    int started;
+    launch_title = title;
+    launch_detail = detail;
+    launch_drawn = 0;
+    ui_loading_progress(title, detail, 0, 0);
+    plat_set_launch_progress(launch_frame);
+    started = plat_launch(path);
+    plat_set_launch_progress(NULL);
+    return started;
+}
+
+void ui_back_to_xenithos(const char *app_id)
+{
+    handoff_set("from", app_id);
+    ui_launch(XENITH_SHELL_PATH, "XenithOS", "Going back");
 }
 
 static char busy_title[64], busy_detail[96];

@@ -23,6 +23,7 @@
 #include "audio.h"
 #include "../../../shared/config.h"     /* doomgeneric has a config.h of its own */
 #include "gfx.h"
+#include "handoff.h"
 #include "platform.h"
 #include "startlog.h"
 #include "theme.h"
@@ -64,7 +65,7 @@ static uint64_t back_since;
 static void back_to_xenith(void)
 {
     plat_rumble(0, 0);
-    plat_launch(XENITH_SHELL_PATH);
+    ui_back_to_xenithos("doom");
 }
 
 static void poll_pad(void)
@@ -193,22 +194,97 @@ void DG_SetWindowTitle(const char *title)
     (void)title;
 }
 
-/* ------------------------------------------------------------------ main */
-static const char *wad_dirs[] = {"uda:/data/", "uda:/doom/", "uda:/"};
-static const char *wad_names[] = {
-    "doom2.wad", "doom.wad", "plutonia.wad", "tnt.wad", "doom1.wad", "freedoom2.wad", "freedoom1.wad",
+/* ------------------------------------------------------------ game data */
+/* Where WADs are looked for: the Store puts game data in uda:/data/. On PCs and Pis the
+ * freedoom package (install.sh adds it) puts it in /usr/share/games/doom/. */
+static const char *wad_dirs[] = {
+    "uda:/data/", "uda:/doom/", "uda:/",
+#ifdef XENITH_LINUX
+    "/usr/share/games/doom/",
+#endif
 };
+static const struct { const char *file, *name; } games[] = {
+    {"doom.wad", "DOOM"},
+    {"doom2.wad", "DOOM II"},
+    {"plutonia.wad", "The Plutonia Experiment"},
+    {"tnt.wad", "TNT: Evilution"},
+    {"doom1.wad", "DOOM (shareware)"},
+    {"freedoom1.wad", "Freedoom: Phase 1"},
+    {"freedoom2.wad", "Freedoom: Phase 2"},
+};
+#define NGAMES ((int)(sizeof games / sizeof *games))
+#define CHOICE_FILE "uda:/doom/iwad.txt"
 
-static int find_wad(char *out, int size)
+static char found_path[NGAMES][96];
+static int found_game[NGAMES], nfound;
+
+static void find_games(void)
 {
-    unsigned d, n;
+    int g;
+    unsigned d;
     struct stat st;
-    for (n = 0; n < sizeof wad_names / sizeof *wad_names; n++)
+    nfound = 0;
+    for (g = 0; g < NGAMES; g++)
         for (d = 0; d < sizeof wad_dirs / sizeof *wad_dirs; d++) {
-            snprintf(out, size, "%s%s", wad_dirs[d], wad_names[n]);
-            if (stat(out, &st) == 0 && st.st_size > 0) return 1;
+            snprintf(found_path[nfound], sizeof found_path[0], "%s%s", wad_dirs[d], games[g].file);
+            if (stat(found_path[nfound], &st) == 0 && st.st_size > 0) {
+                found_game[nfound++] = g;
+                break;
+            }
         }
+}
+
+/* The game picked last time, or the first one. */
+static int last_choice(void)
+{
+    char line[40] = "";
+    int i;
+    FILE *f = fopen(CHOICE_FILE, "r");
+    if (f) {
+        if (!fgets(line, sizeof line, f)) line[0] = 0;
+        fclose(f);
+    }
+    line[strcspn(line, "\r\n")] = 0;
+    for (i = 0; i < nfound; i++)
+        if (!strcmp(games[found_game[i]].file, line)) return i;
     return 0;
+}
+
+static void save_choice(int i)
+{
+    FILE *f;
+    mkdir("uda:/doom", 0777);
+    f = fopen(CHOICE_FILE, "w");
+    if (!f) return;
+    fprintf(f, "%s\n", games[found_game[i]].file);
+    fclose(f);
+}
+
+/* More than one game installed (Freedoom comes as Phase 1 and Phase 2): ask which.
+ * Returns its index in found_*, or -1 to go back to XenithOS. */
+static int pick_game(void)
+{
+    int sel = last_choice(), rowh = 66, w = 560, x = (SCR_W - w) / 2;
+    int top = (SCR_H - nfound * rowh) / 2 + 40;
+    for (;;) {
+        int i, d;
+        ui_poll();
+        d = ui_nav_y();
+        if (d && sel + d >= 0 && sel + d < nfound) sel += d;
+        if (PRESSED(a) || PRESSED(start)) return sel;
+        if (PRESSED(b) || PRESSED(back)) return -1;
+
+        ui_bg();
+        gfx_str_c(FONT_HEAD, SCR_W / 2, top - 130, C_TEXT, "DOOM");
+        gfx_str_c(FONT_BODY, SCR_W / 2, top - 72, C_SUB, "Choose a game");
+        for (i = 0; i < nfound; i++) {
+            int y = top + i * rowh;
+            gfx_fill_rrect((float)x, (float)y, (float)w, rowh - 12.0f, 14, i == sel ? C_ACCENT : C_SURFACE, 255);
+            gfx_str_vc(FONT_BODY_SB, x + 26, y + (rowh - 12) / 2, i == sel ? 0xFFFFFF : C_TEXT, games[found_game[i]].name);
+        }
+        ui_hints("A=Play;B=XenithOS");
+        ui_end_frame();
+    }
 }
 
 static void no_wad_screen(void)
@@ -219,9 +295,15 @@ static void no_wad_screen(void)
     gfx_clear(C_BG);
     gfx_str_c(FONT_HEAD, SCR_W / 2, y, C_TEXT, "DOOM needs game data");
     y += gfx_line_h(FONT_HEAD) + 18;
-    gfx_str_c(FONT_BODY, SCR_W / 2, y, C_SUB, "Install Freedoom from the Store. It's free.");
-    y += 36;
-    gfx_str_c(FONT_BODY, SCR_W / 2, y, C_SUB, "Or copy your own doom1.wad or doom2.wad into a doom folder on the USB stick.");
+    if (plat_kind() == PLAT_XBOX) {
+        gfx_str_c(FONT_BODY, SCR_W / 2, y, C_SUB, "Update DOOM in the Store and it brings Freedoom with it. It's free.");
+        y += 36;
+        gfx_str_c(FONT_BODY, SCR_W / 2, y, C_SUB, "Or copy your own doom.wad or doom2.wad into a doom folder on the USB stick.");
+    } else {
+        gfx_str_c(FONT_BODY, SCR_W / 2, y, C_SUB, "Get Freedoom from the Store, or install the freedoom package.");
+        y += 36;
+        gfx_str_c(FONT_BODY, SCR_W / 2, y, C_SUB, "Or put your own doom.wad or doom2.wad in /usr/share/games/doom.");
+    }
     y += 80;
     gfx_str_c(FONT_BODY_SB, SCR_W / 2, y, C_ACCENT_HI, "Press A to go back to XenithOS");
     gfx_present();
@@ -235,11 +317,13 @@ static void no_wad_screen(void)
     }
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
-    static char wad[64];
+    static char wad[96];
     static char *args[] = {"doom", "-iwad", wad, NULL};
+    int pick = 0;
 
+    handoff_args(argc, argv);
     startlog_mark("start");
     plat_init();
     startlog_mark("video");
@@ -253,12 +337,23 @@ int main(void)
     audio_set_volume(st.volume);
     startlog_mark("sounds");
 
-    if (!find_wad(wad, sizeof wad)) {
+    find_games();
+    if (!nfound) {
         loading = 0;
         no_wad_screen();
         back_to_xenith();
         return 0;
     }
+    if (nfound > 1) {
+        pick = pick_game();
+        if (pick < 0) {
+            back_to_xenith();
+            return 0;
+        }
+        save_choice(pick);
+        loading_screen();
+    }
+    snprintf(wad, sizeof wad, "%s", found_path[pick]);
 
     mkdir("uda:/doom", 0777);
     atexit(back_to_xenith);       /* Doom's Quit, and its fatal errors, return to XenithOS */

@@ -8,11 +8,14 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <strings.h>
+
 #include "apps.h"
 #include "audio.h"
 #include "avatar.h"
 #include "config.h"
 #include "gfx.h"
+#include "handoff.h"
 #include "icons.h"
 #include "net.h"
 #include "platform.h"
@@ -27,13 +30,20 @@ static void boot(void)
 {
     int s = SCR_W / 170, bw, bx, by;
     uint64_t start;
+    /* Coming back from an app: it left "XenithOS / Going back" on screen, so carry on from
+     * there and go straight home, without the logo and the chime. */
+    int back = handoff_get("from") != NULL;
     if (s < 4) s = 4;
     bw = GFX_BRAND_W(s);
     bx = (SCR_W - bw) / 2;
     by = SCR_H / 2 - GFX_TEXT_H(s) / 2 - 20;
 
-    ui_bg();
-    gfx_present();
+    if (back) {
+        ui_loading_frame("XenithOS", "Loading");
+    } else {
+        ui_bg();
+        gfx_present();
+    }
 
     plat_storage_init();
     startlog_mark("storage");
@@ -45,6 +55,7 @@ static void boot(void)
     audio_set_volume(st.volume);
     audio_set_ui_sounds(st.ui_sounds);
     startlog_mark("sounds");
+    if (back) return;
     if (st.boot_sound) sfx(SFX_BOOT);
 
     start = ui_ms();
@@ -218,8 +229,11 @@ static void open_tile(int t)
     ui_fade_in();
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    const char *from;
+    int i;
+    handoff_args(argc, argv);
     startlog_mark("start");
     plat_init();
     startlog_mark("video");
@@ -228,6 +242,12 @@ int main(void)
     boot();
 
     apps_scan();
+    from = handoff_get("from");
+    for (i = 0; from && i < napps; i++)
+        if (!strcasecmp(apps[i].id, from)) {     /* back from this app: it's the one selected */
+            row = 1;
+            card = i;
+        }
     ui_fade_in();
     draw_home();
     ui_end_frame();

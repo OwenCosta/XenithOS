@@ -20,9 +20,14 @@
 #define MAX_ITEMS 32
 enum { ST_NEW, ST_INSTALLED, ST_UPDATE };
 
+#define MAX_NEEDS 4
+
 struct item {
     char id[33], kind[8], name[25], version[13], sha[65], file[48], desc[100];
     int size, state;
+    int own;                     /* the state of its own file; state also counts its game data */
+    int needs[MAX_NEEDS], nneeds;   /* game data it comes with (indexes into items) */
+    int needed;                  /* comes with another item, so it isn't listed by itself */
     char dest[96];
     struct img icon;
     unsigned char *icon_raw;
@@ -31,6 +36,9 @@ struct item {
 
 static struct item items[MAX_ITEMS];
 static int nitems;
+static int view[MAX_ITEMS], nview;      /* the items listed, in order */
+
+static void size_text(int bytes, char *out, int n);
 
 static int safe_name(const char *s)
 {
@@ -65,13 +73,57 @@ static int file_size(const char *path)
     return stat(path, &s) == 0 ? (int)s.st_size : -1;
 }
 
-static void update_state(struct item *it)
+static int own_state(const struct item *it)
 {
     int have = file_size(it->dest);
     if (!strcmp(it->kind, "system"))
-        it->state = !strcmp(it->version, XENITH_VERSION) ? ST_INSTALLED : ST_UPDATE;
-    else
-        it->state = have < 0 ? ST_NEW : have == it->size ? ST_INSTALLED : ST_UPDATE;
+        return !strcmp(it->version, XENITH_VERSION) ? ST_INSTALLED : ST_UPDATE;
+    return have < 0 ? ST_NEW : have == it->size ? ST_INSTALLED : ST_UPDATE;
+}
+
+/* An item that comes with game data only counts as installed once that's there too. */
+static void update_states(void)
+{
+    int i, n;
+    for (i = 0; i < nitems; i++) items[i].own = items[i].state = own_state(&items[i]);
+    for (i = 0; i < nitems; i++)
+        for (n = 0; n < items[i].nneeds; n++)
+            if (items[items[i].needs[n]].own != ST_INSTALLED && items[i].state == ST_INSTALLED)
+                items[i].state = ST_UPDATE;
+}
+
+static int total_size(const struct item *it)
+{
+    int n, bytes = it->size;
+    for (n = 0; n < it->nneeds; n++) bytes += items[it->needs[n]].size;
+    return bytes;
+}
+
+/* "Freedoom: Phase 1 and Freedoom: Phase 2" */
+static void needs_text(const struct item *it, char *out, int size)
+{
+    int n, len = 0;
+    out[0] = 0;
+    for (n = 0; n < it->nneeds && len < size; n++)
+        len += snprintf(out + len, size - len, "%s%s", n == 0 ? "" : n == it->nneeds - 1 ? " and " : ", ",
+                        items[it->needs[n]].name);
+}
+
+/* "doom|freedoom1,freedoom2": which game data an item comes with. */
+static void link_needs(const char *id, char *list)
+{
+    int a, d;
+    char *tok;
+    for (a = 0; a < nitems && strcmp(items[a].id, id); a++)
+        ;
+    if (a == nitems) return;
+    for (tok = strtok(list, ","); tok && items[a].nneeds < MAX_NEEDS; tok = strtok(NULL, ",")) {
+        for (d = 0; d < nitems; d++)
+            if (d != a && !strcmp(items[d].id, tok) && !strcmp(items[d].kind, "data")) {
+                items[a].needs[items[a].nneeds++] = d;
+                items[d].needed = 1;
+            }
+    }
 }
 
 static void free_items(void)
@@ -117,14 +169,27 @@ static int load_store(void)
             /* The Store's apps and system updates are Xbox programs. On a PC or Pi the apps
              * come with XenithOS itself, so only game data is offered there. */
             int fits = plat_kind() == PLAT_XBOX || !strcmp(it->kind, "data");
-            if (fits && it->size > 0 && strlen(it->sha) == 64 && item_dest(it)) {
-                update_state(it);
-                nitems++;
-            }
+            if (fits && it->size > 0 && strlen(it->sha) == 64 && item_dest(it)) nitems++;
         }
         line = next;
     }
     http_free(&r);
+
+    /* Game data that comes with an app (Freedoom with DOOM) is installed along with it, so
+     * it isn't listed by itself. On a PC the apps aren't listed, and the data stays. */
+    if (cloud_get("/v1/store/needs", 8 * 1024, &r) == 200) {
+        for (line = r.body; line && *line; ) {
+            char *next = strchr(line, '\n'), *f[2];
+            if (next) *next++ = 0;
+            if (split_fields(line, f, 2) == 2) link_needs(f[0], f[1]);
+            line = next;
+        }
+    }
+    http_free(&r);
+    update_states();
+    nview = 0;
+    for (i = 0; i < nitems; i++)
+        if (!items[i].needed) view[nview++] = i;
 
     for (i = 0; i < nitems; i++) {
         struct http_resp ir;
@@ -180,29 +245,26 @@ static int write_file(const char *path, const void *data, int len)
     return 1;
 }
 
-static void install(struct item *it)
+/* Download one item, check it against the Store's SHA-256 and save it. step of steps when
+ * several go together. Says what went wrong itself; returns 1 when it's in place. */
+static int fetch(struct item *it, int step, int steps)
 {
-    char path[96], hex[65], q[96];
+    char path[96], hex[65], detail[64];
     struct http_resp r;
     int code;
 
-    if (!strcmp(it->kind, "system")) {
-        if (!ui_confirm("Update XenithOS?", "This replaces xenon.elf on your USB stick with the version from the Store.", "Update", "Cancel")) return;
-    } else {
-        snprintf(q, sizeof q, "%s %s?", it->state == ST_UPDATE ? "Update" : "Install", it->name);
-        if (!ui_confirm(q, it->desc, it->state == ST_UPDATE ? "Update" : "Install", "Cancel")) return;
-    }
-
+    if (steps > 1) snprintf(detail, sizeof detail, "%s (%d of %d)", it->name, step, steps);
+    else snprintf(detail, sizeof detail, "%s", it->name);
     snprintf(path, sizeof path, "/v1/store/file/%s", it->id);
-    install_name = it->name;
+    install_name = detail;
     last_draw = 0;
-    ui_progress_frame("Downloading", it->name, 0, it->size);
+    ui_progress_frame("Downloading", detail, 0, it->size);
     code = http_request(cfg.server, "GET", path, NULL, 0, it->size + 4096, on_progress, NULL, &r);
     if (code != 200) {
         sfx(SFX_ERROR);
         ui_message("Download failed", cloud_error_text(&r, code));
         http_free(&r);
-        return;
+        return 0;
     }
 
     ui_loading_frame("Checking the download", "Comparing its SHA-256 with the Store");
@@ -210,16 +272,16 @@ static void install(struct item *it)
     if (r.body_len != it->size || strcmp(hex, it->sha)) {
         http_free(&r);
         sfx(SFX_ERROR);
-        ui_message("The download was damaged", "Nothing was installed. Try again in a moment.");
-        return;
+        ui_message("The download was damaged", "Nothing more was installed. Try again in a moment.");
+        return 0;
     }
 
-    ui_loading_frame("Installing", it->dest);
+    ui_loading_frame("Installing", detail);
     if (!write_file(it->dest, r.body, r.body_len)) {
         http_free(&r);
         sfx(SFX_ERROR);
         ui_message("Couldn't save it", "Is the USB stick full or write-protected?");
-        return;
+        return 0;
     }
     http_free(&r);
 
@@ -234,17 +296,52 @@ static void install(struct item *it)
         snprintf(path, sizeof path, "uda:/apps/%s.txt", it->id);
         write_file(path, meta, n);
     }
-    update_state(it);
-    if (!strcmp(it->kind, "system")) it->state = ST_INSTALLED;
+    return 1;
+}
+
+static void install(struct item *it)
+{
+    struct item *todo[1 + MAX_NEEDS];
+    char q[96], body[200], list[120], sz[24];
+    int n = 0, i, bytes = 0;
+
+    if (!strcmp(it->kind, "system")) {
+        if (!ui_confirm("Update XenithOS?", "This replaces xenon.elf on your USB stick with the version from the Store.", "Update", "Cancel")) return;
+        todo[n++] = it;
+    } else if (it->nneeds && it->state != ST_INSTALLED) {
+        /* It comes with game data: everything that's missing, in one go. */
+        const char *verb = it->own == ST_NEW ? "Install" : "Update";
+        if (it->own != ST_INSTALLED) todo[n++] = it;
+        for (i = 0; i < it->nneeds; i++)
+            if (items[it->needs[i]].own != ST_INSTALLED) todo[n++] = &items[it->needs[i]];
+        for (i = 0; i < n; i++) bytes += todo[i]->size;
+        size_text(bytes, sz, sizeof sz);
+        needs_text(it, list, sizeof list);
+        snprintf(q, sizeof q, "%s %s?", verb, it->name);
+        snprintf(body, sizeof body, "%s comes with %s, so it's ready to play. %s in all.", it->name, list, sz);
+        if (!ui_confirm(q, body, verb, "Cancel")) return;
+    } else {
+        snprintf(q, sizeof q, "%s %s?", it->state == ST_UPDATE ? "Update" : "Install", it->name);
+        if (!ui_confirm(q, it->desc, it->state == ST_UPDATE ? "Update" : "Install", "Cancel")) return;
+        todo[n++] = it;
+    }
+
+    for (i = 0; i < n; i++)
+        if (!fetch(todo[i], i + 1, n)) {
+            update_states();
+            return;
+        }
+    update_states();
+    if (!strcmp(it->kind, "system")) it->state = it->own = ST_INSTALLED;
     sfx(SFX_SUCCESS);
 
     if (!strcmp(it->kind, "system")) {
         if (ui_confirm("XenithOS updated", "Restart XenithOS now to use the new version?", "Restart now", "Later"))
-            plat_launch(XENITH_SHELL_PATH);
+            ui_launch(XENITH_SHELL_PATH, "XenithOS", "Restarting");
     } else if (!strcmp(it->kind, "app")) {
         snprintf(q, sizeof q, "%s is installed", it->name);
         if (ui_confirm(q, "You'll find it on the home screen and in Apps.", "Start it", "Done"))
-            plat_launch(it->dest);
+            ui_launch(it->dest, it->name, "Starting");
     } else {
         snprintf(q, sizeof q, "%s is installed", it->name);
         ui_message(q, "Apps that use it will find it automatically.");
@@ -278,7 +375,7 @@ static void draw_row(struct item *it, int x, int y, int w, int h, int sel, float
         gfx_fill_rrect(x + 12.0f, y + 10.0f, (float)tw, h - 20.0f, 8, C_SURFACE2, 255);
         icon_draw(ICON_DOWNLOAD, x + 12 + tw / 2.0f, y + h / 2.0f, 26, C_DIM, C_SURFACE2);
     }
-    size_text(it->size, sz, sizeof sz);
+    size_text(total_size(it), sz, sizeof sz);
     snprintf(meta, sizeof meta, "%s  -  %s", kind_label(it->kind), sz);
     gfx_str_fit(FONT_BODY_SB, x + tw + 28, y + 14, fg, it->name, w - tw - 150);
     gfx_str(FONT_SMALL, x + tw + 28, y + 44, sub, meta);
@@ -302,10 +399,10 @@ void screen_store(void)
 
         ui_poll();
         d = ui_nav_y();
-        if (d && nitems && sel + d >= 0 && sel + d < nitems) { sel += d; sfx(SFX_MOVE); }
+        if (d && nview && sel + d >= 0 && sel + d < nview) { sel += d; sfx(SFX_MOVE); }
         if (PRESSED(b)) { sfx(SFX_BACK); free_items(); return; }
-        if (PRESSED(y)) { sfx(SFX_SELECT); if (!load_store()) return; if (sel >= nitems) sel = 0; }
-        if (PRESSED(a) && nitems) { sfx(SFX_SELECT); install(&items[sel]); }
+        if (PRESSED(y)) { sfx(SFX_SELECT); if (!load_store()) return; if (sel >= nview) sel = 0; }
+        if (PRESSED(a) && nview) { sfx(SFX_SELECT); install(&items[view[sel]]); }
 
         if (sel < first) first = sel;
         if (sel >= first + visible) first = sel - visible + 1;
@@ -313,38 +410,52 @@ void screen_store(void)
 
         ui_bg();
         ui_header("Store", plat_kind() == PLAT_XBOX ? "Apps, games and updates from XenithOS Cloud" : "Game data from XenithOS Cloud. Apps come with XenithOS here.");
-        if (!nitems) {
+        if (!nview) {
             gfx_str(FONT_LABEL, M, top + 10, C_TEXT, "The Store is empty");
         } else {
             gfx_fill_rrect((float)M, top + hl * rowh, (float)listw, rowh - 8.0f, 14, C_ACCENT, 255);
-            for (i = 0; i < visible && first + i < nitems; i++)
-                draw_row(&items[first + i], M, top + i * rowh, listw, rowh - 8, first + i == sel, hl);
+            for (i = 0; i < visible && first + i < nview; i++)
+                draw_row(&items[view[first + i]], M, top + i * rowh, listw, rowh - 8, first + i == sel, hl);
 
             /* Details */
             {
-                struct item *it = &items[sel];
-                int iw, ih, y;
+                struct item *it = &items[view[sel]];
+                int iw, ih, ix, y, lines, ph = SCR_H - top - 70, below;
                 px = M + listw + 28;
                 pw = SCR_W - M - px;
-                ui_panel(px, top, pw, SCR_H - top - 70);
+                ui_panel(px, top, pw, ph);
+                /* The picture gets what the text under it leaves: the name, the details, up to
+                 * three lines of description and a line for the game data an app comes with.
+                 * The same for every item, so the picture doesn't change size between them. */
+                below = 20 + gfx_line_h(FONT_TITLE) + 4 + gfx_line_h(FONT_SMALL) + 12 + 3 * (gfx_line_h(FONT_BODY) + 4)
+                        + 10 + gfx_line_h(FONT_SMALL) + 18;
                 iw = pw - 48;
                 ih = iw * 9 / 16;
-                if (ih > (SCR_H - top) / 2) { ih = (SCR_H - top) / 2; iw = ih * 16 / 9; }
-                if (it->icon.px) gfx_image_rounded(&it->icon, px + 24, top + 24, iw, ih, 12, 255);
-                else gfx_fill_rrect(px + 24.0f, top + 24.0f, (float)iw, (float)ih, 12, C_SURFACE2, 255);
+                if (ih > ph - 24 - below) { ih = ph - 24 - below; iw = ih * 16 / 9; }
+                ix = px + (pw - iw) / 2;
+                if (it->icon.px) gfx_image_rounded(&it->icon, ix, top + 24, iw, ih, 12, 255);
+                else gfx_fill_rrect((float)ix, top + 24.0f, (float)iw, (float)ih, 12, C_SURFACE2, 255);
                 y = top + 24 + ih + 20;
                 gfx_str_fit(FONT_TITLE, px + 24, y, C_TEXT, it->name, pw - 48);
                 y += gfx_line_h(FONT_TITLE) + 4;
-                size_text(it->size, sz, sizeof sz);
+                size_text(total_size(it), sz, sizeof sz);
                 snprintf(meta, sizeof meta, "%s  -  Version %s  -  %s", kind_label(it->kind), it->version, sz);
                 gfx_str(FONT_SMALL, px + 24, y, C_SUB, meta);
                 y += gfx_line_h(FONT_SMALL) + 12;
-                gfx_wrap(FONT_BODY, px + 24, y, pw - 48, 4, C_TEXT, it->desc, 3);
+                lines = gfx_wrap(FONT_BODY, px + 24, y, pw - 48, 4, C_TEXT, it->desc, 3);
+                if (it->nneeds) {
+                    char list[120], line[160];
+                    needs_text(it, list, sizeof list);
+                    snprintf(line, sizeof line, "Comes with %s.", list);
+                    y += lines * (gfx_line_h(FONT_BODY) + 4) + 10;
+                    gfx_wrap(FONT_SMALL, px + 24, y, pw - 48, 4, C_SUB, line, 1);
+                }
             }
         }
-        if (nitems) {
-            const char *act = items[sel].state == ST_INSTALLED ? "A=Reinstall;Y=Refresh;B=Back"
-                            : items[sel].state == ST_UPDATE ? "A=Update;Y=Refresh;B=Back" : "A=Install;Y=Refresh;B=Back";
+        if (nview) {
+            const struct item *it = &items[view[sel]];
+            const char *act = it->state == ST_INSTALLED ? "A=Reinstall;Y=Refresh;B=Back"
+                            : it->state == ST_UPDATE ? "A=Update;Y=Refresh;B=Back" : "A=Install;Y=Refresh;B=Back";
             ui_hints(act);
         } else {
             ui_hints("Y=Refresh;B=Back");

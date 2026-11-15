@@ -1,7 +1,10 @@
 /* platform.h on a real Xbox 360, through libxenon. */
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/stat.h>
 
 #include <xenos/xenos.h>
 #include <input/input.h>
@@ -17,10 +20,12 @@
 #include <xenon_sound/sound.h>
 #include <pci/io.h>
 
+#include "handoff.h"
 #include "platform.h"
 #include "tiled.h"
 
 int bdev_enum(int handle, const char **name);
+extern int xenos_is_hdmi;          /* libxenon: xenon_sound_init turns on HDMI sound when set */
 
 /* ------------------------------------------------------------------ video */
 
@@ -34,25 +39,48 @@ struct ati_info {
 } __attribute__((__packed__));
 
 static uint32_t *fb;
-static int fb_bytes, scr_w, scr_h;
+static int fb_bytes, fb_w, fb_h, overscan, scr_w, scr_h;
 static struct tiled_fb tfb;      /* shared/tiled.c: only changed blocks get rewritten */
+
+/* Started by another XenithOS program that left the screen running in a mode we can use:
+ * keep it. Setting a video mode makes the TV drop the picture for a second or more, which is
+ * what made every app start (and every return to XenithOS) go black. Only when the handoff
+ * says so and the display registers agree; anything else gets the full set-up. */
+static int keep_screen(void)
+{
+    struct ati_info *ai = (struct ati_info *)0xec806100ULL;
+    const char *v = handoff_get("video");
+    int w, h, over, hdmi;
+    if (!v || sscanf(v, "%dx%d:%d:%d", &w, &h, &over, &hdmi) != 4) return 0;
+    if (w < 320 || h < 240 || w > 1920 || h > 1080) return 0;
+    if ((int)ai->width != w || (int)ai->height != h) return 0;
+    if (ai->base != 0x1e000000) return 0;          /* where libxenon puts the framebuffer */
+    overscan = over != 0;
+    xenos_is_hdmi = hdmi != 0;                     /* xenos_init would have found this out */
+    return 1;
+}
 
 void plat_init(void)
 {
     struct ati_info *ai;
-    int off_x = 0, off_y = 0;
+    int off_x = 0, off_y = 0, kept;
 
     /* If the program before this one left the sound chip running, it's now playing whatever
      * this program was loaded over. Stop it before anything else. */
     plat_audio_stop();
-    xenos_init(VIDEO_MODE_AUTO);
+    kept = keep_screen();
+    if (!kept) xenos_init(VIDEO_MODE_AUTO);
     xenon_make_it_faster(XENON_SPEED_FULL);
 
     ai = (struct ati_info *)0xec806100ULL;
     fb = (uint32_t *)(long)(ai->base | 0x80000000);
+    fb_w = ai->width;
+    fb_h = ai->height;
     fb_bytes = (((ai->width + 31) >> 5) << 5) * (((ai->height + 31) >> 5) << 5) * 4;
 
-    if (xenos_is_overscan()) {
+    /* xenos_is_overscan() only works after xenos_init (it exits otherwise). */
+    if (!kept) overscan = xenos_is_overscan();
+    if (overscan) {
         off_x = ai->width / 28;
         off_y = ai->height / 28;
     }
@@ -60,9 +88,13 @@ void plat_init(void)
     scr_h = ((ai->height - off_y * 2) / 8) * 8;
     tiled_init(&tfb, fb, ai->width, ai->height, off_x, off_y, scr_w, scr_h);
 
-    /* Wipe whatever the loader left on screen, including the overscan border. */
-    memset(fb, 0, fb_bytes);
-    memdcbst(fb, fb_bytes);
+    /* A new mode: wipe whatever the loader left on screen, including the overscan border.
+     * A kept one shows the last program's final frame until this one draws (tiled.c rewrites
+     * the whole screen on the first present). */
+    if (!kept) {
+        memset(fb, 0, fb_bytes);
+        memdcbst(fb, fb_bytes);
+    }
 
     usb_init();
     usb_do_poll();
@@ -131,7 +163,17 @@ void plat_rumble(int left, int right)
 
 void plat_audio_init(void)
 {
+    static uint8_t silence[PLAT_AUDIO_BLOCK * 4];
+    int rptr, i;
     xenon_sound_init();
+    /* libxenon starts writing at the first of its 32 blocks, but the chip goes on reading from
+     * wherever the last program left it (after a cold boot that's the first block too). When
+     * the two start far apart, the chip plays up to a whole ring of old sound before the new,
+     * and the mixer, which judges how far ahead it is from those two positions, keeps them
+     * apart: the repeating, popping sound after coming back from a game. So write silence up
+     * to the chip's position first; one block of it after a cold boot. */
+    rptr = read32(0xea001600 + 4) & 0x1f;
+    for (i = 0; i <= rptr; i++) xenon_sound_submit(silence, sizeof silence);
 }
 
 int plat_audio_queued(void)
@@ -299,12 +341,55 @@ int plat_kind(void)
     return PLAT_XBOX;
 }
 
+static void (*launch_progress)(int done, int total);
+
+void plat_set_launch_progress(void (*fn)(int done, int total))
+{
+    launch_progress = fn;
+}
+
+/* libxenon's ELF loader hands this area to the next program as its arguments. */
+#define ELF_ARGV_AREA ((void *)0x93FC0000)
+
 int plat_launch(const char *path)
 {
+    char video[48], *argv[HANDOFF_MAX + 2];
+    struct stat s;
+    unsigned char *buf;
+    int f, size, got = 0, argc;
+
+    /* Read the whole program first, while the screen can still show progress and the sound
+     * is still playing (elf_runFromDisk would do the same read with the screen frozen). */
+    if (stat(path, &s) != 0 || s.st_size <= 0) return 0;
+    size = (int)s.st_size;
+    f = open(path, O_RDONLY);
+    if (f < 0) return 0;
+    buf = malloc(size);
+    if (!buf) { close(f); return 0; }
+    while (got < size) {
+        int want = size - got > 256 * 1024 ? 256 * 1024 : size - got;
+        int n = read(f, buf + got, want);
+        if (n <= 0) break;
+        got += n;
+        if (launch_progress) launch_progress(got, size);
+    }
+    close(f);
+    if (got != size) { free(buf); return 0; }
+
     if (hook_before) hook_before();
     plat_audio_stop();
     plat_rumble(0, 0);
-    elf_runFromDisk((char *)path);
+
+    snprintf(video, sizeof video, "%dx%d:%d:%d", fb_w, fb_h, overscan, xenos_is_hdmi ? 1 : 0);
+    handoff_set("video", video);
+    argc = handoff_argv(path, argv, HANDOFF_MAX + 2);
+    elf_setArgcArgv(argc, argv);
+    /* elf_setArgcArgv's own cache flush is given a pointer as its length and does nothing,
+     * and the loader copies these in real mode, from memory: write them out ourselves. */
+    memdcbst(ELF_ARGV_AREA, 4096);
+
+    elf_runFromMemory(buf, size);    /* only comes back if the file isn't a program */
+    free(buf);
     if (hook_failed) hook_failed();
     return 0;
 }

@@ -22,12 +22,20 @@ mkdir -p "$work/uda:/xenith"
     [ -n "$XSIM_KEY" ] && echo "key=$XSIM_KEY"
 } > "$work/uda:/xenith/config.txt"
 [ -n "$XSIM_PROFILE" ] && cp "$XSIM_PROFILE" "$work/uda:/xenith/profile.txt"
-if [ -n "$XSIM_WAD" ]; then mkdir -p "$work/uda:/doom" && cp "$XSIM_WAD" "$work/uda:/doom/"; fi
+# XSIM_WAD: one or more WADs (space-separated) for DOOM
+if [ -n "$XSIM_WAD" ]; then
+    mkdir -p "$work/uda:/doom"
+    # shellcheck disable=SC2086
+    for w in $XSIM_WAD; do cp "$w" "$work/uda:/doom/"; done
+fi
 
 bin="${XSIM_BIN:-xsim}"
 make -s -C "$here" "$bin"
 cd "$work"
-XSIM_SCRIPT="$script" XSIM_OUT="$work/out" ASAN_OPTIONS=detect_leaks=0 "$here/$bin"
+# XSIM_ARGS: arguments for the program, e.g. "xenithos-handoff from=volt" to start XenithOS as
+# if coming back from an app (shared/handoff.h)
+# shellcheck disable=SC2086
+XSIM_SCRIPT="$script" XSIM_OUT="$work/out" ASAN_OPTIONS=detect_leaks=0 "$here/$bin" $XSIM_ARGS
 
 mkdir -p "$here/out/$name"
 cp "$work"/out/* "$here/out/$name/"

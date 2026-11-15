@@ -404,6 +404,12 @@ void plat_set_launch_hooks(void (*before)(void), void (*failed)(void))
     hook_failed = failed;
 }
 
+/* Apps start as their own processes here, straight from disk: nothing to show progress for. */
+void plat_set_launch_progress(void (*fn)(int done, int total))
+{
+    (void)fn;
+}
+
 /* ---------------------------------------------------------------- storage */
 
 static void mkdirs(const char *path)

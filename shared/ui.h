@@ -38,9 +38,18 @@ void ui_panel(int x, int y, int w, int h);      /* a card */
 
 /* Full-screen loading and progress */
 void ui_loading_frame(const char *title, const char *detail);
+/* ui_loading_frame with a thin bar under it (done of total; no bar while total is 0) */
+void ui_loading_progress(const char *title, const char *detail, int done, int total);
 void ui_busy_begin(const char *title, const char *detail);   /* animates during network waits */
 void ui_busy_end(void);
 void ui_progress_frame(const char *title, const char *detail, int done, int total);
+
+/* Start another program (plat_launch) behind a loading screen in ui_loading_frame's layout,
+ * with a bar while it's read. Programs start with a frame laid out the same way, so on the
+ * Xbox the switch doesn't show. Returns what plat_launch returns. */
+int  ui_launch(const char *path, const char *title, const char *detail);
+/* Leave an app for XenithOS, which comes back on the home screen with the app selected. */
+void ui_back_to_xenithos(const char *app_id);
 
 /* Modal dialogs over the current screen */
 int  ui_dialog(const char *title, const char *body, const char *const *options, int n);   /* -1 on B */

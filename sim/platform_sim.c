@@ -447,8 +447,20 @@ void plat_switch_to_desktop(void)
 }
 void plat_audio_stop(void) { }
 
+static void (*launch_progress)(int done, int total);
+
+void plat_set_launch_progress(void (*fn)(int done, int total))
+{
+    launch_progress = fn;
+}
+
 int plat_launch(const char *path)
 {
+    struct stat s;
+    int total = stat(path, &s) == 0 && s.st_size > 0 ? (int)s.st_size : 1 << 20, i;
+    if (launch_progress && !sim_is_pc())        /* as if reading it off the stick, like the Xbox */
+        for (i = 1; i <= 4; i++) launch_progress(total * i / 4, total);
+    save_png("launch");                         /* what's left on screen for the next program */
     if (hook_before) hook_before();
     fprintf(stderr, "sim: launch %s (not possible in the simulator)\n", path);
     if (hook_failed) hook_failed();
