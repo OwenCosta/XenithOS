@@ -228,6 +228,7 @@
         <tr><td>VOLT, DOOM, Tube, Photos</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">DOOM comes with Freedoom and has sound effects; no music yet</td></tr>
         <tr><td>PCs and Raspberry Pis</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">0.5.2 runs apps inside XenithOS's window: no black screen between them</td></tr>
         <tr><td>Minecraft and the guide</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">PCs only; they open over XenithOS on its own X server and the guide comes up over them, tested in a virtual display</td></tr>
+        <tr><td>HostMC</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">PCs only; it ran real Minecraft 26.3 and Paper servers in testing, but nobody has joined one from a real copy of Minecraft yet</td></tr>
         <tr><td>XenithOS Cloud and this site</td><td class="yes" data-k="Builds">yes</td><td class="live" data-k="On the Xbox">live</td><td class="note">you're on it</td></tr>
       </tbody>
     </table>
@@ -266,6 +267,7 @@
       <li><b>Updates</b> come from the Store: pick <b>XenithOS update</b>, and it builds the new version on your machine and restarts into it.</li>
       <li><b>Minecraft</b> is in the Store's Apps section too (LB and RB switch sections). It installs from Flathub through XenithOS, starts from its home screen and gets the whole screen. X on the Apps screen removes an app from Flathub again.</li>
       <li><b>The guide</b>: press the Xbox button, or hold Esc, in a game. Return home leaves the game running (choose it again to go back), Switch game starts another, and the controller can work as a mouse for launchers or as a keyboard and mouse for Minecraft.</li>
+      <li><b>HostMC</b> hosts a Minecraft: Java Edition server from your XenithOS machine. Friends on your network join with its address, and turning on playit.gg in its Internet page lets them join over the internet without opening ports.</li>
     </ol>
     <h3>In the Store on PCs</h3>
     <p class="muted">Apps come from <a href="https://flathub.org/">Flathub</a> and run under their own licenses. Minecraft: Java Edition runs through <a href="https://prismlauncher.org/">Prism Launcher</a> and needs a Minecraft account; XenithOS starts the instance you played last, and the controller plays it like Minecraft on a console. Machines installed before 0.5.4 need the install command once more for apps.</p>
@@ -278,6 +280,8 @@
   <div class="wrap">
     <h2>Build log</h2>
     <ul class="log">
+      <li><b>0.6.2</b><time datetime="2026-11-15">Nov 15, 2026</time>
+        <p>HostMC, a new app on PCs, hosts a Minecraft: Java Edition server. It gets the server from Mojang, or Paper from PaperMC, along with the Java it needs. It tells you what it's about to download first and checks every download. Its pages start and stop the server, show its console with a keyboard for commands, look after players (op, kick, ban and the whitelist), change the server's settings and memory, pick a version, and back up, restore or start a world. New servers use a whitelist, so add your friends in Players. The server keeps running when you leave HostMC, and HostMC finds it again when you come back. To play with friends over the internet, turn on playit.gg in the Internet page and approve it with the link or QR code. The on-screen keyboard has a row of symbols for commands.</p></li>
       <li><b>0.6.1</b><time datetime="2026-11-15">Nov 15, 2026</time>
         <p>Apps without a picture of their own, like the Prism Launcher tile, show their name on a card in a size that fits it, instead of running over its sides in the Apps list.</p></li>
       <li><b>0.6.0</b><time datetime="2026-11-15">Nov 15, 2026</time>
@@ -322,7 +326,7 @@
 <footer>
   <div class="wrap">
     <p>Made by <a href="https://owencosta.diy/">Owen Costa</a>. XenithOS is GPL-3.0. It uses the Inter typeface (OFL), doomgeneric (GPL-2.0+), stb_image (public domain) and Freedoom (BSD).</p>
-    <p>Not affiliated with Microsoft, Mojang, Google, id Software, Valve or Roblox. Xbox, Minecraft, YouTube, DOOM, Steam and Roblox are their trademarks.</p>
+    <p>Not affiliated with Microsoft, Mojang, Google, id Software, Valve, Roblox, PaperMC or playit.gg. Xbox, Minecraft, YouTube, DOOM, Steam and Roblox are their trademarks.</p>
   </div>
 </footer>
 

@@ -307,6 +307,12 @@ int main(int argc, char **argv)
 {
     const char *from;
     int i;
+    /* "xenithos --version" (PCs): one line and out, for scripts such as XenithOS Desktop's
+     * updater. It comes before anything that opens a window or starts X. */
+    if (argc > 1 && argv && argv[1] && !strcmp(argv[1], "--version")) {
+        printf("XenithOS %s\n", XENITH_VERSION);
+        return 0;
+    }
     handoff_args(argc, argv);
     startlog_mark("start");
     plat_init();
