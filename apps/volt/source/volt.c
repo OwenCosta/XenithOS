@@ -143,6 +143,7 @@ static void upload(void)
     if (prof.signed_in) snprintf(form, sizeof form, "token=%s&score=%d", prof.token, score);
     else snprintf(form, sizeof form, "name=%s&score=%d", cfg.name, score);
     ui_busy_begin("Uploading your score", prof.signed_in ? prof.name : cfg.name);
+    audio_prepare_stall();
     if (!net_up()) {
         ui_busy_end();
         snprintf(result_line, sizeof result_line, "No network. Plug in an Ethernet cable.");

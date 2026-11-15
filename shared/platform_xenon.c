@@ -17,6 +17,7 @@
 #include <xenon_sound/sound.h>
 
 #include "platform.h"
+#include "tiled.h"
 
 int bdev_enum(int handle, const char **name);
 
@@ -32,50 +33,28 @@ struct ati_info {
 } __attribute__((__packed__));
 
 static uint32_t *fb;
-static int fb_bytes, fb_pitch, off_x, off_y, scr_w, scr_h;
-
-/* The framebuffer is stored in 32x32 tiles with a fixed pixel order inside each tile.
- * These tables turn (x, y) into a framebuffer index with two lookups and two adds. */
-static uint16_t tile_inner[32 * 32];
-static int *col_tile, *col_in, *row_base;
+static int fb_bytes, scr_w, scr_h;
+static struct tiled_fb tfb;      /* shared/tiled.c: only changed blocks get rewritten */
 
 void plat_init(void)
 {
     struct ati_info *ai;
-    int x, y;
+    int off_x = 0, off_y = 0;
 
     xenos_init(VIDEO_MODE_AUTO);
     xenon_make_it_faster(XENON_SPEED_FULL);
 
     ai = (struct ati_info *)0xec806100ULL;
     fb = (uint32_t *)(long)(ai->base | 0x80000000);
-    fb_pitch = ((ai->width + 31) >> 5) << 5;
-    fb_bytes = fb_pitch * (((ai->height + 31) >> 5) << 5) * 4;
+    fb_bytes = (((ai->width + 31) >> 5) << 5) * (((ai->height + 31) >> 5) << 5) * 4;
 
-    off_x = off_y = 0;
     if (xenos_is_overscan()) {
         off_x = ai->width / 28;
         off_y = ai->height / 28;
     }
     scr_w = ((ai->width - off_x * 2) / 8) * 8;
     scr_h = ((ai->height - off_y * 2) / 8) * 8;
-
-    for (y = 0; y < 32; y++)
-        for (x = 0; x < 32; x++)
-            tile_inner[y * 32 + x] = (uint16_t)(((x & 3) + ((y & 1) << 2) + ((x >> 2) << 3) + ((y >> 1) << 6))
-                                                ^ ((y & 8) << 2));
-    col_tile = malloc(sizeof(int) * scr_w);
-    col_in = malloc(sizeof(int) * scr_w);
-    row_base = malloc(sizeof(int) * scr_h);
-    for (x = 0; x < scr_w; x++) {
-        int X = x + off_x;
-        col_tile[x] = (X >> 5) << 10;
-        col_in[x] = X & 31;
-    }
-    for (y = 0; y < scr_h; y++) {
-        int Y = y + off_y;
-        row_base[y] = (Y >> 5) * 32 * fb_pitch;
-    }
+    tiled_init(&tfb, fb, ai->width, ai->height, off_x, off_y, scr_w, scr_h);
 
     /* Wipe whatever the loader left on screen, including the overscan border. */
     memset(fb, 0, fb_bytes);
@@ -91,17 +70,14 @@ void plat_screen_size(int *w, int *h)
     *h = scr_h;
 }
 
+static void flush_lines(void *addr, int bytes)
+{
+    memdcbst(addr, bytes);
+}
+
 void plat_present(const uint32_t *px)
 {
-    int x, y;
-    for (y = 0; y < scr_h; y++) {
-        const uint16_t *inner = &tile_inner[((y + off_y) & 31) * 32];
-        uint32_t *dst = fb + row_base[y];
-        const uint32_t *src = px + y * scr_w;
-        for (x = 0; x < scr_w; x++)
-            dst[col_tile[x] + inner[col_in[x]]] = __builtin_bswap32(src[x]);   /* 0xBBGGRR00 */
-    }
-    memdcbst(fb, fb_bytes);
+    tiled_present(&tfb, px, flush_lines);
 }
 
 /* ------------------------------------------------------------------- time */
@@ -177,6 +153,71 @@ void plat_audio_submit(const int16_t *stereo, int frames)
     }
 }
 
+/* ----------------------------------------------------------- spare thread */
+
+/* Thread 2 is the first thread of the second core; XenithOS itself runs on thread 0.
+ * libxenon's secondary threads poll for a task, run it on the stack they're given, and go
+ * back to polling when it returns. The ELF loader waits for every thread to be free, so the
+ * task must return (plat_thread_stop) before another program is launched. */
+#define SPARE_THREAD 2
+static unsigned char thread_stack[64 * 1024] __attribute__((aligned(128)));
+static void (*volatile thread_step)(void);
+static volatile int thread_run, thread_alive, thread_cancel;
+
+static void thread_task(void)
+{
+    if (thread_cancel) return;
+    thread_alive = 1;
+    while (thread_run) {
+        thread_step();
+        udelay(1000);
+    }
+    thread_alive = 0;
+}
+
+int plat_thread_start(void (*step)(void))
+{
+    uint64_t start;
+    if (thread_run) return 1;
+    thread_step = step;
+    thread_alive = 0;
+    thread_cancel = 0;
+    thread_run = 1;
+    __sync_synchronize();
+    if (xenon_run_thread_task(SPARE_THREAD, thread_stack + sizeof thread_stack - 0x100, (void *)thread_task) != 0) {
+        thread_run = 0;
+        return 0;
+    }
+    start = mftb();
+    while (!thread_alive) {
+        if (tb_diff_msec(mftb(), start) > 100) {   /* never picked up: make sure it never runs */
+            thread_cancel = 1;
+            thread_run = 0;
+            __sync_synchronize();
+            return 0;
+        }
+    }
+    return 1;
+}
+
+void plat_thread_stop(void)
+{
+    uint64_t start = mftb();
+    if (!thread_run) return;
+    thread_run = 0;
+    __sync_synchronize();
+    while (xenon_is_thread_task_running(SPARE_THREAD) && tb_diff_msec(mftb(), start) < 500)
+        ;
+}
+
+static void (*hook_before)(void), (*hook_failed)(void);
+
+void plat_set_launch_hooks(void (*before)(void), void (*failed)(void))
+{
+    hook_before = before;
+    hook_failed = failed;
+}
+
 /* ---------------------------------------------------------------- storage */
 
 void plat_storage_init(void)
@@ -225,16 +266,20 @@ const char *plat_name(void)
 
 void plat_launch(const char *path)
 {
+    if (hook_before) hook_before();
     plat_rumble(0, 0);
     elf_runFromDisk((char *)path);
+    if (hook_failed) hook_failed();
 }
 
 void plat_reboot(void)
 {
+    if (hook_before) hook_before();
     xenon_smc_power_reboot();
 }
 
 void plat_power_off(void)
 {
+    if (hook_before) hook_before();
     xenon_smc_power_shutdown();
 }

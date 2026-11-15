@@ -58,9 +58,10 @@ int avatar_editor(char *code)
         ui_bg();
         ui_header("Avatar", "Make it yours. Left and right change the selected part.");
         pop = ui_ease(pop, 0, 0.25f);
-        {
-            int grow = (int)(pop * 10);
-            avatar_draw_v(v, M - grow, top + 10 - grow, size + 2 * grow);
+        avatar_draw_v(v, M, top + 10, size);                 /* fixed size, so it stays cached */
+        if (pop > 0.02f) {                                   /* a ring flashes out on each change */
+            float g = (1 - pop) * 12;
+            gfx_stroke_rrect(M - 4 - g, top + 6 - g, size + 8 + 2 * g, size + 8 + 2 * g, size * 0.22f + 4 + g, 3, 0xFFFFFF, (int)(200 * pop));
         }
         hl = ui_ease(hl, (float)sel, 0.45f);
         gfx_fill_rrect((float)lx, top + 10 + hl * rowh, (float)lw, rowh - 6.0f, 12, C_ACCENT, 255);

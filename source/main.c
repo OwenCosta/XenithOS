@@ -157,6 +157,7 @@ static void go_online(void)
     status_line = "Connecting...";
     draw_home();
     ui_end_frame();
+    audio_prepare_stall();
     if (net_up()) {
         status_line = NULL;
         cloud_sync(1);
@@ -235,5 +236,6 @@ int main(void)
     }
 
     plat_rumble(0, 0);
+    audio_shutdown();
     return 0;   /* back to XeLL */
 }

@@ -82,17 +82,18 @@ void apps_scan(void)
     }
 }
 
+/* The card itself never changes size (so its scaled thumbnail stays cached); only the
+ * selection ring closes in around it. */
 void app_card(const struct app *a, int x, int y, int w, int h, int selected, float lift)
 {
-    int g = (int)(lift * 6);
-    int cx = x - g, cy = y - g, cw = w + 2 * g, ch = h + 2 * g;
-    if (selected) gfx_stroke_rrect(cx - 5.0f, cy - 5.0f, cw + 10.0f, ch + 10.0f, 17, 3, 0xFFFFFF, (int)(255 * lift));
+    float g = (1 - lift) * 8;
+    if (selected) gfx_stroke_rrect(x - 5 - g, y - 5 - g, w + 10 + 2 * g, h + 10 + 2 * g, 17 + g, 3, 0xFFFFFF, (int)(255 * lift));
     if (a->thumb.px) {
-        gfx_image_rounded(&a->thumb, cx, cy, cw, ch, 12, 255);
+        gfx_image_rounded(&a->thumb, x, y, w, h, 12, 255);
     } else {
-        gfx_fill_rrect((float)cx, (float)cy, (float)cw, (float)ch, 12, C_SURFACE2, 255);
-        icon_draw(ICON_PLAY, cx + cw / 2.0f, cy + ch / 2.0f - 10, ch * 0.30f, C_SUB, C_SURFACE2);
-        gfx_str_c(FONT_BODY_SB, cx + cw / 2, cy + ch - 38, C_TEXT, a->name);
+        gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 12, C_SURFACE2, 255);
+        icon_draw(ICON_PLAY, x + w / 2.0f, y + h / 2.0f - 10, h * 0.30f, C_SUB, C_SURFACE2);
+        gfx_str_c(FONT_BODY_SB, x + w / 2, y + h - 38, C_TEXT, a->name);
     }
 }
 

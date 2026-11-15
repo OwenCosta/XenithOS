@@ -5,11 +5,12 @@
 #include <strings.h>
 #include <ctype.h>
 
+#include "audio.h"
 #include "net.h"
 #include "platform.h"
 
 static void (*idle_hook)(void);
-static uint64_t last_idle;
+static uint64_t last_idle, last_audio;
 
 void net_set_idle_hook(void (*fn)(void))
 {
@@ -19,6 +20,10 @@ void net_set_idle_hook(void (*fn)(void))
 void net_idle(void)
 {
     uint64_t now = plat_time_us();
+    if (now - last_audio >= 2000) {             /* keep sound fed while waiting on the network */
+        last_audio = now;
+        audio_update();
+    }
     if (idle_hook && now - last_idle >= 33000) {
         last_idle = now;
         idle_hook();

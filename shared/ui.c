@@ -34,8 +34,17 @@ uint64_t ui_ms(void)
 
 void ui_poll(void)
 {
+    audio_update();
     prev = cur;
     plat_poll(&cur);
+}
+
+static uint64_t frame_start;
+static int frame_us_avg;
+
+int ui_frame_ms(void)
+{
+    return (frame_us_avg + 500) / 1000;
 }
 
 static int nav(int neg, int pos, int *held, uint64_t *next)
@@ -62,10 +71,15 @@ int ui_nav_x(void)
     return nav(cur.left || cur.lx < -STICK_TH, cur.right || cur.lx > STICK_TH, &held, &next);
 }
 
+/* How long the last frame really was, in 60 Hz frames. Easing uses it so animations take the
+ * same time even when a frame runs long. */
+static float frame_scale = 1.0f;
+
 float ui_ease(float value, float target, float rate)
 {
     float d = target - value;
     if (fabsf(d) < 0.01f) return target;
+    if (frame_scale > 1.0f) rate = 1.0f - powf(1.0f - rate, frame_scale);
     return value + d * rate;
 }
 
@@ -131,10 +145,24 @@ void ui_end_frame(void)
     audio_update();
 
     now = plat_time_us();
+    if (frame_start) {                    /* how long the frame took before waiting, smoothed */
+        int us = (int)(now - frame_start);
+        frame_us_avg = frame_us_avg ? (frame_us_avg * 7 + us) / 8 : us;
+    }
     if (!next_frame || now > next_frame + 100000) next_frame = now;   /* resync after a long stall */
     next_frame += 16667;
     if (next_frame > now) plat_sleep_us((int)(next_frame - now));
     audio_update();
+    {
+        static uint64_t last_end;
+        uint64_t end = plat_time_us();
+        if (last_end) {
+            float k = (end - last_end) / 16667.0f;
+            frame_scale = k < 1.05f ? 1.0f : k > 4.0f ? 4.0f : k;
+        }
+        last_end = end;
+    }
+    frame_start = plat_time_us();
 }
 
 /* --------------------------------------------------------------- pieces */
@@ -270,11 +298,18 @@ void ui_progress_frame(const char *title, const char *detail, int done, int tota
 int ui_dialog(const char *title, const char *body, const char *const *options, int n)
 {
     size_t bytes = (size_t)SCR_W * SCR_H * 4;
-    uint32_t *under = malloc(bytes);
+    uint32_t *under = malloc(bytes), *dimmed = NULL;
     int sel = 0, w = SCR_W * 46 / 100, row = 54, x, y, h, body_lines = 0, result = -1, i;
     float hl;
 
-    if (under) memcpy(under, gfx_bb, bytes);
+    if (under) {
+        memcpy(under, gfx_bb, bytes);
+        dimmed = malloc(bytes);                /* darken the screen behind once, not every frame */
+        if (dimmed) {
+            gfx_rect_a(0, 0, SCR_W, SCR_H, RGB(0, 0, 0), 150);
+            memcpy(dimmed, gfx_bb, bytes);
+        }
+    }
     if (w < 520) w = 520;
     if (body) {
         /* Measure the body by drawing it off to the side of a scratch clip. */
@@ -300,8 +335,11 @@ int ui_dialog(const char *title, const char *body, const char *const *options, i
         if (PRESSED(a)) { sfx(SFX_SELECT); result = sel; break; }
         if (PRESSED(b)) { sfx(SFX_BACK); result = -1; break; }
 
-        if (under) memcpy(gfx_bb, under, bytes);
-        gfx_rect_a(0, 0, SCR_W, SCR_H, RGB(0, 0, 0), 150);
+        if (dimmed) memcpy(gfx_bb, dimmed, bytes);
+        else {
+            if (under) memcpy(gfx_bb, under, bytes);
+            gfx_rect_a(0, 0, SCR_W, SCR_H, RGB(0, 0, 0), 150);
+        }
         gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 18, C_SURFACE, 255);
         gfx_str(FONT_TITLE, x + 32, y + 26, C_TEXT, title);
         oy = y + 32 + gfx_line_h(FONT_TITLE) + 10;
@@ -317,6 +355,7 @@ int ui_dialog(const char *title, const char *body, const char *const *options, i
         memcpy(gfx_bb, under, bytes);
         free(under);
     }
+    free(dimmed);
     do { ui_poll(); } while (cur.a || cur.b);
     return result;
 }

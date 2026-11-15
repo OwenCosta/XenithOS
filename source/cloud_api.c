@@ -61,6 +61,7 @@ int cloud_ready(const char *title)
     }
     if (net_is_up()) return 1;
     ui_loading_frame("Connecting", "Getting an address from your router");
+    audio_prepare_stall();
     if (!net_up()) {
         sfx(SFX_ERROR);
         ui_message("No network", "Plug an Ethernet cable into the back of the Xbox, then try again. XenithOS can't use Wi-Fi.");

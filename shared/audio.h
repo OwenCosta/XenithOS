@@ -20,7 +20,13 @@ enum {
 };
 
 void audio_init(void);
-void audio_update(void);
+void audio_update(void);              /* only does work when there's no mixer thread */
+void audio_shutdown(void);            /* stop the mixer and leave silence (before launching a program) */
+void audio_resume(void);
+void audio_prepare_stall(void);       /* about to block for a long time: avoid replayed audio */
+
+struct audio_stats { int threaded, queue_ms, chip_ms, dropouts; };
+void audio_get_stats(struct audio_stats *s);
 void sfx(int id);
 void sfx_gain(int id, int gain_pct, int pan_pct);   /* pan -100 (left) .. 100 (right) */
 void audio_set_volume(int pct);                     /* master, 0..100 */

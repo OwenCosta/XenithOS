@@ -21,6 +21,7 @@ void ui_poll(void);
 int  ui_nav_x(void);       /* -1 / +1 with key repeat; call once per frame */
 int  ui_nav_y(void);
 void ui_end_frame(void);   /* toasts, fade, present, sound, 60 fps */
+int  ui_frame_ms(void);    /* how long frames take to draw (not counting the wait), smoothed */
 uint64_t ui_ms(void);
 void ui_fade_in(void);
 float ui_ease(float value, float target, float rate);   /* move a fraction of the way each frame */

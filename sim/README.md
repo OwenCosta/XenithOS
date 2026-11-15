@@ -16,6 +16,17 @@ online screens against a local `server/xenith_cloud.py`.
 Environment: `XSIM_KEY` (console key for the inbox), `XSIM_PROFILE` (a profile.txt to boot signed in),
 `XSIM_BIN` (`xsim` or `xvolt`).
 
+Checks for things that only exist on the console:
+
+- `XSIM_TILED=1` also sends every frame through the console's tiled framebuffer code (`shared/tiled.c`)
+  into a fake framebuffer, reads it back at every screenshot and at the end, and prints how many pixels came
+  out wrong. It should always say 0.
+- `XSIM_THREAD=1` runs the sound mixer on a real second thread, like the console does. The simulator then
+  runs in real time, so a script takes as long as it would on the Xbox.
+
+At the end the simulator prints the average and worst time a frame took to draw on your PC, and how many
+times the sound ran dry ("dropouts"). Compare frame times before and after a change with the same script.
+
 ## Scripts
 
 One command per line; each controller poll is one frame.

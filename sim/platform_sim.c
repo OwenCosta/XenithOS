@@ -7,6 +7,8 @@
  *   XSIM_SCRIPT  input script (see sim/README.md)          required
  *   XSIM_OUT     folder for screenshots and audio.wav      default: out
  *   XSIM_W/H     screen size                               default: 1216 x 680 (720p minus overscan)
+ *   XSIM_THREAD  1 = run the sound mixer on a real second thread, like the console does.
+ *                The simulator then runs in real time instead of instantly.
  *
  * The working directory needs a folder literally named "uda:" standing in for the USB stick.
  */
@@ -15,18 +17,27 @@
 #include <string.h>
 #include <strings.h>
 #include <ctype.h>
+#include <pthread.h>
+#include <unistd.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <zlib.h>
 
+#include "audio.h"
 #include "platform.h"
+#include "tiled.h"
 
 static int W = 1216, H = 680;
 static uint32_t *last_frame;
 static int frames_presented;
 static uint64_t vtime;                       /* virtual microseconds */
 static const char *out_dir = "out";
+static struct tiled_fb tfb;          /* XSIM_TILED: fake console framebuffer */
+static int tiled_on;
 
 /* ------------------------------------------------------------- PNG output */
+
+static void tiled_check(const char *when);
 
 static void put32(unsigned char *p, uint32_t v)
 {
@@ -84,6 +95,7 @@ static void save_png(const char *name)
     fclose(f);
     free(raw);
     free(z);
+    tiled_check(name);
     fprintf(stderr, "sim: wrote %s (frame %d, t=%.2fs)\n", path, frames_presented, vtime / 1e6);
 }
 
@@ -169,10 +181,22 @@ static void load_script(const char *path)
     fclose(f);
 }
 
+/* Real time spent per frame on this PC (drawing + presenting), for before/after comparisons. */
+static double work_total_ms, work_max_ms, last_present_ms;
+static int work_frames;
+
 static void finish(int code)
 {
+    struct audio_stats as;
+    plat_thread_stop();
+    tiled_check("end");
     write_wav();
     fprintf(stderr, "sim: done after %d polls, %d frames, %.2fs virtual\n", polls, frames_presented, vtime / 1e6);
+    if (work_frames)
+        fprintf(stderr, "sim: frame work on this PC: average %.2f ms, worst %.1f ms\n", work_total_ms / work_frames, work_max_ms);
+    audio_get_stats(&as);
+    fprintf(stderr, "sim: sound mixer on %s, %d ms queued, %d dropouts\n",
+            as.threaded ? "its own thread" : "the main thread", as.queue_ms, as.dropouts);
     exit(code);
 }
 
@@ -233,6 +257,12 @@ void plat_init(void)
     if (!s) { fprintf(stderr, "sim: set XSIM_SCRIPT\n"); exit(2); }
     load_script(s);
     last_frame = calloc((size_t)W * H, 4);
+    if (getenv("XSIM_TILED") && !strcmp(getenv("XSIM_TILED"), "1")) {
+        int fw = 1280, fh = 720;
+        uint32_t *fake = calloc((size_t)fw * fh, 4);
+        tiled_init(&tfb, fake, fw, fh, (fw - W) / 2, (fh - H) / 2, W, H);
+        tiled_on = 1;
+    }
 }
 
 void plat_screen_size(int *w, int *h)
@@ -241,20 +271,54 @@ void plat_screen_size(int *w, int *h)
     *h = H;
 }
 
+
+static double real_ms(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
+}
+
+/* Read the fake framebuffer back and count pixels that don't match the last frame. */
+static void tiled_check(const char *when)
+{
+    int x, y, bad = 0;
+    if (!tiled_on) return;
+    for (y = 0; y < H; y++)
+        for (x = 0; x < W; x++)
+            if (tiled_read(&tfb, x, y) != last_frame[y * W + x]) bad++;
+    fprintf(stderr, "sim: tiled framebuffer check (%s): %d wrong pixels", when, bad);
+    fputc(10, stderr);
+}
+
 void plat_present(const uint32_t *px)
 {
+    double now;
     memcpy(last_frame, px, (size_t)W * H * 4);
+    if (tiled_on) tiled_present(&tfb, px, NULL);
     frames_presented++;
+    now = real_ms();
+    if (last_present_ms > 0) {
+        double d = now - last_present_ms;
+        work_total_ms += d;
+        if (d > work_max_ms) work_max_ms = d;
+        work_frames++;
+    }
+    last_present_ms = now;
 }
 
 uint64_t plat_time_us(void)
 {
-    return vtime;
+    return __atomic_load_n(&vtime, __ATOMIC_SEQ_CST);
 }
+
+static int real_time;     /* set when the mixer thread runs: then time has to pass for real */
 
 void plat_sleep_us(int us)
 {
-    if (us > 0) vtime += (uint64_t)us;
+    if (us <= 0) return;
+    if (real_time) usleep(us);
+    __atomic_add_fetch(&vtime, (uint64_t)us, __ATOMIC_SEQ_CST);
 }
 
 void plat_poll(struct pad *p)
@@ -301,6 +365,49 @@ void plat_audio_submit(const int16_t *stereo, int frames)
     wav_frames += frames;
 }
 
+/* ------------------------------------------------------------ mixer thread */
+
+static pthread_t thread;
+static volatile int thread_run;
+static void (*thread_step)(void);
+
+static void *thread_main(void *arg)
+{
+    (void)arg;
+    while (__atomic_load_n(&thread_run, __ATOMIC_SEQ_CST)) {
+        thread_step();
+        usleep(1000);
+    }
+    return NULL;
+}
+
+int plat_thread_start(void (*step)(void))
+{
+    const char *s = getenv("XSIM_THREAD");
+    if (!s || strcmp(s, "1")) return 0;      /* default: everything on one thread, deterministic */
+    if (thread_run) return 1;
+    thread_step = step;
+    real_time = 1;
+    __atomic_store_n(&thread_run, 1, __ATOMIC_SEQ_CST);
+    if (pthread_create(&thread, NULL, thread_main, NULL)) { thread_run = 0; return 0; }
+    return 1;
+}
+
+void plat_thread_stop(void)
+{
+    if (!thread_run) return;
+    __atomic_store_n(&thread_run, 0, __ATOMIC_SEQ_CST);
+    pthread_join(thread, NULL);
+}
+
+static void (*hook_before)(void), (*hook_failed)(void);
+
+void plat_set_launch_hooks(void (*before)(void), void (*failed)(void))
+{
+    hook_before = before;
+    hook_failed = failed;
+}
+
 void plat_storage_init(void)
 {
     mkdir("uda:", 0755);
@@ -323,8 +430,10 @@ const char *plat_name(void) { return "Simulator"; }
 
 void plat_launch(const char *path)
 {
+    if (hook_before) hook_before();
     fprintf(stderr, "sim: launch %s (not possible in the simulator)\n", path);
+    if (hook_failed) hook_failed();
 }
 
-void plat_reboot(void) { fprintf(stderr, "sim: reboot\n"); finish(0); }
-void plat_power_off(void) { fprintf(stderr, "sim: power off\n"); finish(0); }
+void plat_reboot(void) { if (hook_before) hook_before(); fprintf(stderr, "sim: reboot\n"); finish(0); }
+void plat_power_off(void) { if (hook_before) hook_before(); fprintf(stderr, "sim: power off\n"); finish(0); }

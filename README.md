@@ -4,8 +4,9 @@ XenithOS is a homebrew shell for the Xbox 360. It boots from XeLL in place of th
 its own home screen, profiles with avatars, a store that installs apps over Ethernet, and a DOOM port. It's
 written in C on [libxenon](https://github.com/Free60Project/libxenon).
 
-I'm building it on a 360 S (Trinity board). Version 0.3.1 has booted on the real console. 0.4.0, the redesign
-described below, has so far only been run in the simulator.
+I'm building it on a 360 S (Trinity board). The 0.4 redesign described below boots on the real console. On
+0.4.0 the sound broke up and the interface was slow there. 0.4.1 fixes both, but so far it has only been tested
+in the simulator.
 
 ## What's in it
 

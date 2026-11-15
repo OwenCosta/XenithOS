@@ -1,5 +1,6 @@
 /* Shape-drawn icons. Coordinates are fractions of the icon size around its centre. */
 #include <math.h>
+#include <stdlib.h>
 
 #include "gfx.h"
 #include "icons.h"
@@ -17,7 +18,7 @@ static void ci(float x, float y, float r, uint32_t c) { gfx_circle(PX(x), PY(y),
 static void ri(float x, float y, float r, float t) { gfx_ring(PX(x), PY(y), L(r), L(t), FG, 255); }
 static void ar(float x, float y, float r, float t, float a0, float a1) { gfx_arc(PX(x), PY(y), L(r), L(t), a0, a1, FG, 255); }
 
-void icon_draw(int icon, float cx, float cy, float size, uint32_t fg, uint32_t bg)
+static void icon_render(int icon, float cx, float cy, float size, uint32_t fg, uint32_t bg)
 {
     const float PI = 3.14159265f;
     int i;
@@ -155,4 +156,56 @@ void icon_draw(int icon, float cx, float cy, float size, uint32_t fg, uint32_t b
         gfx_tri(PX(0.17f), PY(-0.41f), PX(0.36f), PY(-0.22f), PX(0.12f), PY(-0.16f), FG, 255);
         break;
     }
+}
+
+/* Each icon is drawn once per size (and quarter-pixel position) as a white-on-black
+ * coverage mask, then stamped in any colour. Cut-outs come out see-through. */
+#define ICON_CACHE 64
+static struct { int icon, size_q, frac; struct img m; uint32_t used; } cache[ICON_CACHE];
+static uint32_t clock_;
+
+static const struct img *icon_mask(int icon, int size_q, int fx, int fy, int side)
+{
+    int i, slot = -1, frac = fx * 4 + fy;
+    uint32_t *buf;
+    for (i = 0; i < ICON_CACHE; i++)
+        if (cache[i].m.px && cache[i].icon == icon && cache[i].size_q == size_q && cache[i].frac == frac) {
+            cache[i].used = ++clock_;
+            return &cache[i].m;
+        }
+    buf = calloc((size_t)side * side, 4);
+    if (!buf) return NULL;
+    if (!gfx_target(buf, side, side)) { free(buf); return NULL; }
+    icon_render(icon, side / 2 + fx * 0.25f, side / 2 + fy * 0.25f, size_q * 0.25f, 0xFFFFFF, 0x000000);
+    gfx_target(NULL, 0, 0);
+
+    for (i = 0; i < ICON_CACHE; i++) {
+        if (!cache[i].m.px) { slot = i; break; }
+        if (slot < 0 || cache[i].used < cache[slot].used) slot = i;
+    }
+    free(cache[slot].m.px);
+    cache[slot].icon = icon;
+    cache[slot].size_q = size_q;
+    cache[slot].frac = frac;
+    cache[slot].m.w = side;
+    cache[slot].m.h = side;
+    cache[slot].m.px = buf;
+    cache[slot].m.id = gfx_new_image_id();
+    cache[slot].used = ++clock_;
+    return &cache[slot].m;
+}
+
+void icon_draw(int icon, float cx, float cy, float size, uint32_t fg, uint32_t bg)
+{
+    int ix = (int)floorf(cx), iy = (int)floorf(cy);
+    int fx = (int)((cx - ix) * 4), fy = (int)((cy - iy) * 4);
+    int size_q = (int)(size * 4 + 0.5f), side;
+    const struct img *m;
+    if (fx > 3) fx = 3;
+    if (fy > 3) fy = 3;
+    side = (int)ceilf(size_q * 0.25f * 1.4f) + 6;          /* some shapes reach past the box */
+    if (icon < 0 || icon >= ICON_COUNT || size_q <= 0 || side > 400) { icon_render(icon, cx, cy, size, fg, bg); return; }
+    m = icon_mask(icon, size_q, fx, fy, side);
+    if (m) gfx_mask(m, ix - side / 2, iy - side / 2, fg, 255);
+    else icon_render(icon, cx, cy, size, fg, bg);
 }

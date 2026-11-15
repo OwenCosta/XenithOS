@@ -1,5 +1,6 @@
 /* XenithOS avatars. Mirror any change here in server/web/avatar.js. */
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "avatar.h"
@@ -117,7 +118,7 @@ static void hair_cap(float cut, uint32_t c)
     clip_restore();
 }
 
-void avatar_draw_v(const int v[AV_PARTS], int x, int y, int size)
+static void avatar_render(const int v[AV_PARTS], int x, int y, int size)
 {
     const float PI = 3.14159265f;
     uint32_t skin = SKIN[v[AV_SKIN]], hair = HAIR[v[AV_HAIR_COLOR]], top = TOP[v[AV_TOP_COLOR]];
@@ -294,6 +295,77 @@ void avatar_draw_v(const int v[AV_PARTS], int x, int y, int size)
     }
 
     gfx_set_clip(outer[0], outer[1], outer[2], outer[3]);
+}
+
+/* Drawing an avatar is a few hundred shapes, so each (avatar, size) is drawn once into an
+ * image and copied after that. The rounded outline becomes the image's alpha, so the
+ * corners blend with whatever is behind them. */
+#define AV_CACHE 48
+#define AV_CACHE_BYTES (8u * 1024 * 1024)      /* the editor's big preview makes 700 KB copies */
+static struct { char code[AVATAR_CODE_LEN + 1]; int size; struct img im; uint32_t used; } av_cache[AV_CACHE];
+static uint32_t av_clock;
+static size_t av_bytes;
+
+static void av_evict(int i)
+{
+    av_bytes -= (size_t)av_cache[i].size * av_cache[i].size * 4;
+    free(av_cache[i].im.px);
+    memset(&av_cache[i], 0, sizeof av_cache[i]);
+}
+
+static int av_lru(void)
+{
+    int i, lru = -1;
+    for (i = 0; i < AV_CACHE; i++)
+        if (av_cache[i].im.px && (lru < 0 || av_cache[i].used < av_cache[lru].used)) lru = i;
+    return lru;
+}
+
+static const struct img *avatar_cached(const int v[AV_PARTS], int size)
+{
+    char code[AVATAR_CODE_LEN + 1];
+    int i, slot = -1, n = size * size;
+    uint32_t *px, *mask, bg = BG[v[AV_BACKGROUND]];
+    if (size <= 0 || size > 512) return NULL;
+    avatar_encode(v, code);
+    for (i = 0; i < AV_CACHE; i++)
+        if (av_cache[i].im.px && av_cache[i].size == size && !strcmp(av_cache[i].code, code)) {
+            av_cache[i].used = ++av_clock;
+            return &av_cache[i].im;
+        }
+
+    px = malloc((size_t)n * 4);
+    mask = calloc((size_t)n, 4);
+    if (!px || !mask) { free(px); free(mask); return NULL; }
+    if (!gfx_target(mask, size, size)) { free(px); free(mask); return NULL; }
+    gfx_fill_rrect(0, 0, (float)size, (float)size, size * 0.22f, 0xFFFFFF, 255);
+    gfx_target(NULL, 0, 0);
+    for (i = 0; i < n; i++) px[i] = bg;
+    gfx_target(px, size, size);
+    avatar_render(v, 0, 0, size);
+    gfx_target(NULL, 0, 0);
+    for (i = 0; i < n; i++) px[i] = (px[i] & 0xffffff) | ((mask[i] & 255) << 24);
+    free(mask);
+
+    while (av_bytes + (size_t)n * 4 > AV_CACHE_BYTES && (i = av_lru()) >= 0) av_evict(i);
+    for (i = 0; i < AV_CACHE && slot < 0; i++) if (!av_cache[i].im.px) slot = i;
+    if (slot < 0) { slot = av_lru(); av_evict(slot); }
+    av_bytes += (size_t)n * 4;
+    memcpy(av_cache[slot].code, code, sizeof code);
+    av_cache[slot].size = size;
+    av_cache[slot].im.w = size;
+    av_cache[slot].im.h = size;
+    av_cache[slot].im.px = px;
+    av_cache[slot].im.id = gfx_new_image_id();
+    av_cache[slot].used = ++av_clock;
+    return &av_cache[slot].im;
+}
+
+void avatar_draw_v(const int v[AV_PARTS], int x, int y, int size)
+{
+    const struct img *c = avatar_cached(v, size);
+    if (c) gfx_image(c, x, y, size, size, 255);
+    else avatar_render(v, x, y, size);
 }
 
 void avatar_draw(const char *code, int x, int y, int size)

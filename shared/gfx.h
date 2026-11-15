@@ -51,11 +51,21 @@ int  gfx_text_w(int s, const char *str);
 int  gfx_brand(int x, int y, int s, uint32_t main_color, uint32_t os_color);
 #define GFX_BRAND_W(s) gfx_text_w((s), "XENITHOS")
 
-/* Images: 0xAARRGGBB pixels. */
-struct img { int w, h; uint32_t *px; };
-void gfx_image(const struct img *im, int x, int y, int w, int h, int a);                 /* bilinear */
+/* Images: 0xAARRGGBB pixels. id is unique per loaded or generated image (used for caching). */
+struct img { int w, h; uint32_t *px; uint32_t id; };
+uint32_t gfx_new_image_id(void);
+/* Scaled and rounded copies are made once and cached, so drawing the same image at the same
+ * size every frame is just a copy. */
+void gfx_image(const struct img *im, int x, int y, int w, int h, int a);
 void gfx_image_rounded(const struct img *im, int x, int y, int w, int h, float r, int a);
 void gfx_blit_scaled(const uint32_t *src, int sw, int sh, int dx, int dy, int dw, int dh);  /* opaque, nearest */
+/* An alpha mask (coverage in the low byte of each pixel) drawn in one colour. */
+void gfx_mask(const struct img *mask, int x, int y, uint32_t color, int a);
+
+/* Draw into an off-screen buffer (w*h pixels) instead of the screen; gfx_target(NULL, 0, 0)
+ * goes back to the screen. Used to render things once and cache them. Doesn't nest: returns
+ * 0 (and changes nothing) when asked to switch to a buffer while already drawing into one. */
+int  gfx_target(uint32_t *buf, int w, int h);
 
 uint32_t gfx_mix(uint32_t a, uint32_t b, int t);     /* t = 0..256, a -> b */
 uint32_t gfx_shade(uint32_t c, int pct);              /* pct > 0 lighter, < 0 darker */

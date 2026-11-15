@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "audio.h"
 #include "gfx.h"
 #include "platform.h"
 
@@ -21,7 +22,44 @@ void gfx_init(void)
 
 void gfx_present(void)
 {
+    audio_update();             /* keeps sound fed when there's no mixer thread */
     plat_present(gfx_bb);
+    audio_update();
+}
+
+uint32_t gfx_new_image_id(void)
+{
+    static uint32_t next;
+    return ++next;
+}
+
+/* Off-screen drawing: swap the back buffer and screen size, restore them afterwards. */
+static uint32_t *saved_bb;
+static int saved_w, saved_h, saved_clip[4], in_target;
+
+int gfx_target(uint32_t *buf, int w, int h)
+{
+    if (buf && !in_target) {
+        saved_bb = gfx_bb;
+        saved_w = SCR_W;
+        saved_h = SCR_H;
+        gfx_get_clip(saved_clip);
+        gfx_bb = buf;
+        SCR_W = w;
+        SCR_H = h;
+        in_target = 1;
+        gfx_reset_clip();
+        return 1;
+    }
+    if (!buf && in_target) {
+        gfx_bb = saved_bb;
+        SCR_W = saved_w;
+        SCR_H = saved_h;
+        in_target = 0;
+        gfx_set_clip(saved_clip[0], saved_clip[1], saved_clip[2], saved_clip[3]);
+        return 1;
+    }
+    return 0;
 }
 
 void gfx_set_clip(int x, int y, int w, int h)
@@ -87,10 +125,18 @@ uint32_t gfx_shade(uint32_t c, int pct)
 
 /* ----------------------------------------------------------------- rectangles */
 
+typedef uint64_t __attribute__((may_alias)) u64a;
+
 void gfx_clear(uint32_t c)
 {
     size_t i, n = (size_t)SCR_W * SCR_H;
-    for (i = 0; i < n; i++) gfx_bb[i] = c;
+    if (((uintptr_t)gfx_bb & 7) == 0) {          /* two pixels per store */
+        u64a *p = (u64a *)gfx_bb, v = ((uint64_t)c << 32) | c;
+        for (i = 0; i < n / 2; i++) p[i] = v;
+        if (n & 1) gfx_bb[n - 1] = c;
+    } else {
+        for (i = 0; i < n; i++) gfx_bb[i] = c;
+    }
 }
 
 void gfx_rect(int x, int y, int w, int h, uint32_t c)
@@ -104,15 +150,26 @@ void gfx_rect(int x, int y, int w, int h, uint32_t c)
     }
 }
 
+/* Same result as blend() on every pixel, but red and blue share one multiply and the colour
+ * side is worked out once. Screen fades cover every pixel, so this matters. */
 void gfx_rect_a(int x, int y, int w, int h, uint32_t c, int a)
 {
     int x0 = x < cx0 ? cx0 : x, y0 = y < cy0 ? cy0 : y;
     int x1 = x + w > cx1 ? cx1 : x + w, y1 = y + h > cy1 ? cy1 : y + h;
     int px, py;
+    uint32_t k, ik, crb, cg;
     if (a >= 255) { gfx_rect(x, y, w, h, c); return; }
+    if (a <= 0) return;
+    k = (uint32_t)(a + (a >> 7));
+    ik = 256 - k;
+    crb = (c & 0xff00ff) * k;
+    cg = (c & 0x00ff00) * k;
     for (py = y0; py < y1; py++) {
         uint32_t *row = gfx_bb + (size_t)py * SCR_W;
-        for (px = x0; px < x1; px++) blend(&row[px], c, a);
+        for (px = x0; px < x1; px++) {
+            uint32_t d = row[px];
+            row[px] = ((((d & 0xff00ff) * ik + crb) >> 8) & 0xff00ff) | ((((d & 0x00ff00) * ik + cg) >> 8) & 0x00ff00);
+        }
     }
 }
 
@@ -148,11 +205,29 @@ static inline float sd_rrect(float px, float py, float cx, float cy, float hx, f
     return sqrtf(qx * qx + qy * qy) - r;
 }
 
+/* For one row of a rounded rect (qy = |row centre - cy| - hy), the half-width (from cx) of the
+ * region where the signed distance is <= k - r. Negative when the row has none. Used to find
+ * the spans that are fully inside or fully outside, so only edge pixels need the SDF. */
+static inline float rr_half(float qy, float hx, float k)
+{
+    if (qy <= 0) return qy <= k ? hx + k : -1.0f;
+    if (k < 0 || qy > k) return -1.0f;
+    return hx + sqrtf(k * k - qy * qy);
+}
+
+/* Pixels whose centres are within half-width hw of cx: [*p0, *p1]. Empty when *p0 > *p1. */
+static inline void span(float cx, float hw, int *p0, int *p1)
+{
+    if (hw < 0) { *p0 = 1; *p1 = 0; return; }
+    *p0 = (int)ceilf(cx - hw - 0.5f);
+    *p1 = (int)floorf(cx + hw - 0.5f);
+}
+
 void gfx_fill_rrect(float x, float y, float w, float h, float r, uint32_t c, int a)
 {
     int ix0, iy0, ix1, iy1, px, py;
     float cx = x + w * 0.5f, cy = y + h * 0.5f, hx, hy;
-    if (w <= 0 || h <= 0) return;
+    if (w <= 0 || h <= 0 || a <= 0) return;
     if (r > w * 0.5f) r = w * 0.5f;
     if (r > h * 0.5f) r = h * 0.5f;
     if (r < 0) r = 0;
@@ -161,10 +236,24 @@ void gfx_fill_rrect(float x, float y, float w, float h, float r, uint32_t c, int
     if (!bbox(x, y, x + w, y + h, &ix0, &iy0, &ix1, &iy1)) return;
     for (py = iy0; py < iy1; py++) {
         uint32_t *row = gfx_bb + (size_t)py * SCR_W;
-        float fy = py + 0.5f;
-        for (px = ix0; px < ix1; px++) {
-            int k = cover(sd_rrect(px + 0.5f, fy, cx, cy, hx, hy, r), a);
-            if (k) blend(&row[px], c, k);
+        float fy = py + 0.5f, qy = fabsf(fy - cy) - hy;
+        int f0, f1, o0, o1, lo, hi;
+        span(cx, rr_half(qy, hx, r - 0.5f), &f0, &f1);       /* fully covered */
+        span(cx, rr_half(qy, hx, r + 0.5f), &o0, &o1);       /* touched at all */
+        lo = o0 < ix0 ? ix0 : o0;
+        hi = o1 > ix1 - 1 ? ix1 - 1 : o1;
+        for (px = lo; px <= hi; px++) {
+            if (px >= f0 && px <= f1) {
+                int end = f1 < hi ? f1 : hi;
+                if (a >= 255) for (; px <= end; px++) row[px] = c;
+                else for (; px <= end; px++) blend(&row[px], c, a);
+                px = end;
+                continue;
+            }
+            {
+                int k = cover(sd_rrect(px + 0.5f, fy, cx, cy, hx, hy, r), a);
+                if (k) blend(&row[px], c, k);
+            }
         }
     }
 }
@@ -173,18 +262,27 @@ void gfx_stroke_rrect(float x, float y, float w, float h, float r, float t, uint
 {
     int ix0, iy0, ix1, iy1, px, py;
     float cx = x + w * 0.5f, cy = y + h * 0.5f, hx, hy, half = t * 0.5f;
-    if (w <= 0 || h <= 0) return;
+    if (w <= 0 || h <= 0 || a <= 0) return;
     if (r > w * 0.5f) r = w * 0.5f;
     if (r > h * 0.5f) r = h * 0.5f;
+    if (r < 0) r = 0;
     hx = w * 0.5f - r;
     hy = h * 0.5f - r;
     if (!bbox(x - half - 1, y - half - 1, x + w + half + 1, y + h + half + 1, &ix0, &iy0, &ix1, &iy1)) return;
     for (py = iy0; py < iy1; py++) {
         uint32_t *row = gfx_bb + (size_t)py * SCR_W;
-        float fy = py + 0.5f;
-        for (px = ix0; px < ix1; px++) {
-            float d = fabsf(sd_rrect(px + 0.5f, fy, cx, cy, hx, hy, r)) - half;
-            int k = cover(d, a);
+        float fy = py + 0.5f, qy = fabsf(fy - cy) - hy;
+        int s0, s1, o0, o1, lo, hi;
+        span(cx, rr_half(qy, hx, r - half - 0.5f), &s0, &s1);   /* inside the ring's hole: skip */
+        span(cx, rr_half(qy, hx, r + half + 0.5f), &o0, &o1);   /* touched at all */
+        lo = o0 < ix0 ? ix0 : o0;
+        hi = o1 > ix1 - 1 ? ix1 - 1 : o1;
+        for (px = lo; px <= hi; px++) {
+            float d;
+            int k;
+            if (px >= s0 && px <= s1) { px = s1; continue; }
+            d = fabsf(sd_rrect(px + 0.5f, fy, cx, cy, hx, hy, r)) - half;
+            k = cover(d, a);
             if (k) blend(&row[px], c, k);
         }
     }
@@ -512,7 +610,127 @@ static inline uint32_t sample(const struct img *im, float sx, float sy)
     return out;
 }
 
+/* Draw an image at its own size, blending by its alpha (times a). */
+static void blit(const struct img *im, int x, int y, int a)
+{
+    int x0 = x < cx0 ? cx0 : x, y0 = y < cy0 ? cy0 : y;
+    int x1 = x + im->w > cx1 ? cx1 : x + im->w, y1 = y + im->h > cy1 ? cy1 : y + im->h;
+    int px, py;
+    for (py = y0; py < y1; py++) {
+        uint32_t *row = gfx_bb + (size_t)py * SCR_W;
+        const uint32_t *src = im->px + (size_t)(py - y) * im->w;
+        for (px = x0; px < x1; px++) {
+            uint32_t s = src[px - x];
+            int k = (int)(s >> 24);
+            if (a < 255) k = k * a / 255;
+            if (k >= 255) row[px] = s & 0xffffff;
+            else if (k) blend(&row[px], s & 0xffffff, k);
+        }
+    }
+}
+
+void gfx_mask(const struct img *m, int x, int y, uint32_t color, int a)
+{
+    int x0, y0, x1, y1, px, py;
+    if (!m || !m->px) return;
+    x0 = x < cx0 ? cx0 : x;
+    y0 = y < cy0 ? cy0 : y;
+    x1 = x + m->w > cx1 ? cx1 : x + m->w;
+    y1 = y + m->h > cy1 ? cy1 : y + m->h;
+    for (py = y0; py < y1; py++) {
+        uint32_t *row = gfx_bb + (size_t)py * SCR_W;
+        const uint32_t *src = m->px + (size_t)(py - y) * m->w;
+        for (px = x0; px < x1; px++) {
+            int k = (int)(src[px - x] & 255);
+            if (a < 255) k = k * a / 255;
+            if (k >= 255) row[px] = color;
+            else if (k) blend(&row[px], color, k);
+        }
+    }
+}
+
+/* A w x h copy of im: scaled with bilinear filtering, rounded corners baked into the alpha. */
+static void make_scaled(const struct img *im, struct img *out, int w, int h, float r)
+{
+    int x, y;
+    float sxs = (float)im->w / w, sys = (float)im->h / h, cx = w * 0.5f, cy = h * 0.5f, hx, hy;
+    if (r > w * 0.5f) r = w * 0.5f;
+    if (r > h * 0.5f) r = h * 0.5f;
+    if (r < 0) r = 0;
+    hx = w * 0.5f - r;
+    hy = h * 0.5f - r;
+    out->w = w;
+    out->h = h;
+    out->id = gfx_new_image_id();
+    out->px = malloc((size_t)w * h * 4);
+    if (!out->px) return;
+    for (y = 0; y < h; y++) {
+        float sy = (y + 0.5f) * sys - 0.5f;
+        for (x = 0; x < w; x++) {
+            uint32_t s = sample(im, (x + 0.5f) * sxs - 0.5f, sy);
+            int k = r > 0 ? cover(sd_rrect(x + 0.5f, y + 0.5f, cx, cy, hx, hy, r), 255) : 255;
+            out->px[(size_t)y * w + x] = ((uint32_t)((s >> 24) * k / 255) << 24) | (s & 0xffffff);
+        }
+    }
+}
+
+#define IMG_CACHE 40
+#define IMG_CACHE_BYTES (24u * 1024 * 1024)
+static struct { uint32_t src; int w, h, r; struct img im; uint32_t used; } icache[IMG_CACHE];
+static uint32_t icache_clock;
+static size_t icache_bytes;
+
+static void icache_evict(void)
+{
+    int i, lru = -1;
+    for (i = 0; i < IMG_CACHE; i++)
+        if (icache[i].im.px && (lru < 0 || icache[i].used < icache[lru].used)) lru = i;
+    if (lru < 0) return;
+    icache_bytes -= (size_t)icache[lru].im.w * icache[lru].im.h * 4;
+    free(icache[lru].im.px);
+    memset(&icache[lru], 0, sizeof icache[lru]);
+}
+
+static const struct img *scaled_copy(const struct img *im, int w, int h, float r)
+{
+    int i, slot = -1, rk = (int)(r * 16 + 0.5f);
+    size_t bytes = (size_t)w * h * 4;
+    if (!im->id || bytes > IMG_CACHE_BYTES / 2) return NULL;
+    for (i = 0; i < IMG_CACHE; i++)
+        if (icache[i].im.px && icache[i].src == im->id && icache[i].w == w && icache[i].h == h && icache[i].r == rk) {
+            icache[i].used = ++icache_clock;
+            return &icache[i].im;
+        }
+    while (icache_bytes + bytes > IMG_CACHE_BYTES) icache_evict();
+    for (i = 0; i < IMG_CACHE && slot < 0; i++) if (!icache[i].im.px) slot = i;
+    if (slot < 0) {
+        icache_evict();
+        for (i = 0; i < IMG_CACHE && slot < 0; i++) if (!icache[i].im.px) slot = i;
+    }
+    make_scaled(im, &icache[slot].im, w, h, r);
+    if (!icache[slot].im.px) return NULL;
+    icache[slot].src = im->id;
+    icache[slot].w = w;
+    icache[slot].h = h;
+    icache[slot].r = rk;
+    icache[slot].used = ++icache_clock;
+    icache_bytes += bytes;
+    return &icache[slot].im;
+}
+
+static void image_draw_direct(const struct img *im, int x, int y, int w, int h, float r, int a);
+
 static void image_draw(const struct img *im, int x, int y, int w, int h, float r, int a)
+{
+    const struct img *c;
+    if (!im || !im->px || w <= 0 || h <= 0) return;
+    if (w == im->w && h == im->h && r <= 0) { blit(im, x, y, a); return; }
+    c = scaled_copy(im, w, h, r);
+    if (c) blit(c, x, y, a);
+    else image_draw_direct(im, x, y, w, h, r, a);
+}
+
+static void image_draw_direct(const struct img *im, int x, int y, int w, int h, float r, int a)
 {
     int ix0, iy0, ix1, iy1, px, py;
     float sxs, sys, cx = x + w * 0.5f, cy = y + h * 0.5f, hx, hy;

@@ -41,6 +41,7 @@ int img_load_mem(struct img *out, const void *data, int len)
     free(raw);
     out->w = w;
     out->h = h;
+    out->id = gfx_new_image_id();          /* scaled copies are cached by this */
     return 1;
 }
 

@@ -29,9 +29,20 @@ void plat_rumble(int left, int right);       /* 0..255 each */
 
 #define PLAT_AUDIO_RATE  48000
 #define PLAT_AUDIO_BLOCK 512                 /* frames per submit */
+#define PLAT_AUDIO_RING_BLOCKS 32            /* the sound chip plays from a ring of this many blocks */
 void plat_audio_init(void);
-int  plat_audio_queued(void);                /* frames queued and not played yet */
+int  plat_audio_queued(void);                /* frames queued and not played yet, as the chip reports it */
 void plat_audio_submit(const int16_t *stereo, int frames);  /* frames: multiple of PLAT_AUDIO_BLOCK */
+
+/* A spare hardware thread. step() is called about once a millisecond until plat_thread_stop().
+ * Returns 0 if there's no spare thread (the simulator, by default); the caller then does the
+ * work itself on the main thread. */
+int  plat_thread_start(void (*step)(void));
+void plat_thread_stop(void);
+
+/* before() runs right before another program is launched or the console restarts or turns off.
+ * failed() runs if a launch didn't happen after all. */
+void plat_set_launch_hooks(void (*before)(void), void (*failed)(void));
 
 void plat_storage_init(void);                /* USB / hard drive file systems */
 int  plat_bdev_next(int handle, const char **name);         /* -1 to start, -1 when done */

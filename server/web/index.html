@@ -131,7 +131,7 @@
     runs its own home screen, profiles with avatars, a store that installs apps over Ethernet, and a DOOM port.</p>
   <p class="sub">I'm building it for my old 360 S with a Trinity board. It's written in C on libxenon, and the
     server this page runs on is also the console's cloud backend: profiles, leaderboards and the store live here.</p>
-  <div class="facts"><span id="ver">v0.4.0</span><span>C + libxenon</span><span>GPL-3.0</span><span>runs from a USB stick</span></div>
+  <div class="facts"><span id="ver">v0.4.1</span><span>C + libxenon</span><span>GPL-3.0</span><span>runs from a USB stick</span></div>
   <div class="actions">
     <a class="btn primary" id="dl" href="v1/store/file/xenith" download="xenon.elf">Download XenithOS</a>
     <a class="btn" href="https://github.com/OwenCosta/XenithOS">Source code</a>
@@ -179,8 +179,9 @@
     <table>
       <thead><tr><th>Part</th><th>Builds</th><th>On the Xbox</th><th>Notes</th></tr></thead>
       <tbody>
-        <tr><td>Booting XenithOS from the exploit</td><td class="yes">yes</td><td class="yes">works</td><td class="note">version 0.3.1 booted on the 360 S</td></tr>
-        <tr><td>New interface, sounds, keyboard, avatars</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">0.4.0, tested in the simulator</td></tr>
+        <tr><td>Booting XenithOS from the exploit</td><td class="yes">yes</td><td class="yes">works</td><td class="note">0.3.1 and 0.4.0 booted on the 360 S</td></tr>
+        <tr><td>New interface</td><td class="yes">yes</td><td class="yes">works</td><td class="note">0.4.0 ran slowly on the console; 0.4.1 draws much less per frame</td></tr>
+        <tr><td>Sounds, keyboard, avatars</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">the chime played on 0.4.0 but the sound broke up; fixed in 0.4.1</td></tr>
         <tr><td>Profiles, Store, Cloud</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">needs the Ethernet cable; no Wi-Fi driver</td></tr>
         <tr><td>VOLT</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">scores go to your profile</td></tr>
         <tr><td>DOOM</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">doomgeneric, no game sound yet</td></tr>
@@ -211,6 +212,8 @@
   <div class="wrap">
     <h2>Build log</h2>
     <ul class="log">
+      <li><b>0.4.1</b><time datetime="2026-11-15">Nov 15, 2026</time>
+        <p>Fixes for what showed up on the real console. Sound is mixed on its own processor thread, so it no longer breaks up when the screen or network is busy. Only the parts of the screen that changed get sent to the TV, and thumbnails, icons and avatars are drawn once and reused, which makes the interface much faster.</p></li>
       <li><b>0.4.0</b><time datetime="2026-11-15">Nov 15, 2026</time>
         <p>Blue redesign with smooth animation, the Inter typeface, and thumbnails everywhere. Sounds made in code, including the start-up chime. Profiles with passcodes and avatars, saved on the server. On-screen keyboard, settings, and a simulator for testing on a PC.</p></li>
       <li><b>0.3.2</b><time datetime="2026-11-14">Nov 14, 2026</time>

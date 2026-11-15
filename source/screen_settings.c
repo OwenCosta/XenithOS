@@ -61,6 +61,25 @@ static void system_info(void)
             snprintf(v, sizeof v, "%d C", t);
             gfx_str_r(FONT_BODY_SB, M + w - 24, y, C_TEXT, v);
         }
+        {
+            /* Live numbers for diagnosing speed and sound on the real console. */
+            struct audio_stats as;
+            const char *k[4] = {"Frame time", "Sound mixer", "Sound buffer", "Dropouts"};
+            char vals[4][48];
+            int ms = ui_frame_ms();
+            audio_get_stats(&as);
+            snprintf(vals[0], 48, "%d ms (%d fps)", ms, ms > 16 ? 1000 / (ms ? ms : 1) : 60);
+            snprintf(vals[1], 48, "%s", as.threaded ? "Own thread" : "Main thread");
+            snprintf(vals[2], 48, "%d ms, chip %d ms", as.queue_ms, as.chip_ms);
+            snprintf(vals[3], 48, "%d", as.dropouts);
+            y = top + 312;
+            gfx_str(FONT_BODY_SB, M + 24, y, C_TEXT, "Sound and speed");
+            for (i = 0; i < 4; i++) {
+                y += 40;
+                gfx_str(FONT_BODY, M + 24, y, C_SUB, k[i]);
+                gfx_str_r(FONT_BODY_SB, M + w - 24, y, C_TEXT, vals[i]);
+            }
+        }
         ui_panel(M + w + 24, top, w, h);
         y = top + 22;
         gfx_str(FONT_BODY_SB, M + w + 48, y, C_TEXT, "This console");

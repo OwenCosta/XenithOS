@@ -8,7 +8,8 @@
 
 #define RATE    PLAT_AUDIO_RATE
 #define BLOCK   PLAT_AUDIO_BLOCK
-#define TARGET  (BLOCK * 4)          /* keep about 43 ms queued */
+#define TARGET_THREAD (BLOCK * 3)    /* ~32 ms ahead when the mixer has its own thread */
+#define TARGET_MAIN   (BLOCK * 6)    /* ~64 ms ahead when it shares the main thread */
 #define VOICES  10
 #define TAB     4096
 #define PI      3.14159265f
@@ -17,10 +18,24 @@ struct sound { int16_t *pcm; int frames; };   /* interleaved stereo */
 struct voice { const struct sound *s; int pos, gl, gr; int id; };
 
 static struct sound sounds[SFX_COUNT];
-static struct voice voices[VOICES];
 static float sine[TAB];
-static int master = 256, ui_on = 1, ready;
 static uint32_t rng = 0x12345678;
+
+/* Shared between the main thread and the mixer thread. */
+static volatile int master = 256, ui_on = 1, ready, threaded;
+static volatile int voices_active, queue_frames, hw_frames, underruns;
+
+/* sfx() requests: the main thread writes cmd_head, the mixer writes cmd_tail. */
+#define NCMD 32
+struct cmd { int id, gl, gr; };
+static struct cmd cmdq[NCMD];
+static volatile unsigned cmd_head, cmd_tail;
+
+/* Only the mixer touches these. */
+static struct voice voices[VOICES];
+static uint64_t est_time;
+static int est_frames;
+static long long submitted;
 
 /* ------------------------------------------------------------- synthesis */
 
@@ -227,14 +242,147 @@ static void make_sounds(void)
 
 /* ----------------------------------------------------------------- mixer */
 
+/* The sound chip plays a ring of PLAT_AUDIO_RING_BLOCKS blocks. If nobody refills it in
+ * time it can replay old blocks, which sounds like fast repeating pops. So the mixer runs on
+ * its own hardware thread when the platform has one, refilling about every millisecond.
+ * It also keeps its own clock-based count of what's queued and never trusts the chip's
+ * number when it's lower, so it can't write faster than the chip plays. */
+
+static void start_voice(const struct cmd *c)
+{
+    int i, slot = -1, oldest = 0;
+    for (i = 0; i < VOICES; i++) {
+        if (!voices[i].s && slot < 0) slot = i;
+        if (voices[i].s && c->id == SFX_MOVE && voices[i].id == SFX_MOVE) { slot = i; break; }   /* the tick restarts */
+        if (voices[i].s && voices[i].pos > voices[oldest].pos) oldest = i;
+    }
+    if (slot < 0) slot = oldest;
+    voices[slot].s = &sounds[c->id];
+    voices[slot].id = c->id;
+    voices[slot].pos = 0;
+    voices[slot].gl = c->gl;
+    voices[slot].gr = c->gr;
+}
+
+static void mixer_step(void)
+{
+    static int16_t out[BLOCK * 2];
+    static int32_t acc[BLOCK * 2];
+    uint64_t now = plat_time_us();
+    int target = threaded ? TARGET_THREAD : TARGET_MAIN, guard = 8, hw, q, v, i, active = 0;
+
+    while (cmd_tail != cmd_head) {
+        __sync_synchronize();
+        start_voice(&cmdq[cmd_tail % NCMD]);
+        __sync_synchronize();
+        cmd_tail = cmd_tail + 1;
+    }
+
+    if (est_time) {
+        long long played = (long long)(now - est_time) * RATE / 1000000;
+        est_frames = played >= est_frames ? 0 : est_frames - (int)played;
+    }
+    est_time = now;
+    hw = plat_audio_queued();
+    hw_frames = hw;
+    if (hw < 0 || hw > (PLAT_AUDIO_RING_BLOCKS - 4) * BLOCK) hw = 0;   /* not believable: go by the clock */
+    q = hw > est_frames ? hw : est_frames;
+    if (q == 0 && submitted) underruns = underruns + 1;
+
+    while (q < target && guard--) {
+        memset(acc, 0, sizeof acc);
+        for (v = 0; v < VOICES; v++) {
+            struct voice *vo = &voices[v];
+            int n;
+            if (!vo->s) continue;
+            n = vo->s->frames - vo->pos;
+            if (n > BLOCK) n = BLOCK;
+            for (i = 0; i < n; i++) {
+                acc[i * 2] += (vo->s->pcm[(vo->pos + i) * 2] * vo->gl) >> 8;
+                acc[i * 2 + 1] += (vo->s->pcm[(vo->pos + i) * 2 + 1] * vo->gr) >> 8;
+            }
+            vo->pos += n;
+            if (vo->pos >= vo->s->frames) vo->s = NULL;
+        }
+        for (i = 0; i < BLOCK * 2; i++) {
+            int32_t s = (acc[i] * master) >> 8;
+            out[i] = (int16_t)(s > 32767 ? 32767 : s < -32768 ? -32768 : s);
+        }
+        plat_audio_submit(out, BLOCK);
+        submitted += BLOCK;
+        q += BLOCK;
+        est_frames += BLOCK;
+    }
+    for (v = 0; v < VOICES; v++) if (voices[v].s) active++;
+    voices_active = active;
+    queue_frames = q;
+}
+
+/* Overwrite the whole ring with silence so nothing old can be replayed. */
+static void fill_silence(void)
+{
+    static const int16_t zero[BLOCK * 2];
+    int i;
+    for (i = 0; i < PLAT_AUDIO_RING_BLOCKS; i++) plat_audio_submit(zero, BLOCK);
+    est_frames = 0;
+    est_time = 0;
+}
+
+void audio_shutdown(void)
+{
+    if (!ready) return;
+    ready = 0;                                   /* sfx() is ignored from here on */
+    if (threaded) {
+        plat_thread_stop();
+        threaded = 0;
+    }
+    memset(voices, 0, sizeof voices);
+    cmd_tail = cmd_head;
+    voices_active = 0;
+    fill_silence();
+}
+
+void audio_resume(void)
+{
+    if (ready || !sounds[SFX_MOVE].pcm) return;
+    ready = 1;
+    threaded = 1;
+    if (!plat_thread_start(mixer_step)) {
+        threaded = 0;
+        mixer_step();
+    }
+}
+
+void audio_prepare_stall(void)
+{
+    /* Only matters without the mixer thread: about to block for a while, so stop
+     * the sounds and leave nothing but silence in the ring. */
+    if (!ready || threaded) return;
+    memset(voices, 0, sizeof voices);
+    cmd_tail = cmd_head;
+    voices_active = 0;
+    fill_silence();
+}
+
 void audio_init(void)
 {
     int i;
     for (i = 0; i < TAB; i++) sine[i] = sinf(2 * PI * i / TAB);
     make_sounds();
     plat_audio_init();
+    plat_set_launch_hooks(audio_shutdown, audio_resume);
     ready = 1;
-    audio_update();
+    threaded = 1;
+    if (!plat_thread_start(mixer_step)) {
+        threaded = 0;
+        mixer_step();
+    }
+}
+
+void audio_update(void)
+{
+    if (!ready || threaded) return;
+    mixer_step();
 }
 
 void audio_set_volume(int pct)
@@ -257,23 +405,18 @@ int sfx_length_ms(int id)
 
 void sfx_gain(int id, int gain_pct, int pan_pct)
 {
-    int i, slot = -1, oldest = 0;
+    struct cmd *c;
     if (!ready || id < 0 || id >= SFX_COUNT || !sounds[id].pcm) return;
     if (!ui_on && id != SFX_BOOT) return;
-    /* The tick restarts instead of stacking when you scroll fast. */
-    for (i = 0; i < VOICES; i++) {
-        if (!voices[i].s && slot < 0) slot = i;
-        if (voices[i].s && id == SFX_MOVE && voices[i].id == SFX_MOVE) { slot = i; break; }
-        if (voices[i].s && voices[i].pos > voices[oldest].pos) oldest = i;
-    }
-    if (slot < 0) slot = oldest;
-    voices[slot].s = &sounds[id];
-    voices[slot].id = id;
-    voices[slot].pos = 0;
+    if (cmd_head - cmd_tail >= NCMD) return;     /* the mixer is behind; drop it */
     if (pan_pct < -100) pan_pct = -100;
     if (pan_pct > 100) pan_pct = 100;
-    voices[slot].gl = gain_pct * 256 / 100 * (pan_pct > 0 ? 100 - pan_pct : 100) / 100;
-    voices[slot].gr = gain_pct * 256 / 100 * (pan_pct < 0 ? 100 + pan_pct : 100) / 100;
+    c = &cmdq[cmd_head % NCMD];
+    c->id = id;
+    c->gl = gain_pct * 256 / 100 * (pan_pct > 0 ? 100 - pan_pct : 100) / 100;
+    c->gr = gain_pct * 256 / 100 * (pan_pct < 0 ? 100 + pan_pct : 100) / 100;
+    __sync_synchronize();
+    cmd_head = cmd_head + 1;
 }
 
 void sfx(int id)
@@ -283,37 +426,13 @@ void sfx(int id)
 
 int audio_busy(void)
 {
-    int i;
-    for (i = 0; i < VOICES; i++) if (voices[i].s) return 1;
-    return 0;
+    return ready && (cmd_head != cmd_tail || voices_active > 0);
 }
 
-void audio_update(void)
+void audio_get_stats(struct audio_stats *s)
 {
-    static int16_t out[BLOCK * 2];
-    static int32_t acc[BLOCK * 2];
-    int guard = 8;
-    if (!ready) return;
-    while (plat_audio_queued() < TARGET && guard--) {
-        int v, i;
-        memset(acc, 0, sizeof acc);
-        for (v = 0; v < VOICES; v++) {
-            struct voice *vo = &voices[v];
-            int n;
-            if (!vo->s) continue;
-            n = vo->s->frames - vo->pos;
-            if (n > BLOCK) n = BLOCK;
-            for (i = 0; i < n; i++) {
-                acc[i * 2] += (vo->s->pcm[(vo->pos + i) * 2] * vo->gl) >> 8;
-                acc[i * 2 + 1] += (vo->s->pcm[(vo->pos + i) * 2 + 1] * vo->gr) >> 8;
-            }
-            vo->pos += n;
-            if (vo->pos >= vo->s->frames) vo->s = NULL;
-        }
-        for (i = 0; i < BLOCK * 2; i++) {
-            int32_t s = (acc[i] * master) >> 8;
-            out[i] = (int16_t)(s > 32767 ? 32767 : s < -32768 ? -32768 : s);
-        }
-        plat_audio_submit(out, BLOCK);
-    }
+    s->threaded = threaded;
+    s->queue_ms = queue_frames * 1000 / RATE;
+    s->chip_ms = hw_frames * 1000 / RATE;
+    s->dropouts = underruns;
 }
