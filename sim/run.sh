@@ -36,7 +36,9 @@ fi
 if [ -n "$XSIM_OTHER" ]; then
     for id in $XSIM_OTHER; do
         app_name=$(python3 -c "import json,sys; print(next((a['name'] for a in json.load(open(sys.argv[1])) if a['id']==sys.argv[2]), sys.argv[2]))" \
-                   "$here/../server/flathub.example.json" "$id")
+                   "$here/../server/flathub.example.json" "${id%%:*}")
+        # "id:Its_Name" names one the catalog doesn't have (underscores for spaces)
+        case "$id" in *:*) app_name=$(echo "${id#*:}" | tr '_' ' '); id="${id%%:*}";; esac
         printf 'name=%s\nflatpak=org.example.%s\n' "$app_name" "$id" > "$work/uda:/apps/$id.app"
         [ -f "$here/../art/thumbs/$id.ximg" ] && cp "$here/../art/thumbs/$id.ximg" "$work/uda:/apps/$id.ximg"
     done

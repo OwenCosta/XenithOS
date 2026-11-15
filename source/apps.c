@@ -124,9 +124,18 @@ void app_card(const struct app *a, int x, int y, int w, int h, int selected, flo
     if (a->thumb.px) {
         gfx_image_rounded(&a->thumb, x, y, w, h, 10, 255);
     } else {
-        gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 12, C_SURFACE2, 255);
-        icon_draw(ICON_PLAY, x + w / 2.0f, y + h / 2.0f - 10, h * 0.30f, C_SUB, C_SURFACE2);
-        gfx_str_c(FONT_BODY_SB, x + w / 2, y + h - 38, C_TEXT, a->name);
+        /* No picture (Prism Launcher's tile, your own apps): the name on a flat card like the
+         * Store's, in a size that suits the card, on two lines at most, and never past its edges. */
+        int font = w >= 200 ? FONT_LABEL : w >= 140 ? FONT_BODY_SB : FONT_SMALL;
+        int pad = w >= 140 ? 18 : 9, lines, clip[4];
+        gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 10, C_SURFACE2, 255);
+        gfx_get_clip(clip);
+        gfx_set_clip(0, 0, 0, 0);                    /* measure first: nothing drawn */
+        lines = gfx_wrap(font, 0, 0, w - 2 * pad, 2, 0, a->name, 2);
+        gfx_set_clip(clip[0], clip[1], clip[2], clip[3]);
+        gfx_clip_intersect(x, y, w, h);
+        gfx_wrap(font, x + pad, y + (h - lines * (gfx_line_h(font) + 2)) / 2, w - 2 * pad, 2, C_TEXT, a->name, 2);
+        gfx_set_clip(clip[0], clip[1], clip[2], clip[3]);
     }
 }
 
