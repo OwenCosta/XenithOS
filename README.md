@@ -1,29 +1,27 @@
 # XENITH
 
-**A custom operating shell for the Xbox 360**, running bare metal on the real hardware through
-[LibXenon](https://github.com/Free60Project/libxenon). It boots from XeLL instead of the Xbox dashboard,
-and comes with its own interface, its own apps, **its own App Store**, **a cloud server**, and **DOOM**.
+XENITH is a homebrew shell for the Xbox 360. It boots from XeLL in place of the Microsoft dashboard and runs
+its own menu and apps, written in C on [LibXenon](https://github.com/Free60Project/libxenon). There's a small
+store that downloads apps over Ethernet, a Python server that backs it, and a DOOM port.
 
-> **Status: early (v0.3.1).** Everything builds cleanly, and the cloud server is tested end to end over the internet.
-> First boot on real hardware (a 360 S, Trinity board) is in progress.
+I'm building it on a 360 S (Trinity board). Status as of v0.3.1: everything compiles and the server is
+running, but none of it has been run on the console yet. The first boot is in progress.
 
 ## What's in it
 
-**XENITH shell** (`source/`)
-- **Boot splash**: the XENITH logo fades in, an accent bar sweeps across, and the controller rumbles
-- **Apps**: launches `.elf` / `.elf32` programs from the root or an `apps/` folder on USB
-- **Store**: browse and install apps and game data from your XENITH Cloud server. Every download is
-  checked against its SHA-256 before anything is written. It can even update XENITH itself.
-- **Cloud**: a live view of your server: load, memory, disk, uptime, ping, a message-of-the-day banner,
-  an **inbox** you can message from anywhere, and the **VOLT leaderboard**
-- **System**: live CPU / GPU / memory / board temperatures, video output type, resolution
-- **Controller**: every button, both sticks and both triggers drawn live, and the triggers drive the rumble motors
+Shell (`source/`):
+- Boot splash with a short controller rumble
+- Apps: launches `.elf` / `.elf32` files from the root or an `apps/` folder on USB
+- Store: installs apps and game data from the server. Each download's SHA-256 is checked before it's
+  written, and the store can also update XENITH itself.
+- Cloud: server load, memory, disk, uptime and ping, a message banner, an inbox, and the VOLT leaderboard
+- System: CPU / GPU / memory / board temperatures, video output, resolution
+- Controller: shows every button, stick and trigger, and the triggers run the rumble motors
 
-**Apps** (`apps/`)
-- **VOLT**: steer a streak of light, collect sparks, speed up every 5 sparks. After a crash, **X** uploads
-  your score to the Cloud leaderboard.
-- **DOOM**: [doomgeneric](https://github.com/ozkl/doomgeneric) ported to XENITH, stretched to 4:3 with full
-  controller support. Install **Freedoom** from the Store, or copy your own `doom1.wad` / `doom2.wad` to a `doom/` folder on USB.
+Apps (`apps/`):
+- VOLT: a light-trail game. Grab sparks, speed up every 5. Press X after a crash to upload your score.
+- DOOM: [doomgeneric](https://github.com/ozkl/doomgeneric) with controller support, scaled to 4:3.
+  Get Freedoom from the store, or copy your own `doom1.wad` / `doom2.wad` into a `doom/` folder on USB.
 
 | DOOM control | |
 |---|---|
@@ -59,11 +57,11 @@ data/                   game data installed by the Store
 doom/                   DOOM config and saves
 ```
 
-**Networking uses the built-in Ethernet port** (LibXenon has no Wi-Fi driver). If you use the software
-exploit, plug the cable in only after XENITH has booted, because the exploit must run offline.
+Networking only works over the Ethernet port, because LibXenon has no Wi-Fi driver. If you use the
+software exploit, plug the cable in after XENITH has booted, since the exploit has to run offline.
 
-> ⚠️ FreeMyXe's own warning: never flash a modified NAND or run anything that writes to the NAND while using
-> it, or you will brick the console. XENITH never writes to the NAND.
+**Warning from FreeMyXe:** never flash a modified NAND or run anything that writes to the NAND while using
+it, or you will brick the console. XENITH only writes to the USB stick.
 
 ### Settings: `xenith/config.txt`
 
@@ -81,8 +79,8 @@ or `config.example.txt` if you don't have one.
 `server/xenith_cloud.py` is a single Python 3 file with no dependencies. It serves the Store, the inbox,
 leaderboards and live server stats over plain HTTP (the console has no TLS).
 
-It also serves the **XENITH website** (`server/web/index.html`) at `http://<server>:8795/`: live server
-stats, the VOLT leaderboard and the Store catalog, drawn with the console's own pixel font.
+It also serves the project website (`server/web/index.html`) at `http://<server>:8795/`. The page has a
+playable copy of the XENITH menu drawn in the console's font, plus the leaderboard, store list and server stats.
 
 ```bash
 python3 server/xenith_cloud.py --selftest      # 37 checks, no network needed
