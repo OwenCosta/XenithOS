@@ -4,7 +4,7 @@
 [LibXenon](https://github.com/Free60Project/libxenon). It boots from XeLL instead of the Xbox dashboard,
 and comes with its own interface, its own apps, **its own App Store**, **a cloud server**, and **DOOM**.
 
-> **Status: early (v0.3).** Everything builds cleanly, and the cloud server is tested end to end over the internet.
+> **Status: early (v0.3.1).** Everything builds cleanly, and the cloud server is tested end to end over the internet.
 > First boot on real hardware (a 360 S, Trinity board) is in progress.
 
 ## What's in it
@@ -70,6 +70,7 @@ exploit, plug the cable in only after XENITH has booted, because the exploit mus
 ```
 server=203.0.113.10:8795    # your XENITH Cloud server, IP:port (the console has no DNS)
 name=PLAYER                 # leaderboard name: letters and digits, up to 12
+key=...                     # console key: matches XENITH_CONSOLE_KEY so only your Xbox reads its inbox
 ```
 
 `build.sh` copies `config.local.txt` (git-ignored, so your server address stays private) to the USB layout,
@@ -80,18 +81,24 @@ or `config.example.txt` if you don't have one.
 `server/xenith_cloud.py` is a single Python 3 file with no dependencies. It serves the Store, the inbox,
 leaderboards and live server stats over plain HTTP (the console has no TLS).
 
+It also serves the **XENITH website** (`server/web/index.html`) at `http://<server>:8795/`: live server
+stats, the VOLT leaderboard and the Store catalog, drawn with the console's own pixel font.
+
 ```bash
-python3 server/xenith_cloud.py --selftest      # 32 checks, no network needed
+python3 server/xenith_cloud.py --selftest      # 37 checks, no network needed
 ```
 
 Install on a Linux server (the unit runs as a throwaway user with a read-only system):
 
 ```bash
-mkdir -p /opt/xenith-cloud/store
+mkdir -p /opt/xenith-cloud/store /opt/xenith-cloud/web
 cp server/xenith_cloud.py /opt/xenith-cloud/
+cp server/web/index.html /opt/xenith-cloud/web/
 cp server/xenith-cloud.service /etc/systemd/system/
 install -m 0755 server/xenith /usr/local/bin/xenith
-umask 077; echo "XENITH_ADMIN_KEY=$(openssl rand -hex 32)" > /etc/xenith-cloud.env
+umask 077
+echo "XENITH_ADMIN_KEY=$(openssl rand -hex 32)" > /etc/xenith-cloud.env
+echo "XENITH_CONSOLE_KEY=$(openssl rand -hex 24)" >> /etc/xenith-cloud.env   # also goes in config.txt as key=
 # put your .elf32 / .wad files and a store.json (see server/store.example.json) in /opt/xenith-cloud/store
 systemctl daemon-reload && systemctl enable --now xenith-cloud
 ufw allow 8795/tcp
