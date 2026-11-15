@@ -25,6 +25,10 @@ void gfx_text_c(int cx, int y, int s, uint32_t c, const char *str); /* centered 
 int  gfx_text_fit(int x, int y, int s, uint32_t c, const char *str, int max_w);
 #define GFX_TEXT_H(s) (7 * (s))
 
+/* The XenithOS wordmark: "XENITH" in main_color, "OS" in os_color. Returns its width. */
+int  gfx_brand(int x, int y, int s, uint32_t main_color, uint32_t os_color);
+#define GFX_BRAND_W(s) gfx_text_w((s), "XENITHOS")
+
 uint32_t gfx_mix(uint32_t a, uint32_t b, int t); /* t = 0..256, a -> b */
 
 #endif

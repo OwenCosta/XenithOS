@@ -17,7 +17,7 @@
 #include "sha256.h"
 #include "screens.h"
 
-#define XENITH_VER "0.3"
+#define XENITH_VER "0.3.2"
 
 /* --------------------------------------------------------------- helpers */
 
@@ -183,7 +183,7 @@ static void install(struct item *it)
     int st;
 
     if (!strcmp(it->kind, "system")) {
-        if (!confirm("UPDATE XENITH ITSELF?")) return;
+        if (!confirm("UPDATE XENITHOS ITSELF?")) return;
     } else {
         snprintf(q, sizeof q, "INSTALL %s?", it->name);
         if (!confirm(q)) return;

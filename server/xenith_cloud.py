@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""XENITH Cloud: the server side of XENITH for the Xbox 360.
+"""XenithOS Cloud: the server side of XenithOS for the Xbox 360.
 
 Standard library only. Plain HTTP, because the console has no TLS or DNS.
 Every reply is text/plain with simple line formats the console parses in C.
 
-  GET  /                              the XENITH website (web/index.html)
+  GET  /                              the XenithOS website (web/index.html)
   GET  /v1/ping                       pong
   GET  /v1/status                     key=value server stats (does not log a console)
   GET  /v1/hello?name=OWEN&ver=0.3    key=value lines: motd + live server stats
@@ -44,7 +44,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "0.3"
+VERSION = "0.3.2"
 GAMES = {"volt"}
 MAX_SCORE = 1_000_000
 TOP_KEEP = 50
@@ -69,7 +69,7 @@ class State:
         self.path = os.path.join(state_dir, "state.json")
         os.makedirs(state_dir, exist_ok=True)
         self.lock = threading.Lock()
-        self.data = {"motd": "WELCOME TO XENITH CLOUD", "inbox": [], "scores": {}, "next_id": 1,
+        self.data = {"motd": "WELCOME TO XENITHOS CLOUD", "inbox": [], "scores": {}, "next_id": 1,
                      "consoles": {}}
         if os.path.exists(self.path):
             with open(self.path, encoding="utf-8") as f:
@@ -220,7 +220,7 @@ def make_handler(state, store, admin_key, web_dir="web", console_key=""):
     last_score_lock = threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "XENITH-Cloud/" + VERSION
+        server_version = "XenithOS-Cloud/" + VERSION
         protocol_version = "HTTP/1.0"
 
         def log_message(self, fmt, *args):
@@ -255,7 +255,7 @@ def make_handler(state, store, admin_key, web_dir="web", console_key=""):
                 return self.reply(200, "pong\n")
 
             if parts == ["v1", "status"]:
-                lines = {"motd": state.data["motd"], "server": "XENITH CLOUD " + VERSION,
+                lines = {"motd": state.data["motd"], "server": "XENITHOS CLOUD " + VERSION,
                          "consoles": str(len(state.data["consoles"])),
                          "apps": str(len(store.items()))}
                 lines.update(server_stats())
@@ -265,7 +265,7 @@ def make_handler(state, store, admin_key, web_dir="web", console_key=""):
                 name = clean(q.get("name", ["PLAYER"])[0], 12).upper()
                 if NAME_RE.match(name):
                     state.seen(name, self.client_address[0])
-                lines = {"motd": state.data["motd"], "server": "XENITH CLOUD " + VERSION,
+                lines = {"motd": state.data["motd"], "server": "XENITHOS CLOUD " + VERSION,
                          "messages": str(len(state.data["inbox"]))}
                 lines.update(server_stats())
                 return self.reply(200, "".join(f"{k}={clean(v)}\n" for k, v in lines.items()))
@@ -300,7 +300,7 @@ def make_handler(state, store, admin_key, web_dir="web", console_key=""):
                 if os.path.isfile(page):
                     with open(page, "rb") as f:
                         return self.reply(200, f.read(), "text/html; charset=utf-8")
-                return self.reply(200, "XENITH Cloud " + VERSION + "\n")
+                return self.reply(200, "XenithOS Cloud " + VERSION + "\n")
 
             return self.reply(404, "not found\n")
 
@@ -357,7 +357,7 @@ def serve():
     httpd = ThreadingHTTPServer(("0.0.0.0", port),
                                 make_handler(state, store, admin_key, web_dir, console_key))
     httpd.daemon_threads = True
-    print(f"XENITH Cloud {VERSION} on :{port} (admin routes {'on' if admin_key else 'off'})",
+    print(f"XenithOS Cloud {VERSION} on :{port} (admin routes {'on' if admin_key else 'off'})",
           flush=True)
     httpd.serve_forever()
 
@@ -416,7 +416,7 @@ def selftest():
     check("status does not log a console", state.data["consoles"] == {})
     code, body = req("GET", "/v1/hello?name=owen&ver=0.3")
     text = body.decode()
-    check("hello ok", code == 200 and "motd=WELCOME TO XENITH CLOUD" in text)
+    check("hello ok", code == 200 and "motd=WELCOME TO XENITHOS CLOUD" in text)
     check("hello stats", "uptime=" in text and "disk_total_gb=" in text and "load=" in text)
     check("hello records console", "OWEN" in state.data["consoles"])
 

@@ -33,7 +33,7 @@
 #include "config.h"
 #include "screens.h"
 
-#define XENITH_VERSION "0.3.1"
+#define XENITH_VERSION "0.3.2"
 
 int bdev_enum(int handle, const char **name);
 
@@ -42,7 +42,7 @@ static void boot_splash(void)
 {
     int L = S * 5;
     int y = SCR_H / 2 - GFX_TEXT_H(L) / 2 - L;
-    int bw = gfx_text_w(L, "XENITH");
+    int bw = GFX_BRAND_W(L);
     int bx = SCR_W / 2 - bw / 2;
     int by = y + GFX_TEXT_H(L) + L * 2;
     int t, i;
@@ -51,7 +51,7 @@ static void boot_splash(void)
     gfx_flush();
 
     for (t = 0; t <= 16; t++) {
-        gfx_text_c(SCR_W / 2, y, L, gfx_mix(C_BG, C_TEXT, t * 16), "XENITH");
+        gfx_brand(bx, y, L, gfx_mix(C_BG, C_TEXT, t * 16), gfx_mix(C_BG, C_ACCENT, t * 16));
         gfx_flush();
         usb_do_poll();
         mdelay(35);
@@ -70,7 +70,7 @@ static void boot_splash(void)
     mdelay(180);
     set_controller_rumble(0, 0, 0);
 
-    gfx_text_c(SCR_W / 2, by + S * 12, S, C_DIM, "OS " XENITH_VERSION);
+    gfx_text_c(SCR_W / 2, by + S * 12, S, C_DIM, "VERSION " XENITH_VERSION);
     gfx_flush();
     mdelay(900);
 }
@@ -228,7 +228,7 @@ static void screen_system(void)
     snprintf(buf, sizeof buf, "VIDEO OUT    %s    %dX%d", av_name(xenon_smc_read_avpack()), SCR_W, SCR_H);
     gfx_text(M, info_y, S, C_TEXT, buf);
     gfx_text(M, info_y + rowh, S, C_TEXT, "CPU          XENON  3 CORES  6 THREADS  3.2 GHZ");
-    gfx_text(M, info_y + rowh * 2, S, C_TEXT, "SOFTWARE     XENITH OS " XENITH_VERSION "  ON LIBXENON");
+    gfx_text(M, info_y + rowh * 2, S, C_TEXT, "SOFTWARE     XENITHOS " XENITH_VERSION "  ON LIBXENON");
 
     for (;;) {
         if (tick-- <= 0) {
@@ -357,7 +357,7 @@ enum { ITEM_APPS, ITEM_STORE, ITEM_CLOUD, ITEM_SYSTEM, ITEM_CONTROLLER, ITEM_RES
 static const char *home_items[ITEM_COUNT] = {"APPS", "STORE", "CLOUD", "SYSTEM", "CONTROLLER", "RESTART", "POWER OFF"};
 static const char *home_desc[ITEM_COUNT] = {
     "LAUNCH PROGRAMS FROM USB OR HARD DRIVE",
-    "GET NEW APPS AND GAMES FROM XENITH CLOUD",
+    "GET NEW APPS AND GAMES FROM XENITHOS CLOUD",
     "YOUR SERVER: LIVE STATS, MESSAGES, LEADERBOARDS",
     "TEMPERATURES, VIDEO OUTPUT AND HARDWARE",
     "TEST EVERY BUTTON, STICK AND TRIGGER",

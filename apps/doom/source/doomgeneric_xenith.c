@@ -201,11 +201,11 @@ static void no_wad_screen(void)
     y += GFX_TEXT_H(S + 3) + S * 8;
     gfx_text_c(SCR_W / 2, y, S, C_TEXT, "NO GAME DATA (WAD) FOUND");
     y += GFX_TEXT_H(S) + S * 6;
-    gfx_text_c(SCR_W / 2, y, S - 1, C_DIM, "INSTALL FREEDOOM FROM THE XENITH STORE, OR COPY");
+    gfx_text_c(SCR_W / 2, y, S - 1, C_DIM, "INSTALL FREEDOOM FROM THE XENITHOS STORE, OR COPY");
     y += GFX_TEXT_H(S - 1) + S * 3;
     gfx_text_c(SCR_W / 2, y, S - 1, C_DIM, "DOOM1.WAD / DOOM2.WAD INTO A DOOM FOLDER ON THE USB STICK");
     y += GFX_TEXT_H(S - 1) + S * 10;
-    gfx_text_c(SCR_W / 2, y, S - 1, C_DIM, "PRESS A TO RETURN TO XENITH");
+    gfx_text_c(SCR_W / 2, y, S - 1, C_DIM, "PRESS A TO RETURN TO XENITHOS");
     gfx_flush();
 
     memset(&p, 0, sizeof p);

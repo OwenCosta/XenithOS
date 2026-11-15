@@ -106,12 +106,12 @@ static void draw_chrome(void)
 {
     int y = M / 2;
     gfx_clear(C_BG);
-    int x = M + gfx_text(M, y, S, C_ACCENT, "XENITH");
+    int x = M + gfx_brand(M, y, S, C_ACCENT, C_TEXT);
     x += S * 6;
     x += gfx_text(x, y, S, C_DIM, "/") + S * 6;
     gfx_text(x, y, S, C_TEXT, "VOLT");
     gfx_text(M, SCR_H - M / 2 - GFX_TEXT_H(S - 1), S - 1, C_DIM,
-             "STEER WITH STICK OR D-PAD     START PAUSE     BACK RETURN TO XENITH");
+             "STEER WITH STICK OR D-PAD     START PAUSE     BACK RETURN TO XENITHOS");
     gfx_rect(OX - 2, OY - 2, GW * CELL + 4, GH * CELL + 4, C_PANEL);
     gfx_rect(OX, OY, GW * CELL, GH * CELL, C_FIELD);
     draw_hud();
@@ -235,7 +235,7 @@ static void upload_score(void)
         gfx_flush();
         return;
     }
-    banner("UPLOADING", "CONNECTING TO XENITH CLOUD", C_TEXT);
+    banner("UPLOADING", "CONNECTING TO XENITHOS CLOUD", C_TEXT);
     gfx_flush();
     snprintf(body, sizeof body, "name=%s&score=%d", cfg.name, score);
     st = http_request(cfg.server, "POST", "/v1/scores/volt", body, strlen(body), 4096, NULL, NULL, &r);

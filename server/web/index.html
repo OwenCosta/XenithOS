@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>XENITH for Xbox 360</title>
-<meta name="description" content="XENITH is a homebrew shell for the Xbox 360 S, built on LibXenon. It has its own app store, a small cloud server, and a DOOM port.">
+<title>XenithOS for Xbox 360</title>
+<meta name="description" content="XenithOS is a homebrew shell for the Xbox 360 S, built on LibXenon. It has its own app store, a small cloud server, and a DOOM port.">
 <style>
   :root {
     --bg: #0b0b0f;
@@ -126,14 +126,14 @@
 
 <header class="top">
   <div class="wrap">
-    <svg id="navlogo" height="16" aria-label="XENITH"></svg>
+    <svg id="navlogo" height="16" aria-label="XenithOS"></svg>
     <nav>
       <a href="#try">Try it</a>
       <a href="#status">Status</a>
       <a href="#scores">Leaderboard</a>
       <a href="#run">Run it</a>
       <a href="#log">Build log</a>
-      <a href="https://github.com/OwenCosta/xenith-360">GitHub</a>
+      <a href="https://github.com/OwenCosta/XenithOS">GitHub</a>
     </nav>
     <span class="pill" id="pill"><span class="dot"></span><span id="pilltext">checking server</span></span>
   </div>
@@ -141,15 +141,15 @@
 
 <main>
 <div class="wrap intro">
-  <svg id="logo" aria-label="XENITH"></svg>
-  <p>XENITH is a homebrew shell for the Xbox 360. It boots from XeLL in place of the Microsoft dashboard and
+  <svg id="logo" aria-label="XenithOS"></svg>
+  <p>XenithOS is a homebrew shell for the Xbox 360. It boots from XeLL in place of the Microsoft dashboard and
     runs its own menu, its own apps, and a small store that downloads new ones over Ethernet.</p>
   <p class="dim">I'm building it for an old 360 S with a Trinity board. It's written in C on top of LibXenon.
     The server this page is running on is also the console's cloud backend.</p>
   <div class="facts"><span id="ver">v0.3.1</span><span>C + LibXenon</span><span>GPL-3.0</span><span>no soldering needed</span></div>
   <div class="actions">
-    <a class="btn primary" id="dl" href="/v1/store/file/xenith" download="xenon.elf">Download XENITH</a>
-    <a class="btn" href="https://github.com/OwenCosta/xenith-360">Source code</a>
+    <a class="btn primary" id="dl" href="v1/store/file/xenith" download="xenon.elf">Download XenithOS</a>
+    <a class="btn" href="https://github.com/OwenCosta/XenithOS">Source code</a>
   </div>
   <div class="sha" id="sha"></div>
 </div>
@@ -157,10 +157,10 @@
 <section id="try">
   <div class="wrap">
     <h2>Try the menu</h2>
-    <p class="lead">This is the XENITH interface redrawn in your browser with the same 5x7 font and layout. The Store and
+    <p class="lead">This is the XenithOS interface redrawn in your browser with the same 5x7 font and layout. The Store and
       Cloud screens pull live data from this server, the same way the console does.</p>
     <div class="sim">
-      <div class="tv"><canvas id="screen" width="640" height="360" tabindex="0" aria-label="XENITH simulator. Use arrow keys, Enter and Escape."></canvas></div>
+      <div class="tv"><canvas id="screen" width="640" height="360" tabindex="0" aria-label="XenithOS simulator. Use arrow keys, Enter and Escape."></canvas></div>
       <div class="controls">
         <div class="pad">
           <button class="up" data-k="up" aria-label="Up">UP</button>
@@ -224,14 +224,14 @@
     <ol class="steps">
       <li>Put <a href="https://github.com/shutterbug2000/ABadAvatar">ABadAvatar</a> and
         <a href="https://github.com/FreeMyXe/FreeMyXe">FreeMyXe</a> on the stick (FreeMyXe's xex renamed to <code>default.xex</code>).</li>
-      <li>Download XENITH above and put it in the root of the stick as <code>xenon.elf</code>.</li>
+      <li>Download XenithOS above and put it in the root of the stick as <code>xenon.elf</code>.</li>
       <li>Unplug the network, boot the 360, and leave the ABadAvatar profile highlighted on the sign-in screen.
         It can take up to 20 minutes and often needs a few tries.</li>
-      <li>When FreeMyXe appears, pick the XeLL option. XeLL loads <code>xenon.elf</code> and XENITH starts.</li>
+      <li>When FreeMyXe appears, pick the XeLL option. XeLL loads <code>xenon.elf</code> and XenithOS starts.</li>
       <li>Now plug in Ethernet if you want the Store and Cloud screens.</li>
     </ol>
     <div class="warning">FreeMyXe's warning applies: don't run anything that writes to the NAND, and don't flash a
-      modified NAND while using it. That bricks consoles. XENITH only writes to the USB stick.</div>
+      modified NAND while using it. That bricks consoles. XenithOS only writes to the USB stick.</div>
   </div>
 </section>
 
@@ -244,7 +244,7 @@
       <li><b>0.3</b><time datetime="2026-11-14">Nov 14, 2026</time>
         <p>Networking over lwIP, the Store, the Cloud screen, VOLT leaderboards, and DOOM. Drawing now writes straight into the tiled framebuffer.</p></li>
       <li><b>0.2</b><time datetime="2026-11-14">Nov 14, 2026</time>
-        <p>Renamed to XENITH. Added VOLT, the first app.</p></li>
+        <p>Named XENITH (now XenithOS). Added VOLT, the first app.</p></li>
       <li><b>0.1</b><time datetime="2026-11-14">Nov 14, 2026</time>
         <p>First build: boot splash, home menu, app launcher, temperatures, controller tester.</p></li>
     </ul>
@@ -254,7 +254,7 @@
 
 <footer>
   <div class="wrap">
-    <p>Made by <a href="https://github.com/OwenCosta">OwenCosta</a>. XENITH is GPL-3.0. The DOOM port uses doomgeneric (GPL-2.0+), and Freedoom is BSD.</p>
+    <p>Made by <a href="https://github.com/OwenCosta">OwenCosta</a>. XenithOS is GPL-3.0. The DOOM port uses doomgeneric (GPL-2.0+), and Freedoom is BSD.</p>
     <p>Not affiliated with Microsoft or id Software. Xbox and DOOM are their trademarks.</p>
   </div>
 </footer>
@@ -279,7 +279,7 @@ const FONT = {
 };
 const glyph = ch => FONT[ch.toUpperCase()] || FONT["?"];
 
-function svgText(svg, text, color) {
+function svgText(svg, text, color, osColor) {
   const ns = "http://www.w3.org/2000/svg", w = text.length * 6 - 1;
   svg.setAttribute("viewBox", `0 0 ${w} 7`);
   svg.setAttribute("shape-rendering", "crispEdges");
@@ -289,13 +289,14 @@ function svgText(svg, text, color) {
     for (let x = 0; x < 5; x++) if (row & (16 >> x)) {
       const r = document.createElementNS(ns, "rect");
       r.setAttribute("x", i * 6 + x); r.setAttribute("y", y);
-      r.setAttribute("width", 1); r.setAttribute("height", 1); r.setAttribute("fill", color);
+      r.setAttribute("width", 1); r.setAttribute("height", 1);
+      r.setAttribute("fill", osColor && i >= text.length - 2 ? osColor : color);
       svg.appendChild(r);
     }
   }));
 }
-svgText(document.getElementById("logo"), "XENITH", "#ececf1");
-svgText(document.getElementById("navlogo"), "XENITH", "#7c5cff");
+svgText(document.getElementById("logo"), "XENITHOS", "#ececf1", "#7c5cff");
+svgText(document.getElementById("navlogo"), "XENITHOS", "#7c5cff", "#ececf1");
 
 /* ---------------------------------------------------------------- live data */
 const $ = id => document.getElementById(id);
@@ -319,7 +320,7 @@ function td(tr, text, cls) {
 async function refresh() {
   try {
     const get = p => fetch(p, { cache: "no-store" }).then(r => { if (!r.ok) throw new Error(p); return r.text(); });
-    const [st, sc, it] = await Promise.all([get("/v1/status"), get("/v1/scores/volt"), get("/v1/store")]);
+    const [st, sc, it] = await Promise.all([get("v1/status"), get("v1/scores/volt"), get("v1/store")]);
     live.stats = parseKV(st);
     live.board = rows(sc);
     live.items = rows(it);
@@ -359,7 +360,7 @@ async function refresh() {
       td(tr, fmtSize(size), "num");
       items.appendChild(tr);
       if (id === "xenith") {
-        $("dl").textContent = `Download XENITH ${ver} (${fmtSize(size)})`;
+        $("dl").textContent = `Download XenithOS ${ver} (${fmtSize(size)})`;
         $("ver").textContent = "v" + ver;
         $("sha").textContent = "sha256 " + sha;
       }
@@ -390,8 +391,8 @@ function fit(str, s, maxw) {
 }
 function chrome(title, hint) {
   g.fillStyle = C.bg; g.fillRect(0, 0, W, H);
-  text(M, 18, 2, C.accent, "XENITH");
-  if (title) { text(M + tw(2, "XENITH") + 12, 18, 2, C.dim, "/"); text(M + tw(2, "XENITH") + 30, 18, 2, C.text, title); }
+  text(M, 18, 2, C.accent, "XENITH"); text(M + tw(2, "XENITH") + 2, 18, 2, C.text, "OS");
+  if (title) { text(M + tw(2, "XENITHOS") + 12, 18, 2, C.dim, "/"); text(M + tw(2, "XENITHOS") + 30, 18, 2, C.text, title); }
   g.fillStyle = C.panel; g.fillRect(M, 40, W - 2 * M, 2);
   if (hint) text(M, H - 22, 1, C.dim, hint);
 }
@@ -418,7 +419,7 @@ function bar(x, y, w, used, total) {
 
 const HOME = [
   ["APPS", "LAUNCH PROGRAMS FROM USB OR HARD DRIVE"],
-  ["STORE", "GET NEW APPS AND GAMES FROM XENITH CLOUD"],
+  ["STORE", "GET NEW APPS AND GAMES FROM XENITHOS CLOUD"],
   ["CLOUD", "YOUR SERVER: LIVE STATS, MESSAGES, LEADERBOARDS"],
   ["SYSTEM", "TEMPERATURES, VIDEO OUTPUT AND HARDWARE"],
   ["CONTROLLER", "TEST EVERY BUTTON, STICK AND TRIGGER"],

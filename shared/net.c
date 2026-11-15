@@ -229,7 +229,7 @@ int http_request(const char *host, const char *method, const char *path,
     if (!req) return out->status = NE_MEMORY;
     {
         int n = snprintf(req, 512,
-                         "%s %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: XENITH/0.3\r\n"
+                         "%s %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: XenithOS/0.3.2\r\n"
                          "Connection: close\r\n%s"
                          "Content-Length: %d\r\n\r\n",
                          method, path, host,

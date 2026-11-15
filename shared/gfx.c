@@ -209,6 +209,12 @@ void gfx_text_c(int cx, int y, int s, uint32_t c, const char *str)
     gfx_text(cx - gfx_text_w(s, str) / 2, y, s, c, str);
 }
 
+int gfx_brand(int x, int y, int s, uint32_t main_color, uint32_t os_color)
+{
+    int w = gfx_text(x, y, s, main_color, "XENITH") + s;   /* + the 1-pixel letter gap */
+    return w + gfx_text(x + w, y, s, os_color, "OS");
+}
+
 /* Draw text cut to at most max_w pixels, ending in ".." when it doesn't fit. */
 int gfx_text_fit(int x, int y, int s, uint32_t c, const char *str, int max_w)
 {

@@ -49,7 +49,7 @@ void draw_chrome(const char *title, const char *hint)
 {
     int y = M / 2;
     gfx_clear(C_BG);
-    int x = M + gfx_text(M, y, S, C_ACCENT, "XENITH");
+    int x = M + gfx_brand(M, y, S, C_ACCENT, C_TEXT);
     if (title) {
         x += S * 6;
         x += gfx_text(x, y, S, C_DIM, "/") + S * 6;
