@@ -54,7 +54,7 @@ def wordmark(d, x, y, s):
 
 
 def volt():
-    img = Image.new("RGB", (W, H), (11, 18, 32))
+    img = Image.new("RGB", (W, H), (12, 14, 18))
     d = ImageDraw.Draw(img)
     cell = 14
     # A light trail on a grid, like the game: blue body, white head, yellow sparks.
@@ -62,7 +62,7 @@ def volt():
             (13, 4), (13, 5), (13, 6), (14, 6), (15, 6), (16, 6), (17, 6), (18, 6)]
     ox, oy = 14, 10
     for i, (cx, cy) in enumerate(path):
-        color = (236, 241, 250) if i == len(path) - 1 else (47, 125, 255)
+        color = (241, 243, 246) if i == len(path) - 1 else (229, 9, 20)
         d.rounded_rectangle([ox + cx * cell + 1, oy + cy * cell + 1, ox + cx * cell + cell - 2, oy + cy * cell + cell - 2],
                             radius=3, fill=color)
     for sx, sy in [(20, 3), (16, 9), (6, 7)]:
@@ -88,37 +88,80 @@ def freedoom(phase, bg, sub):
     return img
 
 
+# The theme's colours (shared/theme.h)
+BG_DARK = (12, 14, 18)
+TEXT = (241, 243, 246)
+SUB = (139, 147, 160)
+RED = (229, 9, 20)
+
+
+def mark(d, cx, cy, size, color=TEXT, dot=RED):
+    """The XenithOS mark (shared/ui.c ui_logo): two chevrons that make an X which doesn't quite
+    meet, and a red point where it would."""
+    arms = [((0, -0.15), (-0.36, -0.42)), ((0, -0.15), (0.36, -0.42)),
+            ((0, 0.15), (-0.36, 0.42)), ((0, 0.15), (0.36, 0.42))]
+    r = size * 0.06                                  # half the stroke
+    for (ix, iy), (ox, oy) in arms:
+        ax, ay = cx + ix * size, cy + iy * size
+        bx, by = cx + ox * size, cy + oy * size
+        length = ((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5
+        nx, ny = -(by - ay) / length * r, (bx - ax) / length * r   # across the stroke
+        d.polygon([(ax + nx, ay + ny), (bx + nx, by + ny), (bx - nx, by - ny), (ax - nx, ay - ny)], fill=color)
+        for x, y in ((ax, ay), (bx, by)):            # round caps
+            d.ellipse([x - r, y - r, x + r, y + r], fill=color)
+    r = size * 0.055
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=dot)
+
+
+def logo_files():
+    """art/logo.png (the mark on transparent), art/logo-on-dark.png and art/logo-wide.png."""
+    big = 2048
+    img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    mark(ImageDraw.Draw(img), big / 2, big / 2, big * 0.9)
+    img.resize((512, 512), Image.LANCZOS).save(os.path.join(ROOT, "art", "logo.png"))
+    dark = Image.new("RGB", (big, big), (7, 8, 10))
+    mark(ImageDraw.Draw(dark), big / 2, big / 2, big * 0.62)
+    dark.resize((512, 512), Image.LANCZOS).save(os.path.join(ROOT, "art", "logo-on-dark.png"))
+    k = 4                                           # drawn 4x and scaled down, for smooth edges
+    wide = Image.new("RGB", (1600 * k, 480 * k), (7, 8, 10))
+    d = ImageDraw.Draw(wide)
+    mark(d, 330 * k, 240 * k, 260 * k)
+    d.text((500 * k, 150 * k), "XenithOS", font=font("Bold", 150 * k), fill=TEXT)
+    x = 506 * k
+    for ch in "CONSOLE":                            # spaced out, like the wordmark on the console
+        d.text((x, 340 * k), ch, font=font("SemiBold", 40 * k), fill=SUB)
+        x += d.textlength(ch, font=font("SemiBold", 40 * k)) + 12 * k
+    wide.resize((1600, 480), Image.LANCZOS).save(os.path.join(ROOT, "art", "logo-wide.png"))
+
+
 def tube():
-    img = Image.new("RGB", (W, H), (14, 17, 26))
+    img = Image.new("RGB", (W, H), BG_DARK)
     d = ImageDraw.Draw(img)
-    d.polygon([(26, 44), (26, 100), (74, 72)], fill=(47, 125, 255))
-    d.text((92, 34), "TUBE", font=font("Black", 66), fill=(236, 241, 250))
-    d.text((26, 128), "Videos from YouTube", font=font("Medium", 20), fill=(156, 168, 192))
+    d.polygon([(26, 44), (26, 100), (74, 72)], fill=RED)
+    d.text((92, 34), "TUBE", font=font("Black", 66), fill=TEXT)
+    d.text((26, 128), "Videos from YouTube", font=font("Medium", 20), fill=SUB)
     return img
 
 
 def photos():
-    img = Image.new("RGB", (W, H), (13, 20, 34))
+    img = Image.new("RGB", (W, H), BG_DARK)
     d = ImageDraw.Draw(img)
     # A flat picture frame: a sun and two hills.
-    d.rounded_rectangle([24, 40, 92, 96], radius=8, fill=(47, 125, 255))
-    d.ellipse([66, 48, 80, 62], fill=(255, 214, 90))
-    d.polygon([(24, 96), (46, 66), (64, 96)], fill=(236, 241, 250))
-    d.polygon([(48, 96), (70, 74), (92, 96)], fill=(176, 196, 230))
-    d.text((108, 34), "PHOTOS", font=font("Black", 50), fill=(236, 241, 250))
-    d.text((26, 128), "Your pictures on the TV", font=font("Medium", 20), fill=(156, 168, 192))
+    d.rounded_rectangle([24, 40, 92, 96], radius=8, fill=(38, 43, 51))
+    d.ellipse([66, 48, 80, 62], fill=RED)
+    d.polygon([(24, 96), (46, 66), (64, 96)], fill=TEXT)
+    d.polygon([(48, 96), (70, 74), (92, 96)], fill=SUB)
+    d.text((108, 34), "PHOTOS", font=font("Black", 50), fill=TEXT)
+    d.text((26, 128), "Your pictures on the TV", font=font("Medium", 20), fill=SUB)
     return img
 
 
 def xenith():
-    img = Image.new("RGB", (W, H), (9, 13, 22))
+    img = Image.new("RGB", (W, H), BG_DARK)
     d = ImageDraw.Draw(img)
-    s = 5
-    w = 8 * 6 * s - s
-    wordmark(d, (W - w) // 2, 58, s)
-    t = "System update"
-    f = font("Medium", 20)
-    d.text(((W - d.textlength(t, font=f)) // 2, 112), t, font=f, fill=(156, 168, 192))
+    mark(d, 70, 76, 84)
+    d.text((124, 48), "XenithOS", font=font("Bold", 40), fill=TEXT)
+    d.text((126, 128), "System update", font=font("Medium", 20), fill=SUB)
     return img
 
 
@@ -200,6 +243,7 @@ def main():
         "xenithos-pc": xenith(),
     }
     art.update(catalog_art())
+    logo_files()
     for name, img in art.items():
         img.save(os.path.join(OUT, f"{name}.png"))
         write_ximg(img, os.path.join(OUT, f"{name}.ximg"))

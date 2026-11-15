@@ -1,17 +1,23 @@
-# The start-up animation, frame by frame (60 frames a second), then the home screen.
+# The start-up animation, frame by frame (about 60 frames a second), then the home screen.
 #   sim/run.sh sim/scripts/boot.txt boot          XSIM_TILED=1 for the tiled framebuffer check
 wait 8
-shot boot_0_13s
+shot boot_a
+wait 22
+shot boot_b
+wait 22
+shot boot_c
 wait 12
-shot boot_0_33s
-wait 15
-shot boot_0_58s
-wait 15
-shot boot_0_83s
+shot boot_d
+wait 8
+shot boot_e
+wait 10
+shot boot_f
 wait 20
-shot boot_1_17s
+shot boot_g
 wait 30
-shot boot_1_67s
-wait 70
-shot boot_home
+shot boot_h
+wait 50
+shot boot_i
+wait 60
+shot home
 quit

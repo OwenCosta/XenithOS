@@ -180,20 +180,23 @@ int keyboard(const char *title, const char *hint, char *buf, int maxlen, int mod
         }
         hx = ui_ease(hx, keys[sel].x, 0.45f);
         hy = ui_ease(hy, (float)keys[sel].row, 0.45f);
-        gfx_fill_rrect(ox + hx * unit, ky + hy * (kh + gap), keys[sel].w * unit - gap, kh, 12, C_ACCENT, 255);
+        gfx_fill_rrect(ox + hx * unit, ky + hy * (kh + gap), keys[sel].w * unit - gap, kh, 8, C_TEXT, 255);
         for (i = 0; i < nkeys; i++) {
             struct key *q = &keys[i];
             float x = ox + q->x * unit, y = ky + q->row * (kh + gap), w = q->w * unit - gap;
             char label[8];
             int is_sel = i == sel;
-            if (!is_sel) gfx_fill_rrect(x, y, w, kh, 12, C_SURFACE, 255);
+            if (!is_sel) {
+                gfx_fill_rrect(x, y, w, kh, 8, C_SURFACE, 255);
+                gfx_stroke_rrect(x, y, w, kh, 8, 1, C_LINE, 255);
+            }
             snprintf(label, sizeof label, "%s", q->label);
             if (q->code >= 'a' && q->code <= 'z' && shift) label[0] = (char)toupper((unsigned char)label[0]);
-            if (q->code == K_SHIFT && shift) gfx_fill_rrect(x + 10, y + kh - 10, w - 20, 3, 2, is_sel ? 0xFFFFFF : C_ACCENT_HI, 255);
+            if (q->code == K_SHIFT && shift) gfx_fill_rrect(x + 10, y + kh - 10, w - 20, 3, 2, C_ACCENT, 255);
             gfx_str_c(q->code < 32 ? FONT_BODY_SB : FONT_LABEL, (int)(x + w / 2),
                       (int)(y + kh / 2) + gfx_cap_h(q->code < 32 ? FONT_BODY_SB : FONT_LABEL) / 2
                           - font_table[q->code < 32 ? FONT_BODY_SB : FONT_LABEL].ascent,
-                      is_sel ? 0xFFFFFF : C_TEXT, label);
+                      is_sel ? C_INK : C_TEXT, label);
         }
         ui_hints(mode == KB_PIN ? "A=Press;B=Delete;START=Done" : "A=Type;B=Delete;Y=Space;LB=Shift;START=Done");
         ui_end_frame();

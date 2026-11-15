@@ -199,8 +199,8 @@ static void about(void)
         if (PRESSED(b) || PRESSED(a)) { sfx(SFX_BACK); return; }
         ui_bg();
         ui_header("About", NULL);
-        gfx_brand(M, y, 6, C_TEXT, C_ACCENT);
-        y += GFX_TEXT_H(6) + 20;
+        ui_brand(M, y, FONT_HEAD, FONT_BODY_SB, 0);
+        y += gfx_line_h(FONT_HEAD) + 20;
         gfx_str(FONT_LABEL, M, y, C_TEXT, "Version " XENITH_VERSION);
         y += 50;
         y += 10 + 30 * gfx_wrap(FONT_BODY, M, y, SCR_W - 2 * M, 6, C_SUB,
@@ -292,15 +292,15 @@ void screen_settings(void)
         ui_bg();
         ui_header("Settings", "Changes are saved to your USB stick");
         hl = ui_ease(hl, (float)(sel - first), 0.45f);
-        gfx_fill_rrect((float)M, top + hl * rowh, (float)w, rowh - 6.0f, 12, C_ACCENT, 255);
+        ui_select_box((float)M, top + hl * rowh, (float)w, rowh - 6.0f, 10);
         for (i = 0; i < visible && first + i < n; i++) {
             int idx = first + i, y = top + i * rowh, cy = y + (rowh - 6) / 2, s = idx == sel;
             gfx_str_vc(FONT_BODY_SB, M + 22, cy, s ? 0xFFFFFF : C_TEXT, label[idx]);
             value_of(idx, v, sizeof v);
             if (idx == S_VOLUME) {
                 int bw = 220, bx = M + w - 22 - bw - 70;
-                gfx_fill_rrect((float)bx, cy - 4.0f, (float)bw, 8, 4, s ? RGB(120, 165, 255) : C_SURFACE2, 255);
-                gfx_fill_rrect((float)bx, cy - 4.0f, bw * st.volume / 100.0f, 8, 4, s ? 0xFFFFFF : C_ACCENT, 255);
+                gfx_fill_rrect((float)bx, cy - 4.0f, (float)bw, 8, 4, C_LINE, 255);
+                gfx_fill_rrect((float)bx, cy - 4.0f, bw * st.volume / 100.0f, 8, 4, C_ACCENT, 255);
                 gfx_str_r(FONT_BODY_SB, M + w - 22, cy - gfx_line_h(FONT_BODY_SB) / 2, s ? 0xFFFFFF : C_SUB, v);
             } else if (v[0]) {
                 gfx_str_r(FONT_BODY_SB, M + w - 22, cy - gfx_line_h(FONT_BODY_SB) / 2, s ? 0xFFFFFF : C_SUB, v);

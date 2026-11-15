@@ -36,6 +36,11 @@ void ui_spinner(int cx, int cy, int r, uint32_t color);
 void ui_toast(const char *title, const char *body);
 void ui_toast_icon(int icon);                   /* icon for the next toast (ICON_*) */
 void ui_panel(int x, int y, int w, int h);      /* a card */
+void ui_select_box(float x, float y, float w, float h, float r);   /* a selected row or card */
+int  ui_brand(int x, int y, int font, int label_font, int measure_only);   /* the mark, "XenithOS", CONSOLE */
+/* The XenithOS mark: an X split into two chevrons, with a red point where they'd cross.
+ * size is its height; arms (0..1) draws the strokes out from the middle; dot scales the point. */
+void ui_logo(float cx, float cy, float size, float arms, float dot, int alpha);
 
 /* Full-screen loading and progress */
 void ui_loading_frame(const char *title, const char *detail);

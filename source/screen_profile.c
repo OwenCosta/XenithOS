@@ -199,14 +199,18 @@ struct action { int icon; const char *label; const char *sub; };
 static int action_list(int x, int y, int w, const struct action *a, int n, int sel, float hl)
 {
     int i, rowh = 84;
-    gfx_fill_rrect((float)x, y + hl * rowh, (float)w, rowh - 10.0f, 14, C_ACCENT, 255);
     for (i = 0; i < n; i++) {
         int ry = y + i * rowh, s = i == sel;
-        uint32_t bg = s ? C_ACCENT : C_SURFACE;
-        if (!s) gfx_fill_rrect((float)x, (float)ry, (float)w, rowh - 10.0f, 14, C_SURFACE, 255);
-        icon_draw(a[i].icon, x + 40.0f, ry + (rowh - 10) / 2.0f, 34, s ? 0xFFFFFF : C_ACCENT_HI, bg);
-        gfx_str(FONT_BODY_SB, x + 76, ry + 12, s ? 0xFFFFFF : C_TEXT, a[i].label);
-        gfx_str(FONT_SMALL, x + 76, ry + 42, s ? 0xDDE8FF : C_SUB, a[i].sub);
+        uint32_t bg = s ? C_SEL : C_SURFACE;
+        if (s) {
+            ui_select_box((float)x, (float)ry, (float)w, rowh - 10.0f, 10);
+        } else {
+            gfx_fill_rrect((float)x, (float)ry, (float)w, rowh - 10.0f, 10, C_SURFACE, 255);
+            gfx_stroke_rrect((float)x, (float)ry, (float)w, rowh - 10.0f, 10, 1, C_LINE, 255);
+        }
+        icon_draw(a[i].icon, x + 40.0f, ry + (rowh - 10) / 2.0f, 34, s ? 0xFFFFFF : C_SUB, bg);
+        gfx_str(FONT_BODY_SB, x + 76, ry + 12, C_TEXT, a[i].label);
+        gfx_str(FONT_SMALL, x + 76, ry + 42, C_SUB, a[i].sub);
     }
     return n * rowh;
 }

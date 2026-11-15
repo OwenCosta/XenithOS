@@ -142,7 +142,8 @@ static void draw_toast(void)
     slide = slide * slide;
     x = SCR_W - M - w + (int)(slide * (w + M));
     y = 28;
-    gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 14, C_SURFACE2, a);
+    gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 14, C_SURFACE, a);
+    gfx_stroke_rrect((float)x, (float)y, (float)w, (float)h, 14, 1, C_LINE, a);
     gfx_circle(x + 38.0f, y + h / 2.0f, 20, C_ACCENT, a);
     if (a > 200) icon_draw(toast_icon, x + 38.0f, y + h / 2.0f, 22, 0xFFFFFF, C_ACCENT);
     gfx_str_a(FONT_BODY_SB, x + 72, y + 12, C_TEXT, a, toast_title);
@@ -193,7 +194,58 @@ void ui_bg(void)
 
 void ui_panel(int x, int y, int w, int h)
 {
-    gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 16, C_SURFACE, 255);
+    gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 14, C_SURFACE, 255);
+    gfx_stroke_rrect((float)x, (float)y, (float)w, (float)h, 14, 1, C_LINE, 255);
+}
+
+/* Selected, the way the streaming site's cards look under the pointer: a little lighter, with
+ * a white edge, instead of a colour fill. */
+void ui_select_box(float x, float y, float w, float h, float r)
+{
+    gfx_fill_rrect(x, y, w, h, r, C_SEL, 255);
+    gfx_stroke_rrect(x, y, w, h, r, 2, 0xFFFFFF, 235);
+}
+
+/* The XenithOS mark. Two chevrons, one pointing down onto the middle and one pointing up at it,
+ * make an X that doesn't quite meet: the red point is where it would (the zenith). Drawn from
+ * round-capped strokes, so it's crisp at any size. */
+void ui_logo(float cx, float cy, float size, float arms, float dot, int alpha)
+{
+    static const float arm[4][4] = {               /* inner end, outer end, in units of size */
+        {0.0f, -0.15f, -0.36f, -0.42f}, {0.0f, -0.15f, 0.36f, -0.42f},
+        {0.0f, 0.15f, -0.36f, 0.42f}, {0.0f, 0.15f, 0.36f, 0.42f},
+    };
+    float stroke = size * 0.12f;
+    int i;
+    if (arms > 1) arms = 1;
+    for (i = 0; arms > 0 && i < 4; i++) {
+        float x0 = cx + arm[i][0] * size, y0 = cy + arm[i][1] * size;
+        float x1 = x0 + (arm[i][2] - arm[i][0]) * size * arms, y1 = y0 + (arm[i][3] - arm[i][1]) * size * arms;
+        gfx_line(x0, y0, x1, y1, stroke, C_TEXT, alpha);
+    }
+    if (dot > 0) gfx_circle(cx, cy, size * 0.055f * dot, C_ACCENT, alpha);
+}
+
+/* The wordmark as the site sets its own: the mark, the name in bold, and a small spaced-out
+ * label. Returns its width; measure_only draws nothing. */
+int ui_brand(int x, int y, int font, int label_font, int measure_only)
+{
+    static const char label[] = "CONSOLE";
+    int lh = gfx_cap_h(font), mark = lh * 3 / 2, gap = lh / 2, w, i, lx;
+    int ly = y + font_table[font].ascent - font_table[label_font].ascent;
+    char c[2] = {0, 0};
+    w = gfx_str_w(font, "XenithOS");
+    if (!measure_only) {
+        ui_logo(x + mark * 0.42f, y + font_table[font].ascent - lh / 2.0f, (float)mark, 1, 1, 255);
+        gfx_str(font, x + mark + gap, y, C_TEXT, "XenithOS");
+    }
+    lx = x + mark + gap + w + gap;
+    for (i = 0; label[i]; i++) {
+        c[0] = label[i];
+        if (!measure_only) gfx_str(label_font, lx, ly, C_SUB, c);
+        lx += gfx_str_w(label_font, c) + 3;
+    }
+    return lx - x;
 }
 
 void ui_profile_chip(int right_x, int cy)
@@ -401,15 +453,17 @@ int ui_dialog(const char *title, const char *body, const char *const *options, i
             if (under) memcpy(gfx_bb, under, bytes);
             gfx_rect_a(0, 0, SCR_W, SCR_H, RGB(0, 0, 0), 150);
         }
-        gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 18, C_SURFACE, 255);
+        gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 14, C_SURFACE, 255);
+        gfx_stroke_rrect((float)x, (float)y, (float)w, (float)h, 14, 1, C_LINE, 255);
         gfx_str(FONT_TITLE, x + 32, y + 26, C_TEXT, title);
         oy = y + 32 + gfx_line_h(FONT_TITLE) + 10;
         if (body) gfx_wrap(FONT_BODY, x + 32, oy, w - 64, 4, C_SUB, body, 6);
         oy += body_lines * (gfx_line_h(FONT_BODY) + 4) + 22;
         hl = ui_ease(hl, (float)sel, 0.45f);
-        gfx_fill_rrect(x + 20.0f, oy + hl * row, w - 40.0f, row - 8.0f, 10, C_ACCENT, 255);
+        /* The selected choice is a white button, like the site's Play */
+        gfx_fill_rrect(x + 20.0f, oy + hl * row, w - 40.0f, row - 8.0f, 8, C_TEXT, 255);
         for (i = 0; i < n; i++)
-            gfx_str_vc(FONT_BODY_SB, x + 40, oy + i * row + (row - 8) / 2, i == sel ? 0xFFFFFF : C_TEXT, options[i]);
+            gfx_str_vc(FONT_BODY_SB, x + 40, oy + i * row + (row - 8) / 2, i == sel ? C_INK : C_TEXT, options[i]);
         ui_end_frame();
     }
     if (under) {

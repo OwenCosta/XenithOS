@@ -26,17 +26,78 @@
 
 /* ------------------------------------------------------------------ boot */
 
+/* 0..1 over [from, from + len) milliseconds */
+static float span(float t, float from, float len)
+{
+    float f = (t - from) / len;
+    return f < 0 ? 0 : f > 1 ? 1 : f;
+}
+
+static float ease_out(float f) { return 1 - (1 - f) * (1 - f) * (1 - f); }
+static float ease_in(float f) { return f * f; }
+
+/* One frame of the start-up, t milliseconds in. Four streaks of light spiral in from the edges
+ * and become the XenithOS mark: its arms shoot out of the middle, the red point lands with the
+ * chime and a ring rolls out from it, then the mark moves aside for the name. Everything is
+ * flat (solid shapes, no glows), in the theme's colours. */
+static void boot_frame(float t)
+{
+    float size = SCR_H * 0.24f, cy = SCR_H / 2.0f - 16, mark_w = size * 0.84f;
+    int name_w = gfx_str_w(FONT_BIG, "XenithOS"), gap = (int)(size * 0.28f), i;
+    float group = mark_w + gap + name_w, final_cx = (SCR_W - group) / 2 + mark_w / 2;
+    float slide = ease_out(span(t, 1500, 650)), cx = SCR_W / 2.0f + (final_cx - SCR_W / 2.0f) * slide;
+    float arms = ease_out(span(t, 900, 320)), dot = 0;
+
+    /* 1. the streaks: each spins in on its own spiral, shrinking and thinning as it closes */
+    for (i = 0; i < 4 && t < 1150; i++) {
+        float p = span(t, 60.0f + i * 70.0f, 980.0f - i * 70.0f), e = ease_in(p);
+        float r = size * (2.4f - 2.3f * e), a0 = i * 1.5708f + 0.4f + p * 6.6f, len = 0.5f + 1.1f * p;
+        int alpha = (int)(255 * (p < 0.15f ? p / 0.15f : t > 1000 ? (1150 - t) / 150.0f : 1));
+        if (p <= 0) continue;
+        gfx_arc(cx, cy, r, size * (0.07f - 0.045f * e), a0, a0 + len, i == 2 ? C_ACCENT : C_TEXT, alpha);
+    }
+    /* 2. the mark's arms come out of the middle */
+    if (arms > 0) {
+        /* 3. the red point lands with a little overshoot */
+        if (t >= 1080) {
+            float q = span(t, 1080, 380);
+            dot = q < 0.6f ? 1.35f * ease_out(q / 0.6f) : 1.35f - 0.35f * ease_out((q - 0.6f) / 0.4f);
+        }
+        ui_logo(cx, cy, size, arms, dot, 255);
+    }
+    /* and a ring rolls out from it */
+    if (t >= 1080 && t < 1900) {
+        float q = span(t, 1080, 820);
+        gfx_ring(cx, cy, size * (0.12f + 1.25f * ease_out(q)), 2 + size * 0.03f * (1 - q), C_TEXT, (int)(150 * (1 - q)));
+    }
+    /* 4. the name comes in beside it, then the label and the version */
+    if (slide > 0) {
+        int x = (int)(cx + mark_w / 2 + gap + 24 * (1 - slide)), ty = (int)cy - font_table[FONT_BIG].ascent + gfx_cap_h(FONT_BIG) / 2;
+        int a = (int)(255 * slide), lx = x, k;
+        const char *label = "CONSOLE";
+        char c[2] = {0, 0};
+        gfx_str_a(FONT_BIG, x, ty, C_TEXT, a, "XenithOS");
+        a = (int)(255 * span(t, 1900, 400));
+        for (k = 0; a > 0 && label[k]; k++) {
+            c[0] = label[k];
+            gfx_str_a(FONT_BODY_SB, lx + 2, ty + gfx_line_h(FONT_BIG) + 2, C_SUB, a, c);
+            lx += gfx_str_w(FONT_BODY_SB, c) + 5;
+        }
+    }
+    if (t > 2100) {
+        int va = (int)(255 * span(t, 2100, 400));
+        gfx_str_a(FONT_SMALL, SCR_W / 2 - gfx_str_w(FONT_SMALL, "Version " XENITH_VERSION) / 2,
+                  SCR_H - 64, C_DIM, va, "Version " XENITH_VERSION);
+    }
+}
+
 static void boot(void)
 {
-    int s = SCR_W / 170, bw, bx, by;
     uint64_t start;
+    int chimed = 0;
     /* Coming back from an app: it left "XenithOS / Going back" on screen, so carry on from
      * there and go straight home, without the logo and the chime. */
     int back = handoff_get("from") != NULL;
-    if (s < 4) s = 4;
-    bw = GFX_BRAND_W(s);
-    bx = (SCR_W - bw) / 2;
-    by = SCR_H / 2 - GFX_TEXT_H(s) / 2 - 20;
 
     if (back) {
         ui_loading_frame("XenithOS", "Loading");
@@ -56,30 +117,21 @@ static void boot(void)
     audio_set_ui_sounds(st.ui_sounds);
     startlog_mark("sounds");
     if (back) return;
-    if (st.boot_sound) sfx(SFX_BOOT);
 
-    /* The start-up animation: the wordmark builds itself up square by square, one letter after
-     * another (flat squares growing from their middles), then the accent line sweeps out under
-     * it and the version fades in. A or Start skips the rest. */
+    /* The start-up animation (boot_frame): the XenithOS logo forms out of four streaks and the
+     * name comes in beside it. A or Start skips the rest. */
     start = ui_ms();
     for (;;) {
         uint64_t t = ui_ms() - start;
         ui_poll();
         if (t > 400 && (PRESSED(a) || PRESSED(start))) break;
-        if (t > 2500) break;
-
+        if (t > 3200) break;
+        if (!chimed && t >= 1080) {                  /* the chime lands with the red point */
+            if (st.boot_sound) sfx(SFX_BOOT);
+            chimed = 1;
+        }
         ui_bg();
-        gfx_brand_anim(bx, by, s, C_TEXT, C_ACCENT, t / 1000.0f);
-        if (t > 850) {
-            float g = t < 1450 ? (t - 850) / 600.0f : 1.0f;
-            g = 1 - (1 - g) * (1 - g);
-            gfx_fill_rrect(SCR_W / 2.0f - bw * g / 2, (float)(by + GFX_TEXT_H(s) + s * 4), bw * g, 4, 2, C_ACCENT, 255);
-        }
-        if (t > 1150) {
-            int va = t < 1650 ? (int)(255 * (t - 1150) / 500) : 255;
-            gfx_str_a(FONT_SMALL, SCR_W / 2 - gfx_str_w(FONT_SMALL, "Version " XENITH_VERSION) / 2,
-                      by + GFX_TEXT_H(s) + s * 4 + 24, C_SUB, va, "Version " XENITH_VERSION);
-        }
+        boot_frame((float)t);
         ui_end_frame();
     }
 }
@@ -124,28 +176,30 @@ static void draw_home(void)
     else snprintf(sub, sizeof sub, "Offline");
     gfx_circle(M + asz + 24.0f, 92, 4, net_is_up() ? C_OK : C_DIM, 255);
     gfx_str(FONT_SMALL, M + asz + 36, 81, C_SUB, sub);
-    gfx_brand(SCR_W - M - GFX_BRAND_W(3), 58, 3, C_TEXT, C_ACCENT);
+    ui_brand(SCR_W - M - ui_brand(0, 0, FONT_LABEL, FONT_SMALL, 1), 46, FONT_LABEL, FONT_SMALL, 0);
 
     /* Tiles */
     tw = (SCR_W - 2 * M - gap * (T_COUNT - 1)) / T_COUNT;
     for (i = 0; i < T_COUNT; i++) {
         int sel = row == 0 && tile == i;
         float l = lift_t[i] = ui_ease(lift_t[i], sel ? 1.0f : 0.0f, 0.35f);
-        int g = (int)(l * 6), x = M + i * (tw + gap) - g, y = ty - g, w = tw + 2 * g, h = th + 2 * g;
-        uint32_t fill = gfx_mix(C_SURFACE, C_ACCENT, (int)(256 * l)), fg = gfx_mix(C_SUB, 0xFFFFFF, (int)(256 * l));
-        gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 18, fill, 255);
+        int x = M + i * (tw + gap), y = ty - (int)(l * 8), w = tw, h = th;
+        uint32_t fill = gfx_mix(C_SURFACE, C_SEL, (int)(256 * l)), fg = gfx_mix(C_SUB, 0xFFFFFF, (int)(256 * l));
+        gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 12, fill, 255);
+        gfx_stroke_rrect((float)x, (float)y, (float)w, (float)h, 12, 1 + l, gfx_mix(C_LINE, 0xFFFFFF, (int)(235 * l)), 255);
         if (i == T_PROFILE && prof.signed_in)
             avatar_draw(prof.avatar, x + w / 2 - 40, y + h * 42 / 100 - 40, 80);
         else
             icon_draw(tile_icon[i], x + w / 2.0f, y + h * 0.40f, 62, fg, fill);
-        gfx_str(FONT_LABEL, x + 20, y + h - 70, gfx_mix(C_TEXT, 0xFFFFFF, (int)(256 * l)), tile_name[i]);
+        gfx_str(FONT_LABEL, x + 20, y + h - 70, C_TEXT, tile_name[i]);
         tile_sub(i, sub, sizeof sub);
-        gfx_str_fit(FONT_SMALL, x + 20, y + h - 38, gfx_mix(C_SUB, 0xE6EEFF, (int)(256 * l)), sub, w - 36);
+        gfx_str_fit(FONT_SMALL, x + 20, y + h - 38, C_SUB, sub, w - 36);
     }
 
     /* Jump back in */
     cy = ty + th + 62;
-    gfx_str(FONT_BODY_SB, M, cy - 40, C_SUB, napps ? "Jump back in" : "Nothing installed yet");
+    gfx_str(FONT_BODY_SB, M, cy - 40, C_TEXT, napps ? "Jump back in" : "Nothing installed yet");
+    if (napps) gfx_str(FONT_SMALL, M + gfx_str_w(FONT_BODY_SB, "Jump back in") + 14, cy - 37, C_SUB, "See all in Apps");
     if (!napps) {
         int sel = row == 1;
         float l = lift_c[0] = ui_ease(lift_c[0], sel ? 1.0f : 0.0f, 0.35f);
@@ -154,7 +208,8 @@ static void draw_home(void)
         icon_draw(ICON_STORE, M + cw / 2.0f, cy + ch / 2.0f - 14, 40, C_SUB, C_SURFACE);
         gfx_str_c(FONT_BODY_SB, M + cw / 2, cy + ch - 46, C_TEXT, "Open the Store");
     }
-    /* The row slides to keep the selected card in view, and is cut at the side margins. */
+    /* The row slides to keep the selected card in view, and is cut at the side margins. Each
+     * card is like the streaming site's posters: the picture, then the name and kind inside it. */
     if (napps) {
         int fit = (SCR_W - 2 * M + cgap) / (cw + cgap), clip[4];
         if (fit < 1) fit = 1;
@@ -165,12 +220,16 @@ static void draw_home(void)
         gfx_get_clip(clip);
         gfx_clip_intersect(M - 14, cy - 14, SCR_W - 2 * M + 28, ch + 80);
         for (i = 0; i < napps; i++) {
-            int x = M + i * (cw + cgap) - (int)(card_scroll + 0.5f), sel = row == 1 && card == i;
+            int x = M + i * (cw + cgap) - (int)(card_scroll + 0.5f), sel = row == 1 && card == i, ly;
             float l = lift_c[i] = ui_ease(lift_c[i], sel ? 1.0f : 0.0f, 0.35f);
             if (x + cw + 14 < M - 14) continue;
             if (x > SCR_W - M + 14) break;
-            app_card(&apps[i], x, cy, cw, ch, sel, l);
-            gfx_str_fit(FONT_BODY_SB, x, cy + ch + 14, sel ? C_TEXT : C_SUB, apps[i].name, cw);
+            ly = cy - (int)(l * 8);
+            gfx_fill_rrect((float)x, (float)ly, (float)cw, ch + 58.0f, 10, C_SURFACE, 255);
+            gfx_stroke_rrect((float)x, (float)ly, (float)cw, ch + 58.0f, 10, 1 + l, gfx_mix(C_LINE, 0xFFFFFF, (int)(235 * l)), 255);
+            app_card(&apps[i], x, ly, cw, ch, 0, 0);
+            gfx_str_fit(FONT_BODY_SB, x + 12, ly + ch + 8, C_TEXT, apps[i].name, cw - 24);
+            gfx_str(FONT_SMALL, x + 12, ly + ch + 32, C_SUB, apps[i].version[0] ? apps[i].version : "App");
         }
         gfx_set_clip(clip[0], clip[1], clip[2], clip[3]);
         if (napps > fit) {               /* where in the row you are */

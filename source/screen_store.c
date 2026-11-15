@@ -816,7 +816,7 @@ static void note_text(const struct item *it, char *out, int n)
 
 static void draw_row(struct item *it, int x, int y, int w, int h, int sel)
 {
-    uint32_t fg = sel ? 0xFFFFFF : C_TEXT, sub = sel ? 0xDDE8FF : C_SUB;
+    uint32_t fg = C_TEXT, sub = C_SUB;
     int tw = (h - 20) * 16 / 9;
     char meta[64];
     if (it->icon.px) gfx_image_rounded(&it->icon, x + 12, y + 10, tw, h - 20, 8, 255);
@@ -827,9 +827,9 @@ static void draw_row(struct item *it, int x, int y, int w, int h, int sel)
     meta_text(it, 0, meta, sizeof meta);
     gfx_str_fit(FONT_BODY_SB, x + tw + 28, y + 14, fg, it->name, w - tw - 150);
     gfx_str_fit(FONT_SMALL, x + tw + 28, y + 44, sub, meta, w - tw - 150);
-    if (it->unavailable) gfx_str_r(FONT_SMALL, x + w - 16, y + h / 2 - 10, sel ? 0xFFFFFF : C_DIM, "Not for this PC");
-    else if (it->state == ST_INSTALLED) gfx_str_r(FONT_SMALL, x + w - 16, y + h / 2 - 10, sel ? 0xFFFFFF : C_OK, "Installed");
-    else if (it->state == ST_UPDATE) gfx_str_r(FONT_SMALL, x + w - 16, y + h / 2 - 10, sel ? 0xFFFFFF : C_ACCENT_HI, "Update");
+    if (it->unavailable) gfx_str_r(FONT_SMALL, x + w - 16, y + h / 2 - 10, C_DIM, "Not for this PC");
+    else if (it->state == ST_INSTALLED) gfx_str_r(FONT_SMALL, x + w - 16, y + h / 2 - 10, C_OK, "Installed");
+    else if (it->state == ST_UPDATE) gfx_str_r(FONT_SMALL, x + w - 16, y + h / 2 - 10, C_ACCENT_HI, "Update");
 }
 
 /* Apps / Steam / XenithOS, for LB and RB. Returns the height it takes. */
@@ -843,6 +843,7 @@ static int draw_tabs(int x, int y, int w)
     tw = (w - 8) / n;
     tab_hl = ui_ease(tab_hl, (float)at, 0.4f);
     gfx_fill_rrect((float)x, (float)y, (float)w, 48, 24, C_SURFACE, 255);
+    gfx_stroke_rrect((float)x, (float)y, (float)w, 48, 24, 1, C_LINE, 255);
     gfx_fill_rrect(x + 4 + tab_hl * tw, y + 4.0f, (float)tw, 40, 20, C_ACCENT, 255);
     for (i = 0; i < n; i++)
         gfx_str_c(FONT_BODY_SB, x + 4 + i * tw + tw / 2, y + 11, i == at ? 0xFFFFFF : C_SUB, tab_name[shown[i]]);
@@ -930,7 +931,7 @@ void screen_store(void)
         if (!nview) {
             gfx_str(FONT_LABEL, M, list_top + 10, C_TEXT, "The Store is empty");
         } else {
-            gfx_fill_rrect((float)M, list_top + hl * rowh, (float)listw, rowh - 8.0f, 14, C_ACCENT, 255);
+            ui_select_box((float)M, list_top + hl * rowh, (float)listw, rowh - 8.0f, 10);
             for (i = 0; i < visible && first + i < nview; i++)
                 draw_row(&items[view[first + i]], M, list_top + i * rowh, listw, rowh - 8, first + i == sel);
 

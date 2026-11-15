@@ -107,7 +107,7 @@ void app_card(const struct app *a, int x, int y, int w, int h, int selected, flo
     float g = (1 - lift) * 8;
     if (selected) gfx_stroke_rrect(x - 5 - g, y - 5 - g, w + 10 + 2 * g, h + 10 + 2 * g, 17 + g, 3, 0xFFFFFF, (int)(255 * lift));
     if (a->thumb.px) {
-        gfx_image_rounded(&a->thumb, x, y, w, h, 12, 255);
+        gfx_image_rounded(&a->thumb, x, y, w, h, 10, 255);
     } else {
         gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 12, C_SURFACE2, 255);
         icon_draw(ICON_PLAY, x + w / 2.0f, y + h / 2.0f - 10, h * 0.30f, C_SUB, C_SURFACE2);

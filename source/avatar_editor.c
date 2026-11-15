@@ -41,7 +41,7 @@ static void swatches(int part, int value, int rx, int cy, int max_w, int on_acce
     x = rx - n * step + step / 2;
     for (i = 0; i < n; i++, x += step) {
         uint32_t c = avatar_option_color(part, i);
-        if (i == value) gfx_ring((float)x, (float)cy, 11, 2.5f, on_accent ? 0xFFFFFF : C_ACCENT_HI, 255);
+        if (i == value) gfx_ring((float)x, (float)cy, 11, 2.5f, on_accent ? 0xFFFFFF : C_SUB, 255);
         gfx_circle((float)x, (float)cy, i == value ? 7.5f : 8, c, 255);
     }
 }
@@ -119,7 +119,7 @@ int avatar_editor(char *code)
 
         /* Parts in this tab */
         hl = ui_ease(hl, (float)sel, 0.45f);
-        gfx_fill_rrect((float)lx, rows_y + hl * rowh, (float)lw, rowh - 6.0f, 12, C_ACCENT, 255);
+        ui_select_box((float)lx, rows_y + hl * rowh, (float)lw, rowh - 6.0f, 10);
         for (i = 0; i < n; i++) {
             int p = tab_parts[tab][i], y = rows_y + i * rowh, cy = y + (rowh - 6) / 2, is = i == sel;
             int rx = lx + lw - 20;
@@ -135,7 +135,7 @@ int avatar_editor(char *code)
                 if (is) {
                     arrows(rx - 46 - vw, rx, cy, 0xFFFFFF);
                     gfx_str_vc(FONT_BODY_SB, rx - 22 - vw, cy, 0xFFFFFF, val);
-                    gfx_str_vc(FONT_SMALL, rx - 64 - vw - gfx_str_w(FONT_SMALL, count), cy, 0xDDE8FF, count);
+                    gfx_str_vc(FONT_SMALL, rx - 64 - vw - gfx_str_w(FONT_SMALL, count), cy, C_SUB, count);
                 } else {
                     gfx_str_vc(FONT_BODY_SB, rx - vw, cy, C_TEXT, val);
                 }
