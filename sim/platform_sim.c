@@ -593,7 +593,7 @@ int plat_flatpak(const char *verb, const char *ref, int (*step)(int percent, int
         return 0;
     }
     snprintf(key, sizeof key, ",%s,", ref);
-    if (!strcmp(verb, "uninstall")) {
+    if (!strcmp(verb, "uninstall") || !strcmp(verb, "purge")) {
         if ((at = strstr(sim_installed, key))) memmove(at, at + strlen(key) - 1, strlen(at + strlen(key) - 1) + 1);
     } else if (!strstr(sim_installed, key) && strlen(sim_installed) + strlen(ref) + 2 < sizeof sim_installed) {
         strcat(sim_installed, ref);

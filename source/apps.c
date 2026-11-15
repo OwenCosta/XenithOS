@@ -50,7 +50,11 @@ static void read_app_file(struct app *a)
         char *nl = strpbrk(line, "\r\n");
         if (nl) *nl = 0;
         if (!strncmp(line, "name=", 5) && line[5]) snprintf(a->name, sizeof a->name, "%s", line + 5);
-        else if (!strncmp(line, "steam=", 6)) snprintf(a->version, sizeof a->version, "Steam");
+        else if (!strncmp(line, "flatpak=", 8)) snprintf(a->ref, sizeof a->ref, "%s", line + 8);
+        else if (!strncmp(line, "steam=", 6)) {
+            snprintf(a->version, sizeof a->version, "Steam");
+            a->steam = 1;
+        }
     }
     fclose(f);
 }

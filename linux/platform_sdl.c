@@ -1236,10 +1236,11 @@ static void ask_to_close(pid_t root)
  *   PAD_MOUSE  launchers and menus (Prism Launcher, Sober's first start): the left stick moves
  *              the pointer, A or RT clicks, B or LT right clicks, X middle clicks, the right
  *              stick scrolls, the d-pad sends the arrow keys, Y Enter, Start Esc, Back Tab.
- *   PAD_KEYS   a game played with a keyboard and mouse (Minecraft): the left stick is W A S D,
- *              the right stick looks around, RT clicks, LT right clicks, A Space, B Shift,
- *              X Q, Y E, LB and RB scroll, the left stick pressed Ctrl, the right stick pressed
- *              middle clicks, d-pad up F5, down F, left and right scroll, Start Esc, Back Tab.
+ *   PAD_KEYS   a game played with a keyboard and mouse, laid out like Minecraft on a console:
+ *              the left stick is W A S D (pressed: Ctrl, sprint), the right stick looks around
+ *              (pressed: Shift, sneak), RT clicks, LT right clicks, A Space, B Q, X and Y E,
+ *              LB and RB scroll the hotbar (so do d-pad left and right), d-pad up F5, down F,
+ *              Start Esc, Back Tab.
  * The guide switches between them and the game reading the controller itself. */
 enum { EK_W, EK_A, EK_S, EK_D, EK_SPACE, EK_SHIFT, EK_CTRL, EK_Q, EK_E, EK_F, EK_F5, EK_ESC, EK_TAB,
        EK_RETURN, EK_UP, EK_DOWN, EK_LEFT, EK_RIGHT, EK_COUNT };
@@ -1354,7 +1355,7 @@ static void emu_step(uint64_t now)
     key[EK_ESC] = DOWN(START);
     key[EK_TAB] = DOWN(BACK);
     if (emu_mode == PAD_MOUSE) {
-        stick_speed(lx, ly, 70, 1700, dt, &emu_fx, &emu_fy);        /* pixels a second */
+        stick_speed(lx, ly, 90, 2300, dt, &emu_fx, &emu_fy);        /* pixels a second */
         button[1] = DOWN(A) || rt > 0.5f;
         button[2] = DOWN(X);
         button[3] = DOWN(B) || lt > 0.5f;
@@ -1372,16 +1373,16 @@ static void emu_step(uint64_t now)
         key[EK_S] = ly > 0.35f;
         key[EK_A] = lx < -0.35f;
         key[EK_D] = lx > 0.35f;
-        key[EK_SPACE] = DOWN(A);
-        key[EK_SHIFT] = DOWN(B);
-        key[EK_Q] = DOWN(X);
-        key[EK_E] = DOWN(Y);
-        key[EK_CTRL] = DOWN(LEFTSTICK);
-        key[EK_F5] = DOWN(DPAD_UP);
-        key[EK_F] = DOWN(DPAD_DOWN);
-        button[1] = rt > 0.5f;
-        button[2] = DOWN(RIGHTSTICK);
-        button[3] = lt > 0.5f;
+        /* Minecraft's own console layout */
+        key[EK_SPACE] = DOWN(A);                     /* jump */
+        key[EK_Q] = DOWN(B);                         /* drop */
+        key[EK_E] = DOWN(X) || DOWN(Y);              /* crafting, inventory */
+        key[EK_CTRL] = DOWN(LEFTSTICK);              /* sprint */
+        key[EK_SHIFT] = DOWN(RIGHTSTICK);            /* sneak */
+        key[EK_F5] = DOWN(DPAD_UP);                  /* camera */
+        key[EK_F] = DOWN(DPAD_DOWN);                 /* swap hands */
+        button[1] = rt > 0.5f;                       /* attack, break */
+        button[3] = lt > 0.5f;                       /* use, place */
         if (pressed[SDL_CONTROLLER_BUTTON_LEFTSHOULDER] || pressed[SDL_CONTROLLER_BUTTON_DPAD_LEFT]) emu_sy += 1;
         if (pressed[SDL_CONTROLLER_BUTTON_RIGHTSHOULDER] || pressed[SDL_CONTROLLER_BUTTON_DPAD_RIGHT]) emu_sy -= 1;
     }
@@ -1453,7 +1454,9 @@ static int other_guide(void)
     g.name = other.app.name;
     g.path = other.path[0] ? other.path : NULL;
     g.keeps_running = other.path[0] != 0;
-    g.pad_modes = emu_ready() ? PAD_GAME | PAD_MOUSE | PAD_KEYS : 0;
+    /* A launcher with a game in it (Minecraft) can't read a controller itself: the pointer, or
+     * the keyboard and mouse. Others can be left to read it. */
+    g.pad_modes = !emu_ready() ? 0 : other.app.game_title[0] ? PAD_MOUSE | PAD_KEYS : PAD_GAME | PAD_MOUSE | PAD_KEYS;
     g.pad_mode = pad_mode;
     emu_stop();                                /* nothing held down while the panel is up */
     kiosk_wm_hold(1);
@@ -1475,7 +1478,7 @@ static int other_guide(void)
  * 1 when the guide's Return home left it running, 0 once it has closed. */
 static int other_watch(int console)
 {
-    uint64_t now, guide_since = 0, test_close, test_guide, titled = 0;
+    uint64_t now, guide_since = 0, test_close, test_guide, titled = 0, focused = 0, drawn = 0;
     int esc_used = 0;
     pid_t r;
     kbd_open();
@@ -1532,15 +1535,24 @@ static int other_watch(int console)
                 fprintf(stderr, "xenithos: the controller %s\n", want == PAD_KEYS ? "plays it as a keyboard and mouse" : "moves the pointer");
             }
         }
+        if (in_kiosk && now - focused > 300000) {    /* the game keeps the keyboard */
+            focused = now;
+            kiosk_wm_keep_focus();
+        }
         emu_step(now);
         other_check_steam(now);
         other_hurry(now);
         r = waitpid(other.pid, &other.status, WNOHANG);
         if (r == other.pid || (r < 0 && errno != EINTR)) break;
         /* Console mode: until the app's window is up (or between its windows, or while it
-         * closes from the guide), XenithOS is what's on screen, so its loading screen moves. */
-        if (in_kiosk && (!kiosk_wm_windows() || other.close_at) && launch_progress) launch_progress(0, 0);
-        else SDL_Delay(emu_on() ? 8 : 20);
+         * closes from the guide), XenithOS is what's on screen, so its loading screen moves:
+         * 20 frames a second, so the game starting up gets the machine. */
+        if (in_kiosk && (!kiosk_wm_windows() || other.close_at) && launch_progress && now - drawn >= 50000) {
+            drawn = now;
+            launch_progress(0, 0);
+        } else {
+            SDL_Delay(emu_on() ? 8 : 20);
+        }
     }
     return 0;
 }

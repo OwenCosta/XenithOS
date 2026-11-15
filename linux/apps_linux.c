@@ -283,6 +283,9 @@ int plat_flatpak(const char *verb, const char *ref, int (*step)(int percent, int
         argv[0] = fp; argv[1] = verb_c; argv[2] = "--user"; argv[3] = "-y"; argv[4] = "flathub"; argv[5] = ref_c; argv[6] = NULL;
     } else if (!strcmp(verb, "update") || !strcmp(verb, "uninstall")) {
         argv[0] = fp; argv[1] = verb_c; argv[2] = "--user"; argv[3] = "-y"; argv[4] = ref_c; argv[5] = NULL;
+    } else if (!strcmp(verb, "purge")) {          /* uninstall, and its data folder with it */
+        argv[0] = fp; argv[1] = "uninstall"; argv[2] = "--user"; argv[3] = "-y"; argv[4] = "--delete-data";
+        argv[5] = ref_c; argv[6] = NULL;
     } else {
         snprintf(why, why_len, "XenithOS can't do that.");
         return 0;
@@ -621,7 +624,8 @@ void plat_sync_apps(void)
 {
     static struct game games[MAX_GAMES];
     char path[160], text[200];
-    int n = find_games(games, MAX_GAMES), i;
+    /* With Steam gone, its games' tiles go too (their files can stay behind in its data folder). */
+    int n = plat_steam_ready() ? find_games(games, MAX_GAMES) : 0, i;
     DIR *d;
     struct dirent *de;
 
@@ -726,7 +730,9 @@ int linux_app_read(const char *path, struct linux_app *a, char *why, int why_len
             snprintf(why, why_len, "Flatpak isn't on this machine any more. Run the XenithOS install command once more.");
             return 0;
         }
-        PUT(prog); PUT("run"); PUT(ref);
+        /* --device=all: the controllers too. Apps that ask Flatpak for input devices with the
+         * newer --device=input (Flatpak 1.15.6) get none on Debian 12's or Ubuntu 22.04's. */
+        PUT(prog); PUT("run"); PUT("--device=all"); PUT(ref);
         for (w = strtok_r(args, " ", &save); w; w = strtok_r(NULL, " ", &save))
             if (safe_word(w)) PUT(w);
         a->steam = !strcmp(ref, STEAM_REF);

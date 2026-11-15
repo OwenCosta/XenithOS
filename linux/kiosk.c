@@ -35,7 +35,8 @@ static int scr_w, scr_h;
 static Window shown[MAX_WINDOWS];            /* apps' windows on screen, bottom to top */
 static int nshown;
 static int hold;                             /* XenithOS's window stays in front */
-static Atom a_type, a_dialog, a_splash, a_utility, a_active;
+static Window check;                         /* EWMH's "a window manager is running" window */
+static Atom a_type, a_dialog, a_splash, a_utility, a_active, a_state, a_fullscreen;
 static volatile int other_wm;
 
 static int quiet_errors(Display *d, XErrorEvent *e)
@@ -50,6 +51,34 @@ static int wm_check(Display *d, XErrorEvent *e)
     (void)d;
     if (e->error_code == BadAccess) other_wm = 1;
     return 0;
+}
+
+/* Enough of EWMH for toolkits to see a window manager here. Without one, GLFW (Minecraft) makes a
+ * full-screen window override-redirect, which no window manager sees, so it never got the
+ * keyboard: the mouse turned the camera (the game grabs the pointer) but keys went to XenithOS.
+ * With it, GLFW and SDL ask for full screen with _NET_WM_STATE, handled in kiosk_wm_poll. */
+static void ewmh_start(void)
+{
+    Atom a_supported = XInternAtom(dpy, "_NET_SUPPORTED", False);
+    Atom a_check = XInternAtom(dpy, "_NET_SUPPORTING_WM_CHECK", False);
+    Atom a_name = XInternAtom(dpy, "_NET_WM_NAME", False), a_utf8 = XInternAtom(dpy, "UTF8_STRING", False);
+    Atom supported[10];
+    int n = 0;
+    check = XCreateSimpleWindow(dpy, root, -10, -10, 1, 1, 0, 0, 0);
+    XChangeProperty(dpy, check, a_check, XA_WINDOW, 32, PropModeReplace, (unsigned char *)&check, 1);
+    XChangeProperty(dpy, check, a_name, a_utf8, 8, PropModeReplace, (const unsigned char *)"XenithOS", 8);
+    XChangeProperty(dpy, root, a_check, XA_WINDOW, 32, PropModeReplace, (unsigned char *)&check, 1);
+    supported[n++] = a_supported;
+    supported[n++] = a_check;
+    supported[n++] = a_name;
+    supported[n++] = a_state;
+    supported[n++] = a_fullscreen;
+    supported[n++] = a_active;
+    supported[n++] = a_type;
+    supported[n++] = a_dialog;
+    supported[n++] = a_splash;
+    supported[n++] = a_utility;
+    XChangeProperty(dpy, root, a_supported, XA_ATOM, 32, PropModeReplace, (unsigned char *)supported, n);
 }
 
 int kiosk_wm_start(unsigned long self_window)
@@ -75,6 +104,9 @@ int kiosk_wm_start(unsigned long self_window)
     a_splash = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_SPLASH", False);
     a_utility = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_UTILITY", False);
     a_active = XInternAtom(dpy, "_NET_ACTIVE_WINDOW", False);
+    a_state = XInternAtom(dpy, "_NET_WM_STATE", False);
+    a_fullscreen = XInternAtom(dpy, "_NET_WM_STATE_FULLSCREEN", False);
+    ewmh_start();
     /* Nothing else gives XenithOS the keyboard on its own X server. */
     XRaiseWindow(dpy, self);
     XSetInputFocus(dpy, self, RevertToPointerRoot, CurrentTime);
@@ -125,10 +157,24 @@ static void tell(Window w, int x, int y, int ww, int wh)
     XSendEvent(dpy, w, False, StructureNotifyMask, (XEvent *)&ce);
 }
 
+/* Whether a window has asked for full screen (_NET_WM_STATE_FULLSCREEN, before it was mapped or
+ * since). */
+static int wants_fullscreen(Window w)
+{
+    Atom type, *states = NULL;
+    int format, on = 0;
+    unsigned long n = 0, left, i;
+    if (XGetWindowProperty(dpy, w, a_state, 0, 16, False, XA_ATOM, &type, &format, &n, &left, (unsigned char **)&states) == Success && states) {
+        for (i = 0; i < n; i++) if (states[i] == a_fullscreen) on = 1;
+        XFree(states);
+    }
+    return on;
+}
+
 static void place(Window w)
 {
     XWindowAttributes at;
-    if (keeps_size(w) && XGetWindowAttributes(dpy, w, &at)) {
+    if (keeps_size(w) && !wants_fullscreen(w) && XGetWindowAttributes(dpy, w, &at)) {
         int ww = at.width < scr_w ? at.width : scr_w, wh = at.height < scr_h ? at.height : scr_h;
         XMoveResizeWindow(dpy, w, (scr_w - ww) / 2, (scr_h - wh) / 2, ww, wh);
         tell(w, (scr_w - ww) / 2, (scr_h - wh) / 2, ww, wh);
@@ -156,16 +202,35 @@ static void forget(Window w)
 
 /* The newest window in front with the keyboard; all of the app's windows over XenithOS's in
  * their order (a dialog's main window shows around it), unless XenithOS is holding the front. */
+static void focus(Window w)
+{
+    XSetInputFocus(dpy, w, RevertToPointerRoot, CurrentTime);
+    XChangeProperty(dpy, root, a_active, XA_WINDOW, 32, PropModeReplace, (unsigned char *)&w, 1);
+}
+
 static void focus_top(void)
 {
     int i;
     if (hold || !nshown) {
         XRaiseWindow(dpy, self);
-        XSetInputFocus(dpy, self, RevertToPointerRoot, CurrentTime);
+        focus(self);
         return;
     }
     for (i = 0; i < nshown; i++) XRaiseWindow(dpy, shown[i]);
-    XSetInputFocus(dpy, shown[nshown - 1], RevertToPointerRoot, CurrentTime);
+    focus(shown[nshown - 1]);
+}
+
+/* A window asking to go full screen or back (_NET_WM_STATE). App windows already fill the screen;
+ * this matters for ones that keep their size, and so the window knows where it stands. */
+static void state_request(const XClientMessageEvent *m)
+{
+    Window w = m->window;
+    int on;
+    if ((Atom)m->data.l[1] != a_fullscreen && (Atom)m->data.l[2] != a_fullscreen) return;
+    on = m->data.l[0] == 1 || (m->data.l[0] == 2 && !wants_fullscreen(w));
+    if (on) XChangeProperty(dpy, w, a_state, XA_ATOM, 32, PropModeReplace, (unsigned char *)&a_fullscreen, 1);
+    else XDeleteProperty(dpy, w, a_state);
+    if (w != self && find(w) >= 0) place(w);
 }
 
 void kiosk_wm_poll(void)
@@ -188,7 +253,21 @@ void kiosk_wm_poll(void)
                 break;
             }
             XMapRaised(dpy, w);
-            if (w != self) XSetInputFocus(dpy, w, RevertToPointerRoot, CurrentTime);
+            if (w != self) focus(w);
+            break;
+        }
+        case MapNotify: {
+            /* A game that makes its own window full screen without asking (override-redirect)
+             * still counts as an app's window: it gets the keyboard, and XenithOS stops drawing
+             * under it. Menus and tooltips do that too, but they're small. */
+            Window w = e.xmap.window;
+            XWindowAttributes at;
+            if (e.xmap.override_redirect && w != self && find(w) < 0 && XGetWindowAttributes(dpy, w, &at) &&
+                    (long)at.width * at.height >= (long)scr_w * scr_h / 2) {
+                if (nshown < MAX_WINDOWS) shown[nshown++] = w;
+                if (hold) focus_top();
+                else focus(w);
+            }
             break;
         }
         case ConfigureRequest: {
@@ -226,6 +305,10 @@ void kiosk_wm_poll(void)
                 forget(e.xclient.window);
                 shown[nshown++] = e.xclient.window;
                 focus_top();
+            } else if (e.xclient.message_type == a_active && e.xclient.window == self && (hold || !nshown)) {
+                focus_top();                 /* SDL_RaiseWindow asks this way once there's EWMH */
+            } else if (e.xclient.message_type == a_state) {
+                state_request(&e.xclient);
             }
             break;
         }
@@ -236,6 +319,20 @@ void kiosk_wm_poll(void)
 int kiosk_wm_windows(void)
 {
     return nshown;
+}
+
+/* The game in front keeps the keyboard: if it has ended up with XenithOS's window or nobody (a
+ * window that closed, a focus request that came too early), it goes back to the game. */
+void kiosk_wm_keep_focus(void)
+{
+    Window f = None;
+    int revert;
+    if (!dpy || hold || !nshown) return;
+    XGetInputFocus(dpy, &f, &revert);
+    if (f == self || f == root || f == None || f == PointerRoot) {
+        focus(shown[nshown - 1]);
+        XFlush(dpy);
+    }
 }
 
 /* The title of the app's window in front ("" when there's none). */

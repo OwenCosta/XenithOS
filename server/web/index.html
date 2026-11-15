@@ -227,7 +227,7 @@
         <tr><td>Profiles, Cloud, avatars</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">needs the Ethernet cable on the Xbox; no Wi-Fi driver</td></tr>
         <tr><td>VOLT, DOOM, Tube, Photos</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">DOOM comes with Freedoom and has sound effects; no music yet</td></tr>
         <tr><td>PCs and Raspberry Pis</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">0.5.2 runs apps inside XenithOS's window: no black screen between them</td></tr>
-        <tr><td>Roblox, Minecraft and the guide</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">PCs only; they open over XenithOS on its own X server and the guide comes up over them, tested in a virtual display</td></tr>
+        <tr><td>Minecraft and the guide</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">PCs only; they open over XenithOS on its own X server and the guide comes up over them, tested in a virtual display</td></tr>
         <tr><td>XenithOS Cloud and this site</td><td class="yes" data-k="Builds">yes</td><td class="live" data-k="On the Xbox">live</td><td class="note">you're on it</td></tr>
       </tbody>
     </table>
@@ -264,11 +264,11 @@
       <li><b>Desktop mode</b> is in XenithOS's power menu: the full Linux desktop, for a browser and everything else.</li>
       <li><b>Return to XenithOS</b> in the desktop's menu goes back to console mode.</li>
       <li><b>Updates</b> come from the Store: pick <b>XenithOS update</b>, and it builds the new version on your machine and restarts into it.</li>
-      <li><b>Roblox</b> and <b>Minecraft</b> are in the Store's Apps section too (LB and RB switch sections). They install from Flathub through XenithOS, start from its home screen and get the whole screen.</li>
+      <li><b>Minecraft</b> is in the Store's Apps section too (LB and RB switch sections). It installs from Flathub through XenithOS, starts from its home screen and gets the whole screen. X on the Apps screen removes an app from Flathub again.</li>
       <li><b>The guide</b>: press the Xbox button, or hold Esc, in a game. Return home leaves the game running (choose it again to go back), Switch game starts another, and the controller can work as a mouse for launchers or as a keyboard and mouse for Minecraft.</li>
     </ol>
     <h3>In the Store on PCs</h3>
-    <p class="muted">Apps come from <a href="https://flathub.org/">Flathub</a> and run under their own licenses. Roblox runs through <a href="https://sober.vinegarhq.org/">Sober</a>, a community project that isn't made by Roblox (use it at your own risk), and only on x86-64 PCs. Minecraft: Java Edition runs through <a href="https://prismlauncher.org/">Prism Launcher</a> and needs a Minecraft account; XenithOS starts the instance you played last. Machines installed before 0.5.4 need the install command once more for apps.</p>
+    <p class="muted">Apps come from <a href="https://flathub.org/">Flathub</a> and run under their own licenses. Minecraft: Java Edition runs through <a href="https://prismlauncher.org/">Prism Launcher</a> and needs a Minecraft account; XenithOS starts the instance you played last, and the controller plays it like Minecraft on a console. Machines installed before 0.5.4 need the install command once more for apps.</p>
     <div class="tiles" id="pcapps"></div>
     <p class="muted">Add <code>--no-desktop</code> to skip desktop mode, or run it again with <code>--uninstall</code> to undo it. More in <a href="https://github.com/OwenCosta/XenithOS/blob/main/linux/README.md">linux/README.md</a>.</p>
   </div>
@@ -278,6 +278,8 @@
   <div class="wrap">
     <h2>Build log</h2>
     <ul class="log">
+      <li><b>0.5.9</b><time datetime="2026-11-15">Nov 15, 2026</time>
+        <p>Games on PCs get the keyboard and the controller properly. XenithOS's window manager now says it's there the standard way, so Minecraft goes full screen through it instead of around it, which had left Minecraft without the keyboard: the camera turned but you couldn't move. Games from Flathub can see the controller on older Flatpak versions too. The controller plays Minecraft with its console layout (A jumps, B drops, Y opens the inventory, LB and RB pick from the hotbar, the right stick pressed sneaks), and XenithOS draws less while a game loads. On the Apps screen, X removes an app from Flathub, with or without its data, including ones the Store doesn't list any more. The Store has Minecraft; Roblox is out for now.</p></li>
       <li><b>0.5.8</b><time datetime="2026-11-15">Nov 15, 2026</time>
         <p>The Apps screen lists everything down the screen, one to a line with its picture and version, instead of a grid three across: up and down go through them, and the list slides along as you go. A game left running from the guide says Running there too.</p></li>
       <li><b>0.5.7</b><time datetime="2026-11-15">Nov 15, 2026</time>

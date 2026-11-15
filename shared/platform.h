@@ -87,7 +87,8 @@ int  plat_install_update(const char *tarball, void (*step)(const char *what, int
  *   plat_arch()              the processor as Flathub names it: "x86_64", "aarch64" ("" on the Xbox)
  *   plat_flatpak_ready()     1 when Flatpak is installed here
  *   plat_flatpak_installed() 1 when that app (an id like "tv.kodi.Kodi") is installed
- *   plat_flatpak()           verb "install", "update" or "uninstall". step(percent or -1,
+ *   plat_flatpak()           verb "install", "update", "uninstall", or "purge" (uninstall and
+ *                            delete the app's data: settings, saves, Steam's games). step(percent or -1,
  *                            seconds) is called many times a second while it works, and can
  *                            return 0 to cancel. 1 when done, -1 when cancelled, 0 with why[] set.
  *   plat_steam_ready()       1 when the Steam app is installed

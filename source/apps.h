@@ -15,6 +15,8 @@ struct app {
     char id[40];
     char name[40];
     char version[16];
+    char ref[64];             /* PCs: its Flathub id ("tv.kodi.Kodi"), for removing it; else "" */
+    int steam;                /* PCs: a game in Steam (removed in Steam) */
     struct img thumb;         /* thumb.px is NULL when there's no thumbnail */
 };
 

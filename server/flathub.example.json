@@ -1,16 +1,5 @@
 [
  {
-  "id": "roblox",
-  "name": "Roblox",
-  "ref": "org.vinegarhq.Sober",
-  "arches": [
-   "x86_64"
-  ],
-  "mb": 15,
-  "shared_mb": 1400,
-  "description": "Plays Roblox through Sober, a community project not made by Roblox. Use at your own risk."
- },
- {
   "id": "minecraft",
   "name": "Minecraft",
   "ref": "org.prismlauncher.PrismLauncher",

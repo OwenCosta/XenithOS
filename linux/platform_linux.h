@@ -51,6 +51,7 @@ int  kiosk_wm_windows(void);                 /* apps' windows on screen now */
 void kiosk_wm_top_title(char *out, int n);   /* the title of the one in front, "" if none */
 void kiosk_wm_show_self(void);               /* XenithOS's window on top with the keyboard again */
 void kiosk_wm_hold(int on);                  /* 1: XenithOS's window stays in front of the app's */
+void kiosk_wm_keep_focus(void);              /* the keyboard back to the app in front, if it's lost */
 int  kiosk_wm_capture(uint32_t *out, int w, int h);   /* the screen, scaled; 0 if it can't */
 /* The pointer, through XTEST: 0 from can_point() when libXtst isn't there. Buttons are X's
  * (1 left, 2 middle, 3 right, 4/5 scroll up/down, 6/7 left/right); keys are X keysyms. */

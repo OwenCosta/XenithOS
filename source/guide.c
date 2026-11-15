@@ -52,7 +52,7 @@ static const char *mode_name(int m)
 static const char *mode_help(int m)
 {
     return m == PAD_MOUSE ? "For launchers and menus: the left stick moves the pointer, A clicks, B right clicks and the right stick scrolls."
-         : m == PAD_KEYS ? "For games played with a keyboard: the left stick walks, the right stick looks, RT and LT click, A jumps and Y opens the inventory."
+         : m == PAD_KEYS ? "Laid out like Minecraft on a console: the sticks walk and look, RT breaks, LT places, A jumps, B drops, Y opens the inventory and LB and RB pick from the hotbar."
          : "The game reads the controller itself.";
 }
 

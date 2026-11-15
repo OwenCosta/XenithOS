@@ -1,0 +1,17 @@
+# Removing an app from Flathub on the Apps screen (X): here Kodi, which the Store doesn't list any
+# more, so the Apps screen is the only place to remove it.
+#   XSIM_KIND=pc XSIM_OTHER="kodi minecraft" sim/run.sh sim/scripts/apps_remove.txt apps_remove
+# The list is by name: DOOM, kodi, Minecraft, Photos, Tube, VOLT.
+wait 210
+press a
+wait 40
+press down
+wait 15
+shot remove_list
+press x
+wait 25
+shot remove_ask
+press a
+wait 180
+shot remove_done
+quit
