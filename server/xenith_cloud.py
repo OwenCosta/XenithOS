@@ -1,22 +1,34 @@
 #!/usr/bin/env python3
-"""XenithOS Cloud: the server side of XenithOS for the Xbox 360.
+"""XenithOS Cloud: the free online service behind XenithOS (Xbox 360, PCs, Raspberry Pis).
 
-Standard library only. Plain HTTP, because the console has no TLS or DNS.
-Replies are text/plain: key=value lines, or rows split by '|'.
+Standard library only (plus yt-dlp and ffmpeg for Tube, if installed). Plain HTTP, because
+the Xbox has no TLS or DNS. Replies are text/plain: key=value lines, or rows split by '|'.
 
 Public
   GET  /                              the XenithOS website (web/index.html)
   GET  /static/<file>                 website files (web/static/)
   GET  /v1/ping                       pong
   GET  /v1/status                     key=value server stats (does not log a console)
-  GET  /v1/hello?name=Owen&ver=0.4    key=value: motd + live server stats (logs the console)
+  GET  /v1/hello?name=Owen&ver=0.5    key=value: motd, players, online now (logs the console)
+  GET  /v1/news                       id|unix_time|text   (newest first), XenithOS news
   GET  /v1/store                      id|kind|name|version|size|sha256|file|description
   GET  /v1/store/file/<id>            the file bytes
   GET  /v1/store/icon/<id>.ximg|.png  the item's thumbnail
   GET  /v1/scores/<game>              rank|name|score|avatar
   GET  /v1/players                    name|avatar|joined|volt_best   (most recently seen first)
   GET  /v1/players/<name>             key=value
-  GET  /v1/inbox?key=<console key>    id|unix_time|text   (newest first)
+  GET  /v1/inbox?key=<console key>    the news, for 0.4 consoles
+  GET  /download/xenithos-xbox360.zip XenithOS, its apps and a config, ready for a USB stick
+  GET  /download/config.txt           a config with this server's address
+  GET  /download/xenithos-source.tar.gz, /install.sh   for PCs and Raspberry Pis
+
+Tube (YouTube; needs a signed-in profile)
+  POST /v1/tube/search                token, q          -> id|title|channel|seconds
+  GET  /v1/tube/thumb/<id>.jpg
+  POST /v1/tube/start                 token, id, t      -> session, title, duration, fps, rate
+  GET  /v1/tube/chunk?s=<session>&off=<bytes>           the next piece of the AVI (204: not
+                                                        ready yet, 410: finished)
+  GET  /v1/tube/stop?s=<session>
 
 Accounts (form posts; errors come back as "error=<message>")
   POST /v1/accounts/create            name, pin, avatar   -> name, token, avatar, joined
@@ -27,7 +39,7 @@ Accounts (form posts; errors come back as "error=<message>")
   POST /v1/scores/<game>              token, score  (or legacy: name, score, for names without a profile)
 
 Admin (header X-Xenith-Key: <XENITH_ADMIN_KEY>)
-  POST /v1/inbox                      body is the message text
+  POST /v1/news (or /v1/inbox)        body is the news post
   POST /v1/inbox/clear
   POST /v1/motd                       body is the new message of the day
 
@@ -42,22 +54,32 @@ Environment
   XENITH_STORE_DIR   default ./store      (store.json + the files it lists)
   XENITH_WEB_DIR     default ./web        (index.html and static/)
   XENITH_ADMIN_KEY   admin key; admin routes are off when unset
-  XENITH_CONSOLE_KEY when set, reading the inbox needs ?key=<this>
+  XENITH_CONSOLE_KEY when set, the old /v1/inbox route needs ?key=<this>
+  XENITH_PUBLIC_ADDR the "ip:port" consoles should use (goes into downloads); default: the
+                     address each download was requested from
+  XENITH_DOWNLOAD_DIR default ./downloads   (install.sh, xenithos-source.tar.gz)
+  XENITH_YTDLP, XENITH_FFMPEG  paths for Tube (default: found on PATH); Tube is off without them
+  XENITH_TUBE_STREAMS default 3: videos playing at once, across everyone
 """
 import hashlib
 import hmac
+import io
 import json
 import os
 import re
 import secrets
+import select
 import shutil
+import subprocess
 import sys
 import threading
 import time
+import urllib.request
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 GAMES = {"volt"}
 MAX_SCORE = 1_000_000
 TOP_KEEP = 50
@@ -73,8 +95,11 @@ LOGIN_PER_10MIN = 20           # per IP
 
 LEGACY_NAME_RE = re.compile(r"^[A-Z0-9]{1,12}$")
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
-AVATAR_RE = re.compile(r"^1[0-9a-z]{9}$")
-AVATAR_COUNTS = [8, 8, 8, 5, 5, 4, 10, 6, 8]
+AVATAR_RE = re.compile(r"^(1[0-9a-z]{9}|2[0-9a-z]{13})$")
+AVATAR_COUNTS_V1 = [8, 8, 8, 5, 5, 4, 10, 6, 8]                   # "1" + 9 digits, the first format
+AVATAR_COUNTS = [10, 14, 13, 8, 10, 8, 12, 11, 12, 6, 5, 5, 3]     # "2" + 13 digits (shared/avatar.c)
+ONLINE_WINDOW = 15 * 60        # "online now": seen in the last 15 minutes
+PUBLIC_ADDR_RE = re.compile(r"^[A-Za-z0-9.-]{1,64}:[0-9]{1,5}$")
 PIN_RE = re.compile(r"^[0-9]{4,8}$")
 STATIC_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}\.(png|js|css|svg|ico|webp|wav)$")
 KINDS = {"app", "data", "system"}
@@ -112,8 +137,10 @@ def check_gamertag(name):
 
 
 def valid_avatar(code):
-    return bool(AVATAR_RE.match(code or "")) and all(
-        int(c, 36) < n for c, n in zip(code[1:], AVATAR_COUNTS))
+    if not AVATAR_RE.match(code or ""):
+        return False
+    counts = AVATAR_COUNTS_V1 if code[0] == "1" else AVATAR_COUNTS
+    return all(int(c, 36) < n for c, n in zip(code[1:], counts))
 
 
 def hash_pin(pin, salt):
@@ -183,6 +210,12 @@ class State:
         with self.lock:
             self.data["inbox"] = []
             self.save()
+
+    def online(self):
+        """How many consoles and machines said hello in the last ONLINE_WINDOW seconds."""
+        cutoff = int(time.time()) - ONLINE_WINDOW
+        with self.lock:
+            return sum(1 for c in self.data["consoles"].values() if c.get("t", 0) >= cutoff)
 
     def seen(self, name, ip):
         with self.lock:
@@ -377,6 +410,221 @@ def server_stats():
     return stats
 
 
+# ---------------------------------------------------------------------- tube
+
+TUBE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+TUBE_SID_RE = re.compile(r"^[0-9a-f]{16}$")
+TUBE_FORMAT = "bv*[height<=360][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=360]+ba/18/b[height<=480]/b"
+TUBE_W, TUBE_H, TUBE_FPS, TUBE_RATE = 426, 240, 20, 24000
+TUBE_CHUNK = 256 * 1024
+TUBE_IDLE_S = 60               # a stream nobody has asked for in this long is dropped
+TUBE_SEARCHES_PER_MIN = 10     # per profile
+TUBE_STARTS_PER_10MIN = 30     # per profile
+
+
+class TubeStream:
+    """One video being turned into the console's stream by ffmpeg. The console asks for it
+    in order, a chunk at a time; asking for the last chunk again (after a network hiccup)
+    gets the same bytes."""
+
+    def __init__(self, proc, owner, title, duration):
+        self.proc, self.owner, self.title, self.duration = proc, owner, title, duration
+        self.sent, self.last_off, self.last_data, self.eof = 0, -1, b"", False
+        self.touched = time.monotonic()
+        self.lock = threading.Lock()
+
+    def read(self, off, wait=2.5):
+        """Bytes from `off`: b"" if nothing is ready yet, None once the stream is over."""
+        with self.lock:
+            self.touched = time.monotonic()
+            if off == self.last_off:
+                return self.last_data
+            if off != self.sent:
+                raise ValueError("out of order")
+            data, fd, end = bytearray(), self.proc.stdout.fileno(), time.monotonic() + wait
+            while len(data) < TUBE_CHUNK and not self.eof:
+                left = end - time.monotonic() if not data else 0.05
+                if left <= 0:
+                    break
+                ready, _, _ = select.select([fd], [], [], left)
+                if not ready:
+                    break
+                more = os.read(fd, TUBE_CHUNK - len(data))
+                if not more:
+                    self.eof = True
+                    break
+                data += more
+            if not data:
+                return None if self.eof else b""
+            self.last_off, self.last_data = off, bytes(data)
+            self.sent += len(data)
+            return self.last_data
+
+    def stop(self):
+        if self.proc.poll() is None:
+            self.proc.kill()
+        try:
+            self.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        if self.proc.stdout:
+            self.proc.stdout.close()
+
+
+class Tube:
+    """YouTube for XenithOS. yt-dlp finds videos, ffmpeg turns one into a stream the Xbox can
+    play: 426x240 JPEG pictures at 20 a second and 24 kHz mono sound, in an AVI. Profiles
+    only, a few streams at a time, so the server can't be used as an open proxy."""
+
+    def __init__(self, ytdlp, ffmpeg, max_streams=3):
+        self.ytdlp, self.ffmpeg, self.max_streams = ytdlp, ffmpeg, max_streams
+        self.lock = threading.Lock()
+        self.streams = {}
+        self.search_cache = {}
+        self.thumbs = {}
+        self.searches = RateLimit(TUBE_SEARCHES_PER_MIN, 60)
+        self.starts = RateLimit(TUBE_STARTS_PER_10MIN, 600)
+
+    def available(self):
+        return bool(self.ytdlp and self.ffmpeg)
+
+    def search(self, query):
+        key = query.lower()
+        with self.lock:
+            hit = self.search_cache.get(key)
+        if hit and time.time() - hit[0] < 600:
+            return hit[1]
+        out = subprocess.run([self.ytdlp, "--flat-playlist", "-J", "--no-warnings", "--no-cache-dir", f"ytsearch16:{query}"],
+                             capture_output=True, timeout=40)
+        data = json.loads(out.stdout or b"{}")
+        rows = []
+        for e in data.get("entries") or []:
+            vid = e.get("id") or ""
+            if not TUBE_ID_RE.match(vid) or e.get("live_status") == "is_upcoming":
+                continue
+            rows.append((vid, clean(e.get("title") or "", 96) or "Untitled",
+                         clean(e.get("channel") or e.get("uploader") or "", 40), int(e.get("duration") or 0)))
+        with self.lock:
+            if len(self.search_cache) > 500:
+                self.search_cache.clear()
+            self.search_cache[key] = (time.time(), rows)
+        return rows
+
+    def thumb(self, vid):
+        with self.lock:
+            hit = self.thumbs.get(vid)
+        if hit:
+            return hit
+        req = urllib.request.Request(f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg",
+                                     headers={"User-Agent": "XenithOS-Cloud/" + VERSION})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = r.read(512 * 1024)
+        with self.lock:
+            if len(self.thumbs) > 400:
+                self.thumbs.clear()
+            self.thumbs[vid] = data
+        return data
+
+    def reap(self):
+        now = time.monotonic()
+        with self.lock:
+            dead = [sid for sid, s in self.streams.items() if now - s.touched > TUBE_IDLE_S]
+            gone = [self.streams.pop(sid) for sid in dead]
+        for s in gone:
+            s.stop()
+
+    def stop(self, sid):
+        with self.lock:
+            s = self.streams.pop(sid, None)
+        if s:
+            s.stop()
+
+    def get(self, sid):
+        with self.lock:
+            return self.streams.get(sid)
+
+    def start(self, vid, at, owner):
+        """Returns (session id, title, duration) or raises RuntimeError with a message for people."""
+        self.reap()
+        with self.lock:
+            mine = [sid for sid, s in self.streams.items() if s.owner == owner]
+        for sid in mine:                          # one video per profile at a time
+            self.stop(sid)
+        with self.lock:
+            if len(self.streams) >= self.max_streams:
+                raise RuntimeError("Tube is busy right now. Try again in a few minutes.")
+        try:
+            out = subprocess.run([self.ytdlp, "-j", "--no-warnings", "--no-cache-dir", "--no-playlist", "-f", TUBE_FORMAT, "--",
+                                  f"https://www.youtube.com/watch?v={vid}"], capture_output=True, timeout=60)
+            info = json.loads(out.stdout)
+        except (subprocess.TimeoutExpired, ValueError):
+            raise RuntimeError("YouTube didn't hand over that video. Try another one.")
+        fmts = info.get("requested_formats") or [info]
+        if not all(f.get("url") for f in fmts):
+            raise RuntimeError("That video can't be played here.")
+        args = [self.ffmpeg, "-nostdin", "-loglevel", "error"]
+        for f in fmts:
+            if at > 0:
+                args += ["-ss", str(at)]
+            headers = "".join(f"{k}: {v}\r\n" for k, v in (f.get("http_headers") or {}).items())
+            if headers:
+                args += ["-headers", headers]
+            args += ["-i", f["url"]]
+        vi = next((i for i, f in enumerate(fmts) if f.get("vcodec") not in (None, "none")), 0)
+        ai = next((i for i, f in enumerate(fmts) if f.get("acodec") not in (None, "none")), None)
+        args += ["-map", f"{vi}:v:0"] + (["-map", f"{ai}:a:0"] if ai is not None else [])
+        args += ["-vf", f"scale={TUBE_W}:{TUBE_H}:force_original_aspect_ratio=decrease,"
+                        f"pad={TUBE_W}:{TUBE_H}:(ow-iw)/2:(oh-ih)/2:black,fps={TUBE_FPS}",
+                 "-c:v", "mjpeg", "-q:v", "5", "-pix_fmt", "yuvj420p", "-threads", "2"]
+        if ai is not None:
+            args += ["-c:a", "pcm_s16le", "-ar", str(TUBE_RATE), "-ac", "1"]
+        args += ["-f", "avi", "pipe:1"]
+        nice = shutil.which("nice")                # keep the website and API quick while it works
+        proc = subprocess.Popen(([nice, "-n", "10"] if nice else []) + args,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        sid = secrets.token_hex(8)
+        stream = TubeStream(proc, owner, clean(info.get("title") or "", 96), int(info.get("duration") or 0))
+        with self.lock:
+            self.streams[sid] = stream
+        return sid, stream.title, stream.duration
+
+
+# ---------------------------------------------------------------------- downloads
+
+
+def public_addr(handler, configured):
+    """The address consoles should use: XENITH_PUBLIC_ADDR, or the one this request came to."""
+    if configured:
+        return configured
+    host = (handler.headers.get("Host") or "").strip()
+    return host if PUBLIC_ADDR_RE.match(host) else ""
+
+
+def xbox_zip(store, addr):
+    """Everything for a USB stick: XenithOS, the apps with their thumbnails, and a config with
+    the XenithOS Cloud address. Built from what's in the Store."""
+    buf = io.BytesIO()
+    items = {i["id"]: i for i in store.items()}
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        if "xenith" in items:
+            z.write(items["xenith"]["path"], "xenon.elf")
+        for iid, it in items.items():
+            if it["kind"] != "app":
+                continue
+            z.write(it["path"], f"apps/{iid}.elf32")
+            z.writestr(f"apps/{iid}.txt", f"name={it['name']}\nversion={it['version']}\n")
+            icon = store.icon(iid, "ximg")
+            if icon:
+                z.write(icon, f"apps/{iid}.ximg")
+        z.writestr("xenith/config.txt", (f"server={addr}\n" if addr else "") + "name=PLAYER\n")
+        z.writestr("README.txt",
+                   "XenithOS for the Xbox 360\r\n\r\n"
+                   "Copy everything here to the root of a FAT32 USB stick, next to ABadAvatar and\r\n"
+                   "FreeMyXe. Start the exploit, choose Launch XeLL in FreeMyXe, and XeLL loads\r\n"
+                   "xenon.elf. Never write to the NAND while using the exploit.\r\n")
+    return buf.getvalue()
+
+
 # ---------------------------------------------------------------------- http
 
 
@@ -384,7 +632,8 @@ def kv(d):
     return "".join(f"{k}={clean(v)}\n" for k, v in d.items())
 
 
-def make_handler(state, store, admin_key, web_dir="web", console_key=""):
+def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=None, public="",
+                 downloads="downloads"):
     last_score = {}
     last_score_lock = threading.Lock()
     creates = RateLimit(CREATE_PER_HOUR, 3600)
@@ -395,7 +644,10 @@ def make_handler(state, store, admin_key, web_dir="web", console_key=""):
         protocol_version = "HTTP/1.0"
 
         def log_message(self, fmt, *args):
-            sys.stderr.write("%s %s\n" % (self.client_address[0], fmt % args))
+            line = fmt % args
+            if "/v1/tube/chunk" in line or "/v1/tube/thumb" in line:
+                return                       # several a second while a video plays
+            sys.stderr.write("%s %s\n" % (self.client_address[0], line))
 
         def reply(self, code, text="", ctype="text/plain; charset=ascii", cache=None):
             body = text.encode("ascii", "replace") if isinstance(text, str) else text
@@ -451,9 +703,71 @@ def make_handler(state, store, admin_key, web_dir="web", console_key=""):
                 if not check_gamertag(name) or LEGACY_NAME_RE.match(name):
                     state.seen(name, self.client_address[0])
                 lines = {"motd": state.data["motd"], "server": "XENITHOS CLOUD " + VERSION,
+                         "players": str(len(state.data["accounts"])), "online": str(state.online()),
+                         "news": str(len(state.data["inbox"])), "now": str(int(time.time())),
                          "messages": str(len(state.data["inbox"]))}
-                lines.update(server_stats())
+                lines.update(server_stats())        # 0.4 consoles still show these
                 return self.reply(200, kv(lines))
+
+            if parts == ["v1", "news"]:
+                return self.reply(200, "".join(f"{m['id']}|{m['t']}|{m['text']}\n"
+                                               for m in state.data["inbox"]))
+
+            if len(parts) == 4 and parts[:3] == ["v1", "tube", "thumb"] and parts[3].endswith(".jpg"):
+                vid = parts[3][:-4]
+                if not tube or not tube.available():
+                    return self.error(503, "Tube isn't available on this server.")
+                if not TUBE_ID_RE.match(vid):
+                    return self.error(404, "No such video.")
+                try:
+                    return self.reply(200, tube.thumb(vid), "image/jpeg", "public, max-age=86400")
+                except OSError:
+                    return self.error(502, "No thumbnail.")
+
+            if parts == ["v1", "tube", "chunk"] or parts == ["v1", "tube", "stop"]:
+                sid = q.get("s", [""])[0]
+                stream = tube.get(sid) if tube and TUBE_SID_RE.match(sid) else None
+                if parts[2] == "stop":
+                    if stream:
+                        tube.stop(sid)
+                    return self.reply(200, "ok=1\n")
+                if not stream:
+                    return self.error(410, "That video stream has finished.")
+                try:
+                    data = stream.read(int(q.get("off", ["0"])[0]))
+                except ValueError:
+                    return self.error(400, "Out of order.")
+                if data is None:
+                    tube.stop(sid)
+                    return self.error(410, "The end.")
+                if not data:
+                    return self.reply(204)
+                return self.reply(200, data, "application/octet-stream", "no-store")
+
+            if parts == ["download", "config.txt"]:
+                addr = public_addr(self, public)
+                return self.reply(200, (f"server={addr}\n" if addr else "") + "name=PLAYER\n", cache="no-store")
+
+            if parts == ["download", "xenithos-xbox360.zip"]:
+                return self.reply(200, xbox_zip(store, public_addr(self, public)), "application/zip", "no-store")
+
+            if parts == ["download", "xenithos-source.tar.gz"]:
+                path = os.path.join(downloads, "xenithos-source.tar.gz")
+                if os.path.isfile(path):
+                    return self.send_file(path, "application/gzip")
+                return self.error(404, "Not found.")
+
+            if parts == ["install.sh"]:
+                path = os.path.join(downloads, "install.sh")
+                if not os.path.isfile(path):
+                    return self.error(404, "Not found.")
+                with open(path, encoding="utf-8") as f:
+                    script = f.read()
+                addr = public_addr(self, public)
+                host = (self.headers.get("Host") or "").strip()
+                source = f"http://{host}/download/xenithos-source.tar.gz" if PUBLIC_ADDR_RE.match(host) or re.match(r"^[A-Za-z0-9.-]{1,64}$", host) else ""
+                script = script.replace("@XENITHOS_SERVER@", addr).replace("@XENITHOS_SOURCE@", source)
+                return self.reply(200, script.encode(), "text/plain; charset=utf-8", "no-store")
 
             if parts == ["v1", "inbox"]:
                 if console_key and not hmac.compare_digest(
@@ -548,6 +862,39 @@ def make_handler(state, store, admin_key, web_dir="web", console_key=""):
                     return self.error(429 if "15 minutes" in err else 401, err)
                 return self.session_reply(*result)
 
+            if parts in (["v1", "tube", "search"], ["v1", "tube", "start"]):
+                if not tube or not tube.available():
+                    return self.error(503, "Tube isn't available on this server.")
+                acc = state.by_token(form.get("token", ""))
+                if not acc:
+                    return self.error(401, "Sign in to a XenithOS profile to use Tube.")
+                if parts[2] == "search":
+                    query = clean(form.get("q", ""), 80)
+                    if not query:
+                        return self.error(400, "Type something to search for.")
+                    if not tube.searches.allow(acc["name"]):
+                        return self.error(429, "That's a lot of searching. Wait a minute.")
+                    try:
+                        rows = tube.search(query)
+                    except (subprocess.TimeoutExpired, ValueError, OSError):
+                        return self.error(502, "YouTube didn't answer. Try again.")
+                    return self.reply(200, "".join(f"{v}|{t}|{c}|{d}\n" for v, t, c, d in rows))
+                vid = form.get("id", "")
+                if not TUBE_ID_RE.match(vid):
+                    return self.error(400, "That isn't a video.")
+                try:
+                    at = max(0, min(int(form.get("t", "0")), 24 * 3600))
+                except ValueError:
+                    at = 0
+                if not tube.starts.allow(acc["name"]):
+                    return self.error(429, "Too many videos at once. Wait a few minutes.")
+                try:
+                    sid, title, duration = tube.start(vid, at, acc["name"])
+                except RuntimeError as e:
+                    return self.error(503, str(e))
+                return self.reply(200, kv({"session": sid, "title": title, "duration": duration, "fps": TUBE_FPS,
+                                           "rate": TUBE_RATE, "width": TUBE_W, "height": TUBE_H}))
+
             if parts[:2] == ["v1", "accounts"] and len(parts) == 3 and parts[2] in ("me", "avatar", "logout"):
                 acc = state.by_token(form.get("token", ""))
                 if not acc:
@@ -591,10 +938,10 @@ def make_handler(state, store, admin_key, web_dir="web", console_key=""):
                 rank, entry = state.submit(parts[2], name, score)
                 return self.reply(200, f"{rank or 0}|{entry['name']}|{entry['score']}\n")
 
-            if parts[:2] in (["v1", "inbox"], ["v1", "motd"]):
+            if parts[:2] in (["v1", "inbox"], ["v1", "motd"], ["v1", "news"]):
                 if not self.is_admin():
                     return self.error(401, "Admin key required.")
-                if parts == ["v1", "inbox"]:
+                if parts in (["v1", "inbox"], ["v1", "news"]):
                     msg = state.add_message(body)
                     return self.reply(200, f"{msg['id']}\n") if msg else self.error(400, "Empty message.")
                 if parts == ["v1", "inbox", "clear"]:
@@ -616,10 +963,23 @@ def serve():
     admin_key = os.environ.get("XENITH_ADMIN_KEY", "")
     console_key = os.environ.get("XENITH_CONSOLE_KEY", "")
     web_dir = os.environ.get("XENITH_WEB_DIR", "web")
+    tube = Tube(os.environ.get("XENITH_YTDLP") or shutil.which("yt-dlp") or "",
+                os.environ.get("XENITH_FFMPEG") or shutil.which("ffmpeg") or "",
+                int(os.environ.get("XENITH_TUBE_STREAMS", "3")))
+    public = os.environ.get("XENITH_PUBLIC_ADDR", "")
+    downloads = os.environ.get("XENITH_DOWNLOAD_DIR", "downloads")
+
+    def reaper():
+        while True:
+            time.sleep(30)
+            tube.reap()
+    threading.Thread(target=reaper, daemon=True).start()
+
     httpd = ThreadingHTTPServer(("0.0.0.0", port),
-                                make_handler(state, store, admin_key, web_dir, console_key))
+                                make_handler(state, store, admin_key, web_dir, console_key, tube, public, downloads))
     httpd.daemon_threads = True
-    print(f"XenithOS Cloud {VERSION} on :{port} (admin routes {'on' if admin_key else 'off'})", flush=True)
+    print(f"XenithOS Cloud {VERSION} on :{port} (admin routes {'on' if admin_key else 'off'}, "
+          f"Tube {'on' if tube.available() else 'off'})", flush=True)
     httpd.serve_forever()
 
 
@@ -654,9 +1014,27 @@ def selftest():
     with open(os.path.join(web_dir, "static", "app.js"), "w") as f:
         f.write("console.log(1)")
 
+    dl_dir = os.path.join(tmp, "downloads")
+    os.makedirs(dl_dir)
+    fake_ytdlp, fake_ffmpeg = os.path.join(tmp, "yt-dlp"), os.path.join(tmp, "ffmpeg")
+    with open(fake_ytdlp, "w") as f:
+        f.write("#!/usr/bin/env python3\nimport json, sys\n"
+                "if '--flat-playlist' in sys.argv:\n"
+                "    print(json.dumps({'entries': [{'id': 'abcdefghijk', 'title': 'Test|video\\nOne', 'channel': 'Chan',"
+                " 'duration': 61}, {'id': 'bad'}]}))\n"
+                "else:\n"
+                "    print(json.dumps({'title': 'Test video', 'duration': 61, 'url': 'http://example.invalid/v',"
+                " 'vcodec': 'avc1', 'acodec': 'mp4a'}))\n")
+    with open(fake_ffmpeg, "w") as f:
+        f.write("#!/usr/bin/env python3\nimport sys\n"
+                "sys.stdout.buffer.write(b'RIFF\\0\\0\\0\\0AVI LIST\\0\\0\\0\\0movi00dc\\4\\0\\0\\0\\xff\\xd8\\xff\\xd9')\n")
+    os.chmod(fake_ytdlp, 0o755)
+    os.chmod(fake_ffmpeg, 0o755)
+
     state = State(os.path.join(tmp, "state"))
     store = Store(store_dir)
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state, store, "k3y", web_dir, "c0nsole"))
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state, store, "k3y", web_dir, "c0nsole",
+                                                               Tube(fake_ytdlp, fake_ffmpeg), "", dl_dir))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{httpd.server_address[1]}"
 
@@ -771,9 +1149,60 @@ def selftest():
           and req("GET", "/v1/inbox?key=c0nsole")[1] == b"")
     check("body too large", req("POST", "/v1/motd", "x" * (MAX_BODY + 1), key="k3y")[0] == 413)
 
+    # Public service: news, hello numbers, v2 avatars, downloads
+    token = kvparse(req("POST", "/v1/accounts/create", "name=Tuber&pin=5678&avatar=22020010000000")[1]).get("token", "")
+    check("v2 avatar accepted at sign-up", token != "" and state.account("tuber")["avatar"] == "22020010000000")
+    check("news post needs admin", req("POST", "/v1/news", "Patch notes")[0] == 401)
+    check("news posted", req("POST", "/v1/news", "Patch notes are up", key="k3y")[0] == 200)
+    code, body = req("GET", "/v1/news")
+    check("news is public", code == 200 and body.decode().split("|", 2)[2] == "Patch notes are up\n")
+    hello = kvparse(req("GET", "/v1/hello?name=Owen&ver=0.5")[1])
+    check("hello has players and online", int(hello.get("players", "0")) >= 1 and int(hello.get("online", "0")) >= 1
+          and int(hello.get("now", "0")) > 0)
+    check("v2 avatar valid", valid_avatar("22020010000000") and valid_avatar("29dc797bab5442") and
+          valid_avatar("2" + "0" * 13) and not valid_avatar("2" + "z" * 13) and not valid_avatar("2" + "0" * 12)
+          and not valid_avatar("2adc797bab5442"))
+    check("v1 avatar still valid", valid_avatar("1202001000") and not valid_avatar("1999999999"))
+    check("v2 avatar saved", req("POST", "/v1/accounts/avatar", f"token={token}&avatar=29d97979ab4421")[0] == 200
+          and state.account("tuber")["avatar"] == "29d97979ab4421")
+    code, body = req("GET", "/download/config.txt")
+    check("config download", code == 200 and body.decode().startswith(f"server=127.0.0.1:{httpd.server_address[1]}\n"))
+    code, body = req("GET", "/download/xenithos-xbox360.zip")
+    with zipfile.ZipFile(io.BytesIO(body)) as z:
+        names = set(z.namelist())
+        cfg_text = z.read("xenith/config.txt").decode()
+    check("xbox zip", code == 200 and {"apps/game.elf32", "apps/game.txt", "apps/game.ximg", "xenith/config.txt",
+                                       "README.txt"} <= names and cfg_text.startswith("server=127.0.0.1:"))
+    check("install.sh missing is 404", req("GET", "/install.sh")[0] == 404)
+    with open(os.path.join(dl_dir, "install.sh"), "w") as f:
+        f.write('SERVER="@XENITHOS_SERVER@"\nSOURCE_URL="@XENITHOS_SOURCE@"\n')
+    code, body = req("GET", "/install.sh")
+    check("install.sh filled in", code == 200 and f'SERVER="127.0.0.1:{httpd.server_address[1]}"'.encode() in body
+          and b"/download/xenithos-source.tar.gz" in body)
+
+    # Tube, with stand-in yt-dlp and ffmpeg
+    tform = f"token={token}"
+    check("tube needs a profile", req("POST", "/v1/tube/search", "q=doom")[0] == 401)
+    code, body = req("POST", "/v1/tube/search", tform + "&q=doom")
+    check("tube search", code == 200 and body == b"abcdefghijk|Test video One|Chan|61\n")
+    check("tube bad id", req("POST", "/v1/tube/start", tform + "&id=../x")[0] == 400)
+    code, body = req("POST", "/v1/tube/start", tform + "&id=abcdefghijk&t=5")
+    sess = kvparse(body)
+    check("tube start", code == 200 and TUBE_SID_RE.match(sess.get("session", "")) and sess.get("fps") == "20"
+          and sess.get("title") == "Test video" and sess.get("duration") == "61")
+    sid = sess.get("session", "")
+    code, first = req("GET", f"/v1/tube/chunk?s={sid}&off=0")
+    check("tube chunk", code == 200 and first.startswith(b"RIFF") and b"movi00dc" in first)
+    check("tube chunk again", req("GET", f"/v1/tube/chunk?s={sid}&off=0") == (200, first))
+    check("tube chunk out of order", req("GET", f"/v1/tube/chunk?s={sid}&off=3")[0] == 400)
+    code, _ = req("GET", f"/v1/tube/chunk?s={sid}&off={len(first)}")
+    check("tube stream ends", code == 410 and req("GET", f"/v1/tube/chunk?s={sid}&off={len(first)}")[0] == 410)
+    check("tube stop", req("GET", f"/v1/tube/stop?s={sid}")[0] == 200)
+    check("tube thumb bad id", req("GET", "/v1/tube/thumb/..x.jpg")[0] == 404)
+
     reloaded = State(os.path.join(tmp, "state"))
     check("state persists", reloaded.data["motd"] == "Game night 9PM"
-          and reloaded.account("owen")["avatar"] == "1333333333")
+          and reloaded.account("tuber")["avatar"] == "29d97979ab4421")
 
     httpd.shutdown()
     shutil.rmtree(tmp)

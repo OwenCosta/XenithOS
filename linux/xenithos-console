@@ -1,0 +1,9 @@
+#!/bin/sh
+# Leave desktop mode and go back to XenithOS (console mode). The "Return to XenithOS" entry
+# in the desktop's menu runs this.
+mkdir -p "$HOME/.config/xenithos"
+echo console > "$HOME/.config/xenithos/mode"
+if command -v xfce4-session-logout >/dev/null 2>&1; then
+    exec xfce4-session-logout --logout --fast
+fi
+pkill -u "$(id -u)" -x xfce4-session || pkill -u "$(id -u)" -x Xorg

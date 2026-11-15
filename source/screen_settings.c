@@ -10,6 +10,7 @@
 #include "net.h"
 #include "platform.h"
 #include "screens.h"
+#include "startlog.h"
 #include "theme.h"
 #include "ui.h"
 
@@ -51,15 +52,16 @@ static void system_info(void)
         ui_header("System info", plat_name());
         ui_panel(M, top, w, h);
         gfx_str(FONT_BODY_SB, M + 24, top + 22, C_TEXT, "Temperatures");
-        for (i = 0; i < 4 && have; i++) {
+        for (i = 0, y = top + 80; i < 4 && have; i++) {
             int t = temps[i], bx = M + 130, bw = w - 130 - 90;
             uint32_t c = t >= 85 ? C_BAD : t >= 70 ? C_WARN : C_OK;
-            y = top + 80 + i * 58;
+            if (t < 0) continue;            /* no sensor (PCs usually only have the CPU's) */
             gfx_str(FONT_BODY, M + 24, y, C_SUB, names[i]);
             gfx_fill_rrect((float)bx, y + 10.0f, (float)bw, 8, 4, C_SURFACE2, 255);
             gfx_fill_rrect((float)bx, y + 10.0f, bw * (t > 100 ? 100 : t < 0 ? 0 : t) / 100.0f, 8, 4, c, 255);
             snprintf(v, sizeof v, "%d C", t);
             gfx_str_r(FONT_BODY_SB, M + w - 24, y, C_TEXT, v);
+            y += 58;
         }
         {
             /* Live numbers for diagnosing speed and sound on the real console. */
@@ -69,33 +71,48 @@ static void system_info(void)
             int ms = ui_frame_ms();
             audio_get_stats(&as);
             snprintf(vals[0], 48, "%d ms (%d fps)", ms, ms > 16 ? 1000 / (ms ? ms : 1) : 60);
-            snprintf(vals[1], 48, "%s", as.threaded ? "Own thread" : "Main thread");
+            snprintf(vals[1], 48, "%s", as.threaded ? "Own thread" : as.thread_failed ? "Main thread (helper stopped)" : "Main thread");
             snprintf(vals[2], 48, "%d ms, chip %d ms", as.queue_ms, as.chip_ms);
             snprintf(vals[3], 48, "%d", as.dropouts);
-            y = top + 312;
+            y = top + 296;
             gfx_str(FONT_BODY_SB, M + 24, y, C_TEXT, "Sound and speed");
             for (i = 0; i < 4; i++) {
-                y += 40;
+                y += 36;
                 gfx_str(FONT_BODY, M + 24, y, C_SUB, k[i]);
                 gfx_str_r(FONT_BODY_SB, M + w - 24, y, C_TEXT, vals[i]);
             }
         }
         ui_panel(M + w + 24, top, w, h);
         y = top + 22;
-        gfx_str(FONT_BODY_SB, M + w + 48, y, C_TEXT, "This console");
+        gfx_str(FONT_BODY_SB, M + w + 48, y, C_TEXT, plat_kind() == PLAT_XBOX ? "This console" : "This machine");
         y += 56;
         {
-            const char *k[6] = {"Software", "Video output", "Resolution", "Processor", "Network", "Server"};
+            const char *k[6] = {"Software", "Video output", "Resolution", "Processor", "Network", "XenithOS Cloud"};
             char vals[6][64];
             snprintf(vals[0], 64, "XenithOS %s", XENITH_VERSION);
             snprintf(vals[1], 64, "%s", plat_video_out());
             snprintf(vals[2], 64, "%d x %d", SCR_W, SCR_H);
-            snprintf(vals[3], 64, "Xenon, 3 cores at 3.2 GHz");
+            snprintf(vals[3], 64, "%s", plat_cpu_name());
             snprintf(vals[4], 64, "%s", net_is_up() ? net_ip() : "Not connected");
-            snprintf(vals[5], 64, "%s", cfg.server[0] ? cfg.server : "Not set");
-            for (i = 0; i < 6; i++, y += 48) {
+            snprintf(vals[5], 64, "%s", !cfg.server[0] ? "Not set up" : net_is_up() ? "Connected" : "Offline");
+            for (i = 0; i < 6; i++, y += 44) {
                 gfx_str(FONT_BODY, M + w + 48, y, C_SUB, k[i]);
-                gfx_str_r(FONT_BODY_SB, M + 2 * w, y, C_TEXT, vals[i]);
+                gfx_str_fit(FONT_BODY_SB, M + 2 * w - gfx_str_w(FONT_BODY_SB, vals[i]) < M + w + 230 ? M + w + 230 : M + 2 * w - gfx_str_w(FONT_BODY_SB, vals[i]), y, C_TEXT, vals[i], M + 2 * w - (M + w + 230));
+            }
+        }
+        {
+            /* How long starting up took, to find what makes starts slow. */
+            char line[200];
+            y += 8;
+            gfx_str(FONT_BODY_SB, M + w + 48, y, C_TEXT, "Start-up times");
+            y += 38;
+            startlog_summary(line, sizeof line);
+            gfx_str_fit(FONT_SMALL, M + w + 48, y, C_SUB, "XenithOS", w - 48);
+            gfx_str_fit(FONT_SMALL, M + w + 150, y, C_TEXT, line, w - 150);
+            y += 30;
+            if (startlog_last_app(line, sizeof line)) {
+                gfx_str_fit(FONT_SMALL, M + w + 48, y, C_SUB, "Last app", w - 48);
+                gfx_str_fit(FONT_SMALL, M + w + 150, y, C_TEXT, line, w - 150);
             }
         }
         ui_hints("B=Back");
@@ -262,7 +279,7 @@ void screen_settings(void)
                 else if (sel == S_CONTROLLER) controller_test();
                 else if (sel == S_ABOUT) about();
                 else if (sel == S_SIGN_OUT) {
-                    if (ui_confirm("Sign out?", "Your profile stays on the server.", "Sign out", "Cancel")) {
+                    if (ui_confirm("Sign out?", "Your profile stays on XenithOS Cloud.", "Sign out", "Cancel")) {
                         profile_clear();
                         sel = 0;
                     }

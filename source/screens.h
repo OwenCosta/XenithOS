@@ -19,10 +19,8 @@ void kv_get(const char *body, const char *key, char *out, int size);
 int  split_fields(char *line, char **f, int max);
 const char *cloud_error_text(struct http_resp *r, int status);
 
-/* keyboard.c and avatar_editor.c */
-#define KB_TEXT 0
-#define KB_PIN  1
-int keyboard(const char *title, const char *hint, char *buf, int maxlen, int mode);
+/* shared/keyboard.c and avatar_editor.c */
+#include "keyboard.h"
 int avatar_editor(char *code);              /* code is AVATAR_CODE_LEN+1 bytes; 1 if saved */
 
 #endif

@@ -22,6 +22,7 @@ mkdir -p "$work/uda:/xenith"
     [ -n "$XSIM_KEY" ] && echo "key=$XSIM_KEY"
 } > "$work/uda:/xenith/config.txt"
 [ -n "$XSIM_PROFILE" ] && cp "$XSIM_PROFILE" "$work/uda:/xenith/profile.txt"
+if [ -n "$XSIM_WAD" ]; then mkdir -p "$work/uda:/doom" && cp "$XSIM_WAD" "$work/uda:/doom/"; fi
 
 bin="${XSIM_BIN:-xsim}"
 make -s -C "$here" "$bin"

@@ -103,7 +103,7 @@ static void create_profile(void)
             http_free(&r);
             sfx(SFX_SUCCESS);
             snprintf(hello, sizeof hello, "Welcome, %s", prof.name);
-            ui_toast(hello, "Your profile is saved on your server.");
+            ui_toast(hello, "Your profile is saved to XenithOS Cloud.");
             return;
         }
         sfx(SFX_ERROR);
@@ -182,7 +182,7 @@ static void sign_out(void)
 {
     struct http_resp r;
     char form[96];
-    if (!ui_confirm("Sign out?", "Your profile stays on the server. Sign in again any time with your passcode.", "Sign out", "Cancel")) return;
+    if (!ui_confirm("Sign out?", "Your profile stays on XenithOS Cloud. Sign in again any time with your passcode.", "Sign out", "Cancel")) return;
     if (cfg.server[0] && net_is_up()) {
         snprintf(form, sizeof form, "token=%s", prof.token);
         cloud_post("/v1/accounts/logout", form, &r);
@@ -254,7 +254,7 @@ void screen_profile(void)
         }
 
         ui_bg();
-        ui_header("Profile", prof.signed_in ? "Saved on your XenithOS Cloud server" : "You're playing as a guest");
+        ui_header("Profile", prof.signed_in ? "Saved to XenithOS Cloud" : "You're playing as a guest");
         avatar_draw(prof.avatar, M, top + 10, size);
         hl = ui_ease(hl, (float)sel, 0.45f);
         if (prof.signed_in) {
@@ -280,7 +280,7 @@ void screen_profile(void)
             gfx_str(FONT_HEAD, ax, y, C_TEXT, "Guest");
             gfx_wrap(FONT_BODY, ax, y + gfx_line_h(FONT_HEAD) + 4, SCR_W - M - ax, 4, C_SUB,
                      "A profile gives you a gamertag, an avatar, and your own spot on the leaderboards. "
-                     "It's saved on your server, so it follows you to any console running XenithOS.", 4);
+                     "It's saved to XenithOS Cloud, so it follows you to any machine running XenithOS.", 4);
             action_list(ax, y + 190, SCR_W - M - ax, acts, n, sel, hl);
         }
         ui_hints("A=Select;B=Back");

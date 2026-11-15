@@ -17,6 +17,7 @@
 #include "gfx.h"
 #include "net.h"
 #include "platform.h"
+#include "startlog.h"
 #include "theme.h"
 #include "ui.h"
 
@@ -139,7 +140,7 @@ static void upload(void)
     char form[160];
     struct http_resp r;
     int code;
-    if (!cfg.server[0]) { snprintf(result_line, sizeof result_line, "No server set in xenith/config.txt"); return; }
+    if (!cfg.server[0]) { snprintf(result_line, sizeof result_line, "XenithOS Cloud isn't set up on this machine"); return; }
     if (prof.signed_in) snprintf(form, sizeof form, "token=%s&score=%d", prof.token, score);
     else snprintf(form, sizeof form, "name=%s&score=%d", cfg.name, score);
     ui_busy_begin("Uploading your score", prof.signed_in ? prof.name : cfg.name);
@@ -166,7 +167,7 @@ static void upload(void)
                 if (strchr(err, '\n')) *strchr(err, '\n') = 0;
             }
         }
-        snprintf(result_line, sizeof result_line, "%s", err[0] ? err : code < 0 ? net_error(code) : "The server refused it.");
+        snprintf(result_line, sizeof result_line, "%s", err[0] ? err : code < 0 ? net_error(code) : "XenithOS Cloud didn't take it.");
         sfx(SFX_ERROR);
     }
     http_free(&r);
@@ -241,17 +242,22 @@ static void back_to_shell(void)
 
 int main(void)
 {
-    int uploaded = 0;
+    int uploaded = 0, started = 0;
 
+    startlog_mark("start");
     plat_init();
+    startlog_mark("video");
     gfx_init();
     ui_init();
+    ui_loading_frame("VOLT", "Loading");       /* something on screen while the rest starts */
     plat_storage_init();
+    startlog_mark("storage");
     config_load();
     settings_load();
     profile_load();
     audio_init();
     audio_set_volume(st.volume);
+    startlog_mark("sounds");
     srand((unsigned)plat_time_us());
 
     CELL = SCR_H >= 600 ? 24 : 16;
@@ -299,5 +305,6 @@ int main(void)
         }
         draw();
         ui_end_frame();
+        if (!started) { started = 1; startlog_ready("VOLT"); }
     }
 }

@@ -17,7 +17,7 @@ SOURCES		:=	source doomgeneric ../../shared
 DATA		:=
 INCLUDES	:=	doomgeneric ../../shared
 
-CFLAGS		=	-g -O2 -Wall -Wno-unused -Wno-pointer-sign -Wno-format-truncation -Wno-stringop-truncation -DNORMALUNIX -D_DEFAULT_SOURCE -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200 $(MACHDEP) $(INCLUDE)
+CFLAGS		=	-g -O2 -Wall -Wno-unused -DFEATURE_SOUND -Wno-pointer-sign -Wno-format-truncation -Wno-stringop-truncation -DNORMALUNIX -D_DEFAULT_SOURCE -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200 $(MACHDEP) $(INCLUDE)
 CXXFLAGS	=	$(CFLAGS)
 LDFLAGS		=	-g $(MACHDEP) -Wl,--gc-sections -Wl,-Map,$(notdir $@).map
 

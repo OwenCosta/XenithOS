@@ -28,7 +28,7 @@ struct xenith_profile {
     int signed_in;
     char name[20];
     char token[64];
-    char avatar[12];
+    char avatar[16];          /* up to AVATAR_CODE_LEN + 1 */
     char joined[16];
 };
 

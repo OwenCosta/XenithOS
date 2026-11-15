@@ -1,7 +1,7 @@
 #!/bin/sh
-# Admin helper for XENITH Cloud on the VPS. Run as root.
-#   xenith send "Dinner is ready"     message shows up in the Xbox's CLOUD inbox
-#   xenith motd "Game night at 9"     banner at the top of the CLOUD screen
+# Admin helper for XenithOS Cloud. Run as root on the server.
+#   xenith send "XenithOS 0.5 is out" a news post: everyone sees it on the Cloud screen
+#   xenith motd "Welcome"             banner at the top of the Cloud screen
 #   xenith status                     service state and the last log lines
 set -e
 if [ "$1" = "status" ]; then

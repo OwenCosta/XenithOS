@@ -7,7 +7,8 @@
 
 #include "audio.h"
 #include "gfx.h"
-#include "screens.h"
+#include "platform.h"
+#include "keyboard.h"
 #include "theme.h"
 #include "ui.h"
 
@@ -82,14 +83,30 @@ int keyboard(const char *title, const char *hint, char *buf, int maxlen, int mod
     layout(mode);
     if (mode == KB_TEXT && buf[0]) shift = 0;
     ui_fade_in();
+    plat_text_input(1);
 
     for (;;) {
-        int cols = mode == KB_PIN ? 3 : 10, dx, dy, len = (int)strlen(buf);
+        int cols = mode == KB_PIN ? 3 : 10, dx, dy, len = (int)strlen(buf), nt;
         float total = cols * unit - gap, ox = (SCR_W - total) / 2.0f;
         int fy = HEADER_H + 40, ky = fy + 110;
         struct key *k = &keys[sel];
+        char typed[32];
 
         ui_poll();
+
+        /* A real keyboard, where there is one: type straight into the field. */
+        nt = plat_text_take(typed, sizeof typed);
+        for (i = 0; i < nt; i++) {
+            char c = typed[i];
+            len = (int)strlen(buf);
+            if (c == '\n') { sfx(SFX_SELECT); plat_text_input(0); return 1; }
+            if (c == '\b') { if (len) buf[len - 1] = 0; sfx(SFX_KEY); continue; }
+            if (mode == KB_PIN ? !isdigit((unsigned char)c) : !(isalnum((unsigned char)c) || c == ' ')) continue;
+            if (c == ' ' && (!len || buf[len - 1] == ' ')) continue;
+            if (len < maxlen) { buf[len] = c; buf[len + 1] = 0; sfx(SFX_KEY); }
+            else sfx(SFX_ERROR);
+        }
+        len = (int)strlen(buf);
         dx = ui_nav_x();
         dy = ui_nav_y();
         if (dx) {
@@ -106,7 +123,7 @@ int keyboard(const char *title, const char *hint, char *buf, int maxlen, int mod
         k = &keys[sel];
 
         if (PRESSED(a)) {
-            if (k->code == K_DONE) { sfx(SFX_SELECT); return 1; }
+            if (k->code == K_DONE) { sfx(SFX_SELECT); plat_text_input(0); return 1; }
             if (k->code == K_SHIFT) { shift = !shift; sfx(SFX_KEY); }
             else if (k->code == K_DEL) { if (len) buf[len - 1] = 0; sfx(SFX_KEY); }
             else if (k->code == K_SPACE) {
@@ -122,7 +139,7 @@ int keyboard(const char *title, const char *hint, char *buf, int maxlen, int mod
                 sfx(SFX_ERROR);
             }
         } else if (PRESSED(b) || PRESSED(x)) {
-            if (!len && PRESSED(b)) { sfx(SFX_BACK); return 0; }
+            if (!len && PRESSED(b)) { sfx(SFX_BACK); plat_text_input(0); return 0; }
             if (len) buf[len - 1] = 0;
             sfx(SFX_KEY);
         } else if (PRESSED(y) && mode == KB_TEXT) {
@@ -130,6 +147,7 @@ int keyboard(const char *title, const char *hint, char *buf, int maxlen, int mod
             sfx(SFX_KEY);
         } else if (PRESSED(start)) {
             sfx(SFX_SELECT);
+            plat_text_input(0);
             return 1;
         } else if (PRESSED(lb) && mode == KB_TEXT) {
             shift = !shift;

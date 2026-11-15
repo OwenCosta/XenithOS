@@ -8,6 +8,7 @@
 #include "config.h"
 #include "icons.h"
 #include "net.h"
+#include "platform.h"
 #include "screens.h"
 #include "ui.h"
 
@@ -47,7 +48,7 @@ const char *cloud_error_text(struct http_resp *r, int status)
         kv_get(r->body, "error", msg, sizeof msg);
         if (msg[0]) return msg;
     }
-    snprintf(msg, sizeof msg, "The server answered with error %d.", status);
+    snprintf(msg, sizeof msg, "XenithOS Cloud answered with error %d.", status);
     return msg;
 }
 
@@ -56,7 +57,7 @@ int cloud_ready(const char *title)
     (void)title;
     if (!cfg.server[0]) {
         sfx(SFX_ERROR);
-        ui_message("No server set", "Add a line like server=203.0.113.10:8795 to xenith/config.txt on the USB stick.");
+        ui_message("XenithOS Cloud isn't set up", "This copy of XenithOS doesn't have the XenithOS Cloud address. Download XenithOS again from its website, which includes it.");
         return 0;
     }
     if (net_is_up()) return 1;
@@ -64,7 +65,10 @@ int cloud_ready(const char *title)
     audio_prepare_stall();
     if (!net_up()) {
         sfx(SFX_ERROR);
-        ui_message("No network", "Plug an Ethernet cable into the back of the Xbox, then try again. XenithOS can't use Wi-Fi.");
+        if (plat_kind() == PLAT_XBOX)
+            ui_message("No network", "Plug an Ethernet cable into the back of the Xbox, then try again. XenithOS can't use Wi-Fi on the Xbox.");
+        else
+            ui_message("No network", "This machine isn't connected to the internet. Connect it, then try again.");
         return 0;
     }
     return 1;
@@ -80,15 +84,13 @@ int cloud_get(const char *path, int max, struct http_resp *r)
     return http_request(cfg.server, "GET", path, NULL, 0, max, NULL, NULL, r);
 }
 
-/* Show newer inbox messages as a toast. */
+/* Show newer XenithOS Cloud news as a toast. */
 static void check_inbox(void)
 {
     struct http_resp r;
-    char path[128], *line, *f[3];
+    char *line, *f[3];
     int st_code;
-    if (!cfg.key[0]) return;
-    snprintf(path, sizeof path, "/v1/inbox?key=%s", cfg.key);
-    st_code = cloud_get(path, 16 * 1024, &r);
+    st_code = cloud_get("/v1/news", 16 * 1024, &r);
     if (st_code == 200 && r.body_len) {
         line = r.body;
         {
@@ -101,7 +103,7 @@ static void check_inbox(void)
                 st.last_inbox = id;
                 settings_save();
                 ui_toast_icon(ICON_MAIL);
-                ui_toast("New message", f[2]);
+                ui_toast("XenithOS news", f[2]);
                 sfx(SFX_NOTIFY);
             }
         }

@@ -15,6 +15,7 @@
 #include <xenon_soc/xenon_power.h>
 #include <xenon_smc/xenon_smc.h>
 #include <xenon_sound/sound.h>
+#include <pci/io.h>
 
 #include "platform.h"
 #include "tiled.h"
@@ -41,6 +42,9 @@ void plat_init(void)
     struct ati_info *ai;
     int off_x = 0, off_y = 0;
 
+    /* If the program before this one left the sound chip running, it's now playing whatever
+     * this program was loaded over. Stop it before anything else. */
+    plat_audio_stop();
     xenos_init(VIDEO_MODE_AUTO);
     xenon_make_it_faster(XENON_SPEED_FULL);
 
@@ -135,6 +139,13 @@ int plat_audio_queued(void)
     return xenon_sound_get_unplayed() / 4;
 }
 
+void plat_audio_stop(void)
+{
+    /* The sound DMA's control register (xenon_sound_init starts from the same write).
+     * Stopped, the chip can't replay its last block over and over. */
+    write32(0xea001600 + 8, 0);
+}
+
 void plat_audio_submit(const int16_t *stereo, int frames)
 {
     /* The sound chip wants little-endian 16-bit stereo; the CPU is big-endian.
@@ -220,11 +231,25 @@ void plat_set_launch_hooks(void (*before)(void), void (*failed)(void))
 
 /* ---------------------------------------------------------------- storage */
 
+/* Only the USB ports. libxenon's hard drive set-up always waits a full second and the DVD
+ * set-up another 0.35 s, on every start of every program; XenithOS reads neither (the hard
+ * drive is FATX, which libfat can't read). The stick can take a moment to show up after
+ * usb_init, so keep trying for up to 2 seconds. */
+extern DISC_INTERFACE usb2mass_ops_0, usb2mass_ops_1, usb2mass_ops_2;
+
 void plat_storage_init(void)
 {
-    xenon_ata_init();
-    xenon_atapi_init();
-    fatInitDefault();
+    static const char *const names[3] = {"uda", "udb", "udc"};
+    DISC_INTERFACE *const io[3] = {&usb2mass_ops_0, &usb2mass_ops_1, &usb2mass_ops_2};
+    int mounted[3] = {0, 0, 0}, any = 0, tries, i;
+    for (tries = 0; tries < 40 && !any; tries++) {
+        for (i = 0; i < 3; i++)
+            if (!mounted[i] && fatMount(names[i], io[i], 0, 32, 64)) mounted[i] = any = 1;
+        if (!any) {
+            usb_do_poll();
+            mdelay(50);
+        }
+    }
 }
 
 int plat_bdev_next(int handle, const char **name)
@@ -264,22 +289,43 @@ const char *plat_name(void)
     return "Xbox 360";
 }
 
-void plat_launch(const char *path)
+const char *plat_cpu_name(void)
+{
+    return "Xenon, 3 cores at 3.2 GHz";
+}
+
+int plat_kind(void)
+{
+    return PLAT_XBOX;
+}
+
+int plat_launch(const char *path)
 {
     if (hook_before) hook_before();
+    plat_audio_stop();
     plat_rumble(0, 0);
     elf_runFromDisk((char *)path);
     if (hook_failed) hook_failed();
+    return 0;
 }
+
+void plat_text_input(int on) { (void)on; }
+int plat_text_take(char *out, int n) { (void)out; (void)n; return 0; }
 
 void plat_reboot(void)
 {
     if (hook_before) hook_before();
+    plat_audio_stop();
     xenon_smc_power_reboot();
 }
 
 void plat_power_off(void)
 {
     if (hook_before) hook_before();
+    plat_audio_stop();
     xenon_smc_power_shutdown();
 }
+
+int plat_can_exit_to_loader(void) { return 1; }
+int plat_has_desktop(void) { return 0; }
+void plat_switch_to_desktop(void) { }

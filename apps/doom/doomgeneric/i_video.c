@@ -459,6 +459,7 @@ int I_GetPaletteIndex (int r, int g, int b)
 
 void I_BeginRead (void)
 {
+    DG_OnRead();            /* XenithOS: keeps the loading screen moving */
 }
 
 void I_EndRead (void)

@@ -27,6 +27,15 @@ Checks for things that only exist on the console:
 At the end the simulator prints the average and worst time a frame took to draw on your PC, and how many
 times the sound ran dry ("dropouts"). Compare frame times before and after a change with the same script.
 
+More switches:
+
+- `XSIM_KIND=pc` acts like the PC and Raspberry Pi version (desktop mode in the power menu, game data only in
+  the Store).
+- `XSIM_TYPE="text"` types that text the first time the on-screen keyboard opens, as a real keyboard would
+  (`|` is Enter).
+- `XSIM_BIN=xdoom XSIM_WAD=path/to/freedoom1.wad` runs DOOM (`sim/scripts/doom.txt`), and `XSIM_BIN=xtube`
+  runs Tube against a XenithOS Cloud with yt-dlp and ffmpeg (`sim/scripts/tube.txt`, use `XSIM_THREAD=1`).
+
 ## Scripts
 
 One command per line; each controller poll is one frame.

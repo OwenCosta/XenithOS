@@ -20,10 +20,15 @@
 #include "doomgeneric.h"
 #include "doomkeys.h"
 
+#include "audio.h"
+#include "../../../shared/config.h"     /* doomgeneric has a config.h of its own */
 #include "gfx.h"
 #include "platform.h"
+#include "startlog.h"
 #include "theme.h"
+#include "ui.h"
 
+#undef STICK_TH
 #define STICK_TH 16000
 #define TRIGGER_TH 100
 
@@ -113,6 +118,29 @@ static void poll_pad(void)
     }
 }
 
+/* ---------------------------------------------------------- loading */
+
+/* Doom reads a lot of its WAD before the first frame. Until then a loading screen is shown,
+ * redrawn from DG_OnRead (called before every read) so the spinner keeps turning. */
+static int loading = 1, first_frame_done;
+static uint64_t loading_drawn;
+
+static void loading_screen(void)
+{
+    int cy = SCR_H / 2;
+    ui_bg();
+    ui_spinner(SCR_W / 2, cy - 44, 24, C_ACCENT);
+    gfx_str_c(FONT_LABEL, SCR_W / 2, cy + 6, C_TEXT, "DOOM");
+    gfx_str_c(FONT_BODY, SCR_W / 2, cy + 46, C_SUB, "Loading the game data");
+    gfx_present();
+    loading_drawn = plat_time_us();
+}
+
+void DG_OnRead(void)
+{
+    if (loading && plat_time_us() - loading_drawn > 66000) loading_screen();
+}
+
 /* ---------------------------------------------------------- doomgeneric */
 static int dst_x, dst_y, dst_w, dst_h;
 
@@ -126,14 +154,18 @@ void DG_Init(void)
     }
     dst_x = (SCR_W - dst_w) / 2;
     dst_y = (SCR_H - dst_h) / 2;
-    gfx_clear(0);
-    gfx_present();
+    loading = 0;
+    gfx_clear(0);          /* the bars beside the picture; the first frame shows it */
 }
 
 void DG_DrawFrame(void)
 {
     gfx_blit_scaled(DG_ScreenBuffer, DOOMGENERIC_RESX, DOOMGENERIC_RESY, dst_x, dst_y, dst_w, dst_h);
     gfx_present();
+    if (!first_frame_done) {
+        first_frame_done = 1;
+        startlog_ready("DOOM");
+    }
     poll_pad();
 }
 
@@ -208,11 +240,21 @@ int main(void)
     static char wad[64];
     static char *args[] = {"doom", "-iwad", wad, NULL};
 
+    startlog_mark("start");
     plat_init();
+    startlog_mark("video");
     gfx_init();
+    ui_init();
+    loading_screen();
     plat_storage_init();
+    startlog_mark("storage");
+    settings_load();
+    audio_init_opts(0);                /* the mixer only: Doom brings its own sounds */
+    audio_set_volume(st.volume);
+    startlog_mark("sounds");
 
     if (!find_wad(wad, sizeof wad)) {
+        loading = 0;
         no_wad_screen();
         back_to_xenith();
         return 0;
@@ -222,6 +264,7 @@ int main(void)
     atexit(back_to_xenith);       /* Doom's Quit, and its fatal errors, return to XenithOS */
 
     doomgeneric_Create(3, args);
+    startlog_mark("game data");
     for (;;)
         doomgeneric_Tick();
     return 0;

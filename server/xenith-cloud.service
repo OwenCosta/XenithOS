@@ -1,5 +1,5 @@
 [Unit]
-Description=XENITH Cloud (Xbox 360 XENITH server: store, inbox, leaderboards, stats)
+Description=XenithOS Cloud (profiles, Store, news, leaderboards, Tube, website)
 After=network-online.target
 Wants=network-online.target
 
@@ -10,6 +10,7 @@ Environment=XENITH_PORT=8795
 Environment=XENITH_STATE_DIR=/var/lib/xenith-cloud
 Environment=XENITH_STORE_DIR=/opt/xenith-cloud/store
 Environment=XENITH_WEB_DIR=/opt/xenith-cloud/web
+Environment=XENITH_DOWNLOAD_DIR=/opt/xenith-cloud/downloads
 Restart=always
 RestartSec=3
 
@@ -23,12 +24,15 @@ NoNewPrivileges=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-RestrictAddressFamilies=AF_INET AF_INET6
+# AF_UNIX and AF_NETLINK: name lookups by yt-dlp and ffmpeg for Tube
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 RestrictNamespaces=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
-MemoryMax=256M
+# Tube's ffmpeg runs inside this service: room for a few videos, and CPU left for everything else.
+MemoryMax=1G
+CPUQuota=250%
 
 [Install]
 WantedBy=multi-user.target

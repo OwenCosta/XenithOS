@@ -114,7 +114,10 @@ static int load_store(void)
             snprintf(it->sha, sizeof it->sha, "%s", f[5]);
             snprintf(it->file, sizeof it->file, "%s", f[6]);
             snprintf(it->desc, sizeof it->desc, "%s", f[7]);
-            if (it->size > 0 && strlen(it->sha) == 64 && item_dest(it)) {
+            /* The Store's apps and system updates are Xbox programs. On a PC or Pi the apps
+             * come with XenithOS itself, so only game data is offered there. */
+            int fits = plat_kind() == PLAT_XBOX || !strcmp(it->kind, "data");
+            if (fits && it->size > 0 && strlen(it->sha) == 64 && item_dest(it)) {
                 update_state(it);
                 nitems++;
             }
@@ -309,7 +312,7 @@ void screen_store(void)
         hl = ui_ease(hl, (float)(sel - first), 0.4f);
 
         ui_bg();
-        ui_header("Store", "Apps, games and updates from XenithOS Cloud");
+        ui_header("Store", plat_kind() == PLAT_XBOX ? "Apps, games and updates from XenithOS Cloud" : "Game data from XenithOS Cloud. Apps come with XenithOS here.");
         if (!nitems) {
             gfx_str(FONT_LABEL, M, top + 10, C_TEXT, "The Store is empty");
         } else {

@@ -1,0 +1,22 @@
+# DOOM: loading screen, title, start a game on the first map, shoot and walk.
+# Needs a real WAD in uda:/doom/ (XSIM_WAD=path/to/freedoom1.wad).
+wait 2
+shot doom_loading
+wait 300
+shot doom_title
+press start
+wait 20
+press a
+wait 20
+press a
+wait 20
+press a
+wait 150
+shot doom_play
+hold rt 20
+wait 30
+stick ly 30000 60
+shot doom_walk
+hold rt 20
+wait 40
+quit

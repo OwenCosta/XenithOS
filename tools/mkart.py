@@ -84,6 +84,15 @@ def freedoom(phase, bg, sub):
     return img
 
 
+def tube():
+    img = Image.new("RGB", (W, H), (14, 17, 26))
+    d = ImageDraw.Draw(img)
+    d.polygon([(26, 44), (26, 100), (74, 72)], fill=(47, 125, 255))
+    d.text((92, 34), "TUBE", font=font("Black", 66), fill=(236, 241, 250))
+    d.text((26, 128), "Videos from YouTube", font=font("Medium", 20), fill=(156, 168, 192))
+    return img
+
+
 def xenith():
     img = Image.new("RGB", (W, H), (9, 13, 22))
     d = ImageDraw.Draw(img)
@@ -101,6 +110,7 @@ def main():
     art = {
         "volt": volt(),
         "doom": doom(),
+        "tube": tube(),
         "freedoom1": freedoom(1, (19, 32, 26), (143, 181, 154)),
         "freedoom2": freedoom(2, (35, 20, 20), (214, 160, 143)),
         "xenith": xenith(),

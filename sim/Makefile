@@ -11,7 +11,21 @@ LDLIBS  := -lz -lm
 
 VOLT    := ../apps/volt/source/volt.c $(SHARED) platform_sim.c net_sim.c
 
-all: xsim xvolt
+# DOOM: doomgeneric's 1990s C trips the undefined-behaviour checker all over, so this one is
+# checked for memory errors only.
+DOOM    := $(wildcard ../apps/doom/doomgeneric/*.c) $(wildcard ../apps/doom/source/*.c) $(SHARED) platform_sim.c net_sim.c
+DOOMFLAGS := -O1 -g -std=gnu11 -w -fsanitize=address -fno-omit-frame-pointer -I../apps/doom/doomgeneric -I../shared \
+           -DXENITH_SIM -DFEATURE_SOUND -DNORMALUNIX -D_DEFAULT_SOURCE -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200
+
+TUBE    := $(wildcard ../apps/tube/source/*.c) $(SHARED) platform_sim.c net_sim.c
+
+all: xsim xvolt xdoom xtube
+
+# stb_image is checked for memory errors only (it does its own careful casting).
+xtube: $(TUBE) $(HDRS)
+	$(CC) $(filter-out -fsanitize=address$(comma)undefined,$(CFLAGS)) -fsanitize=address -I../apps/tube/source $(TUBE) -o $@ $(LDLIBS)
+
+comma := ,
 
 xsim: $(SRC) $(HDRS)
 	$(CC) $(CFLAGS) $(SRC) -o $@ $(LDLIBS)
@@ -19,5 +33,8 @@ xsim: $(SRC) $(HDRS)
 xvolt: $(VOLT) $(HDRS)
 	$(CC) $(CFLAGS) $(VOLT) -o $@ $(LDLIBS)
 
+xdoom: $(DOOM) $(HDRS)
+	$(CC) $(DOOMFLAGS) $(DOOM) -o $@ $(LDLIBS)
+
 clean:
-	rm -f xsim xvolt
+	rm -f xsim xvolt xdoom xtube

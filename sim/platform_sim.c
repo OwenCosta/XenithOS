@@ -427,12 +427,45 @@ int plat_temps(int c[4])
 
 const char *plat_video_out(void) { return "HDMI"; }
 const char *plat_name(void) { return "Simulator"; }
+const char *plat_cpu_name(void) { return "Simulated"; }
 
-void plat_launch(const char *path)
+/* XSIM_KIND=pc makes the simulator act like the PC / Raspberry Pi build (desktop mode switch,
+ * no XeLL), so those screens can be checked too. */
+static int sim_is_pc(void)
+{
+    const char *k = getenv("XSIM_KIND");
+    return k && !strcmp(k, "pc");
+}
+int plat_kind(void) { return sim_is_pc() ? PLAT_PC : PLAT_XBOX; }
+int plat_can_exit_to_loader(void) { return !sim_is_pc(); }
+int plat_has_desktop(void) { return sim_is_pc(); }
+void plat_switch_to_desktop(void)
+{
+    if (hook_before) hook_before();
+    fprintf(stderr, "sim: switch to desktop mode\n");
+    finish(0);
+}
+void plat_audio_stop(void) { }
+
+int plat_launch(const char *path)
 {
     if (hook_before) hook_before();
     fprintf(stderr, "sim: launch %s (not possible in the simulator)\n", path);
     if (hook_failed) hook_failed();
+    return sim_is_pc();        /* as on a PC: the "app" ran and came back */
+}
+
+/* Typing on a real keyboard: XSIM_TYPE="text" is typed the first time typing is switched on. */
+static int typing_on, typed_once;
+void plat_text_input(int on) { typing_on = on; }
+int plat_text_take(char *out, int n)
+{
+    const char *t = getenv("XSIM_TYPE");
+    int i;
+    if (!typing_on || typed_once || !t) return 0;
+    typed_once = 1;
+    for (i = 0; t[i] && i < n; i++) out[i] = t[i] == '|' ? '\n' : t[i];
+    return i;
 }
 
 void plat_reboot(void) { if (hook_before) hook_before(); fprintf(stderr, "sim: reboot\n"); finish(0); }

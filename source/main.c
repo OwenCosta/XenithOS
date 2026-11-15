@@ -17,6 +17,7 @@
 #include "net.h"
 #include "platform.h"
 #include "screens.h"
+#include "startlog.h"
 #include "theme.h"
 #include "ui.h"
 
@@ -35,12 +36,15 @@ static void boot(void)
     gfx_present();
 
     plat_storage_init();
+    startlog_mark("storage");
     config_load();
     settings_load();
     profile_load();
+    startlog_mark("settings");
     audio_init();
     audio_set_volume(st.volume);
     audio_set_ui_sounds(st.ui_sounds);
+    startlog_mark("sounds");
     if (st.boot_sound) sfx(SFX_BOOT);
 
     start = ui_ms();
@@ -166,15 +170,38 @@ static void go_online(void)
     }
 }
 
+/* Returns 1 to leave XenithOS (back to XeLL on the Xbox). */
 static int power_menu(void)
 {
-    static const char *const opts[] = {"Restart", "Turn off", "Exit to XeLL", "Cancel"};
-    int c;
     draw_home();
-    c = ui_dialog("Power", "XenithOS stays on your USB stick. Starting it again needs the exploit unless you have RGH.", opts, 4);
-    if (c == 0) plat_reboot();
-    if (c == 1) plat_power_off();
-    return c == 2;
+    if (plat_kind() == PLAT_XBOX) {
+        static const char *const opts[] = {"Restart", "Turn off", "Exit to XeLL", "Cancel"};
+        int c = ui_dialog("Power", "XenithOS stays on your USB stick. Starting it again needs the exploit unless you have RGH.", opts, 4);
+        if (c == 0) plat_reboot();
+        if (c == 1) plat_power_off();
+        return c == 2;
+    } else {
+        const char *opts[4];
+        int n = 0, desk = -1, c;
+        if (plat_has_desktop()) { desk = n; opts[n++] = "Switch to desktop mode"; }
+        opts[n++] = "Restart";
+        opts[n++] = "Turn off";
+        opts[n++] = "Cancel";
+        c = ui_dialog("Power", plat_has_desktop()
+                      ? "Desktop mode opens the full Linux desktop. Return to XenithOS from its menu or desktop icon."
+                      : "Restart or turn off this machine.", opts, n);
+        if (c >= 0 && c == desk) {
+            ui_loading_frame("Switching to desktop mode", "One moment");
+            plat_switch_to_desktop();
+            sfx(SFX_ERROR);
+            ui_message("Couldn't switch", "Desktop mode isn't set up on this machine.");
+        } else if (c >= 0 && !strcmp(opts[c], "Restart")) {
+            plat_reboot();
+        } else if (c >= 0 && !strcmp(opts[c], "Turn off")) {
+            plat_power_off();
+        }
+        return 0;
+    }
 }
 
 static void open_tile(int t)
@@ -193,7 +220,9 @@ static void open_tile(int t)
 
 int main(void)
 {
+    startlog_mark("start");
     plat_init();
+    startlog_mark("video");
     gfx_init();
     ui_init();
     boot();
@@ -202,6 +231,7 @@ int main(void)
     ui_fade_in();
     draw_home();
     ui_end_frame();
+    startlog_mark("boot screen");
     if (st.auto_connect) go_online();
 
     for (;;) {
@@ -237,5 +267,6 @@ int main(void)
 
     plat_rumble(0, 0);
     audio_shutdown();
+    plat_audio_stop();
     return 0;   /* back to XeLL */
 }

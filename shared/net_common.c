@@ -33,14 +33,14 @@ void net_idle(void)
 const char *net_error(int status)
 {
     switch (status) {
-    case NE_NO_NETWORK: return "No network. Plug an Ethernet cable into the Xbox.";
-    case NE_BAD_HOST:   return "No server address is set in xenith/config.txt.";
-    case NE_CONNECT:    return "Couldn't reach the server.";
+    case NE_NO_NETWORK: return plat_kind() == PLAT_XBOX ? "No network. Plug an Ethernet cable into the Xbox." : "No network connection.";
+    case NE_BAD_HOST:   return "XenithOS Cloud isn't set up on this machine.";
+    case NE_CONNECT:    return "Couldn't reach XenithOS Cloud.";
     case NE_RESET:      return "The connection dropped.";
-    case NE_TIMEOUT:    return "The server stopped responding.";
+    case NE_TIMEOUT:    return "XenithOS Cloud stopped responding.";
     case NE_TOO_BIG:    return "The reply was too large.";
     case NE_MEMORY:     return "Out of memory.";
-    case NE_BAD_REPLY:  return "The server sent something unexpected.";
+    case NE_BAD_REPLY:  return "XenithOS Cloud sent something unexpected.";
     default:            return "Network error.";
     }
 }

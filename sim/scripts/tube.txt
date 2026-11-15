@@ -1,0 +1,16 @@
+# TUBE: suggestions, a search, the results with thumbnails, then a few seconds of a video.
+# Run with XSIM_THREAD=1 (real time) against a local XenithOS Cloud that has yt-dlp and ffmpeg.
+wait 30
+shot tube_home
+press down
+press a
+wait 400
+shot tube_results
+press a
+wait 900
+shot tube_play
+wait 300
+shot tube_play2
+press b
+wait 60
+quit

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Return to XenithOS
+Comment=Leave the desktop and go back to XenithOS (console mode)
+Exec=/usr/bin/xenithos-console
+Icon=go-home
+Terminal=false
+Categories=System;

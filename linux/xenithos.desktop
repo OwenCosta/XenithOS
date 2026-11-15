@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=XenithOS (window)
+Comment=Run XenithOS in a window on the desktop
+Exec=/usr/lib/xenithos/xenithos
+Icon=applications-games
+Terminal=false
+Categories=Game;

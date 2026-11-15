@@ -10,6 +10,7 @@
 #include "icons.h"
 #include "img.h"
 #include "platform.h"
+#include "startlog.h"
 #include "theme.h"
 #include "ui.h"
 
@@ -106,9 +107,10 @@ void app_launch(const struct app *a)
     settings_save();
     sfx(SFX_LAUNCH);
     snprintf(line, sizeof line, "Starting %s", a->name);
-    while (ui_ms() - start < 700) {
-        float t = (ui_ms() - start) / 700.0f;
-        int al = (int)(255 * (t < 0.3f ? t / 0.3f : 1.0f));
+    /* Just long enough to see what's starting; the app shows its own loading screen. */
+    while (ui_ms() - start < 260) {
+        float t = (ui_ms() - start) / 260.0f;
+        int al = (int)(255 * (t < 0.5f ? t / 0.5f : 1.0f));
         ui_poll();
         ui_bg();
         if (a->thumb.px) gfx_image_rounded(&a->thumb, (SCR_W - tw) / 2, SCR_H / 2 - th / 2 - 50, tw, th, 16, al);
@@ -116,7 +118,8 @@ void app_launch(const struct app *a)
         ui_spinner(SCR_W / 2, SCR_H / 2 + th / 2 + 50, 16, C_ACCENT);
         ui_end_frame();
     }
-    plat_launch(a->path);
+    startlog_launching(a->name);
+    if (plat_launch(a->path)) return;      /* on a PC the app ran as its own program and has quit */
     sfx(SFX_ERROR);
     ui_message("Couldn't start the app", "The file may be damaged. Try installing it again from the Store.");
 }

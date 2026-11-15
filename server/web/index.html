@@ -88,6 +88,8 @@
   .kind { font: 12px var(--mono); color: var(--dim); }
   .muted { color: var(--sub); }
 
+  pre.cmd { margin: 0 0 18px; padding: 14px 16px; background: var(--panel-2); border-radius: 10px; overflow-x: auto; }
+  pre.cmd code { padding: 0; background: none; font-size: 15px; white-space: pre; }
   ol.steps { margin: 0; padding-left: 20px; max-width: 46em; }
   ol.steps li { margin-bottom: 10px; }
   .warning { margin-top: 18px; padding: 12px 14px; border-left: 3px solid var(--warn); background: #1a1409; color: #efc98f; font-size: 14px; max-width: 46em; }
@@ -127,13 +129,16 @@
 <main>
 <div class="wrap intro">
   <svg id="logo" aria-label="XenithOS"></svg>
-  <p>XenithOS is a homebrew shell for the Xbox 360. It boots from XeLL in place of the Microsoft dashboard and
-    runs its own home screen, profiles with avatars, a store that installs apps over Ethernet, and a DOOM port.</p>
-  <p class="sub">I'm building it for my old 360 S with a Trinity board. It's written in C on libxenon, and the
-    server this page runs on is also the console's cloud backend: profiles, leaderboards and the store live here.</p>
-  <div class="facts"><span id="ver">v0.4.1</span><span>C + libxenon</span><span>GPL-3.0</span><span>runs from a USB stick</span></div>
+  <p>XenithOS is a homebrew console system. It runs on an Xbox 360 in place of the Microsoft dashboard, and on
+    PCs and Raspberry Pis as a console you can switch to a normal Linux desktop. It has its own home screen,
+    profiles with avatars, a store, YouTube, DOOM and a light-trail game.</p>
+  <p class="sub">Every copy uses XenithOS Cloud, the free service this page runs on: profiles, the Store, news,
+    leaderboards and Tube (YouTube) live here, for everyone. It's written in C, on libxenon for the Xbox and
+    SDL2 everywhere else.</p>
+  <div class="facts"><span id="ver">v0.5.0</span><span>Xbox 360, PC, Raspberry Pi</span><span>GPL-3.0</span><span>free to use</span></div>
   <div class="actions">
-    <a class="btn primary" id="dl" href="v1/store/file/xenith" download="xenon.elf">Download XenithOS</a>
+    <a class="btn primary" id="dl" href="download/xenithos-xbox360.zip" download="xenithos-xbox360.zip">Download for Xbox 360</a>
+    <a class="btn" href="#pc">Install on a PC or Pi</a>
     <a class="btn" href="https://github.com/OwenCosta/XenithOS">Source code</a>
     <button class="btn" id="chime" type="button" aria-label="Play the start-up chime">&#9654; Start-up chime</button>
   </div>
@@ -153,7 +158,7 @@
 <section id="players">
   <div class="wrap">
     <h2>Players</h2>
-    <p class="lead">Profiles made on an Xbox running XenithOS. Your gamertag and avatar are stored here, so they follow you to any console.</p>
+    <p class="lead">Everyone with a XenithOS profile. Your gamertag and avatar are saved to XenithOS Cloud, so they follow you to any Xbox, PC or Pi.</p>
     <div class="players" id="playerlist"><p class="muted">Loading...</p></div>
   </div>
 </section>
@@ -174,18 +179,18 @@
 <section id="status">
   <div class="wrap">
     <h2>Where it's at</h2>
-    <p class="lead">"Works" in the Xbox column only means I've seen it working on the real console. Everything else has only run in the simulator so far.</p>
+    <p class="lead">"Works" in the Xbox column only means I've seen it working on the real console. Everything else has run in the simulator or on Linux so far.</p>
     <div class="scroll">
     <table>
       <thead><tr><th>Part</th><th>Builds</th><th>On the Xbox</th><th>Notes</th></tr></thead>
       <tbody>
-        <tr><td>Booting XenithOS from the exploit</td><td class="yes">yes</td><td class="yes">works</td><td class="note">0.3.1 and 0.4.0 booted on the 360 S</td></tr>
-        <tr><td>New interface</td><td class="yes">yes</td><td class="yes">works</td><td class="note">0.4.0 ran slowly on the console; 0.4.1 draws much less per frame</td></tr>
-        <tr><td>Sounds, keyboard, avatars</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">the chime played on 0.4.0 but the sound broke up; fixed in 0.4.1</td></tr>
-        <tr><td>Profiles, Store, Cloud</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">needs the Ethernet cable; no Wi-Fi driver</td></tr>
-        <tr><td>VOLT</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">scores go to your profile</td></tr>
-        <tr><td>DOOM</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">doomgeneric, no game sound yet</td></tr>
-        <tr><td>Cloud server and this site</td><td class="yes">yes</td><td class="live">live</td><td class="note">you're on it</td></tr>
+        <tr><td>Booting XenithOS from the exploit</td><td class="yes">yes</td><td class="yes">works</td><td class="note">0.3.1, 0.4.0 and 0.4.1 ran on the 360 S</td></tr>
+        <tr><td>Interface, Store updates</td><td class="yes">yes</td><td class="yes">works</td><td class="note">0.4.1 installed itself from the Store</td></tr>
+        <tr><td>Sound in games, app start times</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">0.5.0 stops the sound chip before an app loads and skips 1.5 s of disk set-up per start</td></tr>
+        <tr><td>Profiles, Cloud, avatars</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">needs the Ethernet cable on the Xbox; no Wi-Fi driver</td></tr>
+        <tr><td>VOLT, DOOM, Tube</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">DOOM has sound effects in 0.5.0; no music yet</td></tr>
+        <tr><td>PCs and Raspberry Pis</td><td class="yes">yes</td><td class="note">-</td><td class="note">new in 0.5.0, tested on Linux</td></tr>
+        <tr><td>XenithOS Cloud and this site</td><td class="yes">yes</td><td class="live">live</td><td class="note">you're on it</td></tr>
       </tbody>
     </table>
     </div>
@@ -194,17 +199,31 @@
 
 <section id="run">
   <div class="wrap">
-    <h2>Running it on your own 360</h2>
+    <h2>On an Xbox 360</h2>
     <p class="lead">You need a 360 on dashboard 17559, a FAT32 USB stick, the console's hard drive (for avatar data), and an Ethernet cable for the online parts.</p>
     <ol class="steps">
       <li>Put <a href="https://github.com/shutterbug2000/ABadAvatar">ABadAvatar</a> and
         <a href="https://github.com/FreeMyXe/FreeMyXe">FreeMyXe</a> on the stick, with FreeMyXe's xex renamed to <code>default.xex</code>.</li>
-      <li>Download XenithOS above and put it in the root of the stick as <code>xenon.elf</code>.</li>
+      <li><a href="download/xenithos-xbox360.zip">Download XenithOS for Xbox 360</a> and copy everything in it to the root of the stick. It already knows the XenithOS Cloud address.</li>
       <li>Unplug the network, boot the 360, and leave the ABadAvatar profile highlighted on the sign-in screen. It can take up to 20 minutes and a few tries.</li>
       <li>When FreeMyXe appears, choose <b>Launch XeLL instead</b>. XeLL loads <code>xenon.elf</code> and XenithOS starts.</li>
-      <li>Plug in Ethernet, then make a profile from the Profile tile.</li>
+      <li>Plug in Ethernet, then make a profile from the Profile tile. Updates come from the Store after that.</li>
     </ol>
     <div class="warning">FreeMyXe's warning applies: don't run anything that writes to the NAND, and don't flash a modified NAND while using it. That bricks consoles. XenithOS only writes to the USB stick.</div>
+  </div>
+</section>
+
+<section id="pc">
+  <div class="wrap">
+    <h2>On a PC or Raspberry Pi</h2>
+    <p class="lead">Install Debian 12 or newer, Ubuntu 22.04 or newer, or Raspberry Pi OS (Lite is fine), then run this as your user. It builds XenithOS and sets the machine to start straight into it.</p>
+    <pre class="cmd"><code id="installcmd">curl -fsSL http://this-server/install.sh | sudo bash</code></pre>
+    <ol class="steps">
+      <li>Restart. You're in <b>console mode</b>: XenithOS full screen, with a controller or the keyboard (arrows, Enter, Escape).</li>
+      <li><b>Desktop mode</b> is in XenithOS's power menu: the full Linux desktop, for a browser and everything else.</li>
+      <li><b>Return to XenithOS</b> in the desktop's menu goes back to console mode.</li>
+    </ol>
+    <p class="muted">Add <code>--no-desktop</code> to skip desktop mode, or run it again with <code>--uninstall</code> to undo it. More in <a href="https://github.com/OwenCosta/XenithOS/blob/main/linux/README.md">linux/README.md</a>.</p>
   </div>
 </section>
 
@@ -212,6 +231,8 @@
   <div class="wrap">
     <h2>Build log</h2>
     <ul class="log">
+      <li><b>0.5.0</b><time datetime="2026-11-15">Nov 15, 2026</time>
+        <p>XenithOS runs on PCs and Raspberry Pis, with console mode and desktop mode. Tube plays YouTube, even on the Xbox. A new avatar editor with thirteen parts in three tabs. DOOM has sound effects. Apps start faster with a loading screen instead of a black one, and the sound chip is stopped before an app loads so it can't play noise. XenithOS Cloud is now a public service with news for everyone.</p></li>
       <li><b>0.4.1</b><time datetime="2026-11-15">Nov 15, 2026</time>
         <p>Fixes for what showed up on the real console. Sound is mixed on its own processor thread, so it no longer breaks up when the screen or network is busy. Only the parts of the screen that changed get sent to the TV, and thumbnails, icons and avatars are drawn once and reused, which makes the interface much faster.</p></li>
       <li><b>0.4.0</b><time datetime="2026-11-15">Nov 15, 2026</time>
@@ -229,8 +250,8 @@
 
 <footer>
   <div class="wrap">
-    <p>Made by <a href="https://github.com/OwenCosta">OwenCosta</a>. XenithOS is GPL-3.0. It uses the Inter typeface (OFL), doomgeneric (GPL-2.0+) and Freedoom (BSD).</p>
-    <p>Not affiliated with Microsoft or id Software. Xbox and DOOM are their trademarks.</p>
+    <p>Made by <a href="https://github.com/OwenCosta">OwenCosta</a>. XenithOS is GPL-3.0. It uses the Inter typeface (OFL), doomgeneric (GPL-2.0+), stb_image (public domain) and Freedoom (BSD).</p>
+    <p>Not affiliated with Microsoft, Google or id Software. Xbox, YouTube and DOOM are their trademarks.</p>
   </div>
 </footer>
 
@@ -259,14 +280,16 @@ function wordmark(svg, main, os) {
 }
 wordmark($("logo"), "#ecf1fa", "#2f7dff");
 wordmark($("navlogo"), "#ecf1fa", "#2f7dff");
+/* The install command points at whichever address this page was opened from. */
+$("installcmd").textContent = `curl -fsSL http://${location.host}/install.sh | sudo bash`;
 
 /* Screens */
 const SHOTS = [
-  ["home", "Home", "Your profile at the top, five tiles, and the apps you've installed. A notification slides in when a message arrives."],
-  ["store", "Store", "Everything on the server, with thumbnails. Downloads are checked against their SHA-256 before they're saved."],
-  ["profile", "Profile", "Profiles live on the server and follow you to any console. Make one with a gamertag and a passcode."],
-  ["avatar", "Avatar", "Build your avatar from nine parts. Left and right change each part, Y picks something random."],
-  ["cloud", "Cloud", "Live stats from the server, the inbox, and the VOLT leaderboard with everyone's avatar."],
+  ["home", "Home", "Your profile at the top, five tiles, and the apps you've installed. A notification slides in when there's XenithOS news."],
+  ["store", "Store", "Apps, game data and updates from XenithOS Cloud, with thumbnails. Downloads are checked against their SHA-256 before they're saved."],
+  ["profile", "Profile", "Profiles are saved to XenithOS Cloud and follow you to any Xbox, PC or Pi. Make one with a gamertag and a passcode."],
+  ["avatar", "Avatar", "Thirteen parts in three tabs: face, hair and outfit, with every colour as a swatch. Y picks something random."],
+  ["cloud", "Cloud", "Who's playing, XenithOS news, and the VOLT leaderboard with everyone's avatar."],
   ["volt", "VOLT", "Grab sparks, don't hit the walls. Your best score goes on your profile."],
 ];
 function showShot(i) {
@@ -342,9 +365,9 @@ async function refresh() {
       td(tr, fmtSize(size), "num");
       items.appendChild(tr);
       if (id === "xenith") {
-        $("dl").textContent = `Download XenithOS ${ver} (${fmtSize(size)})`;
+        $("dl").textContent = `Download ${ver} for Xbox 360`;
         $("ver").textContent = "v" + ver;
-        $("sha").textContent = "sha256 " + sha;
+        $("sha").textContent = "xenon.elf sha256 " + sha;
       }
     });
 

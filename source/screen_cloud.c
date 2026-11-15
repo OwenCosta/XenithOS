@@ -1,4 +1,6 @@
-/* CLOUD: your server's live stats, the inbox, and the VOLT leaderboard. */
+/* CLOUD: XenithOS Cloud's status, the news, and the VOLT leaderboard.
+ * XenithOS Cloud is the free online service every copy of XenithOS uses for profiles, the
+ * Store and leaderboards. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,19 +17,49 @@
 
 #define MAX_ROWS 6
 
-static char motd[128], uptime[48], load[48], when[48];
-static long mem_used, mem_total, disk_used, disk_total;
+static char motd[128], version[32], players[16], online[16];
 static int ping_ms, have_stats;
-static char inbox[MAX_ROWS][120];
-static int ninbox;
-static struct { char rank[6], name[20], score[16], avatar[12]; } board[MAX_ROWS];
+static char news[MAX_ROWS][120], news_when[MAX_ROWS][24];
+static int nnews;
+static struct { char rank[6], name[20], score[16], avatar[16]; } board[MAX_ROWS];
 static int nboard;
+
+/* "3 days ago" style, from a unix time and the server's clock. */
+static void ago(long t, long now, char *out, int n)
+{
+    long d = now - t;
+    if (t <= 0 || now <= 0) { out[0] = 0; return; }
+    if (d < 120) snprintf(out, n, "Just now");
+    else if (d < 3600) snprintf(out, n, "%ld minutes ago", d / 60);
+    else if (d < 7200) snprintf(out, n, "An hour ago");
+    else if (d < 86400) snprintf(out, n, "%ld hours ago", d / 3600);
+    else if (d < 172800) snprintf(out, n, "Yesterday");
+    else snprintf(out, n, "%ld days ago", d / 86400);
+}
+
+static void read_news(struct http_resp *r, long now)
+{
+    char *line = r->body;
+    nnews = 0;
+    while (line && *line && nnews < MAX_ROWS) {
+        char *next = strchr(line, '\n'), *f[3];
+        if (next) *next++ = 0;
+        if (split_fields(line, f, 3) == 3) {
+            snprintf(news[nnews], sizeof news[0], "%s", f[2]);
+            ago(atol(f[1]), now, news_when[nnews], sizeof news_when[0]);
+            if (atoi(f[0]) > st.last_inbox) { st.last_inbox = atoi(f[0]); settings_save(); }
+            nnews++;
+        }
+        line = next;
+    }
+}
 
 static int refresh(void)
 {
     struct http_resp r;
-    char path[160], name[48], v[48];
+    char path[160], name[48], v[32];
     uint64_t t0;
+    long now = 0;
     int code;
 
     net_escape(prof.signed_in ? prof.name : cfg.name, name, sizeof name);
@@ -37,38 +69,24 @@ static int refresh(void)
     http_free(&r);
     if (code != 200) {
         sfx(SFX_ERROR);
-        ui_message("Your server isn't answering", cloud_error_text(NULL, code));
+        ui_message("XenithOS Cloud isn't answering", cloud_error_text(NULL, code));
         return 0;
     }
 
     snprintf(path, sizeof path, "/v1/hello?name=%s&ver=" XENITH_VERSION, name);
     if (cloud_get(path, 16 * 1024, &r) == 200) {
         kv_get(r.body, "motd", motd, sizeof motd);
-        kv_get(r.body, "uptime", uptime, sizeof uptime);
-        kv_get(r.body, "load", load, sizeof load);
-        kv_get(r.body, "time", when, sizeof when);
-        kv_get(r.body, "mem_used_mb", v, sizeof v); mem_used = atol(v);
-        kv_get(r.body, "mem_total_mb", v, sizeof v); mem_total = atol(v);
-        kv_get(r.body, "disk_used_gb", v, sizeof v); disk_used = atol(v);
-        kv_get(r.body, "disk_total_gb", v, sizeof v); disk_total = atol(v);
+        kv_get(r.body, "server", version, sizeof version);
+        kv_get(r.body, "players", players, sizeof players);
+        kv_get(r.body, "online", online, sizeof online);
+        kv_get(r.body, "now", v, sizeof v);
+        now = atol(v);
         have_stats = 1;
     }
     http_free(&r);
 
-    ninbox = 0;
-    snprintf(path, sizeof path, "/v1/inbox?key=%s", cfg.key);
-    if (cloud_get(path, 16 * 1024, &r) == 200) {
-        char *line = r.body;
-        while (line && *line && ninbox < MAX_ROWS) {
-            char *next = strchr(line, '\n'), *f[3];
-            if (next) *next++ = 0;
-            if (split_fields(line, f, 3) == 3) {
-                snprintf(inbox[ninbox++], sizeof inbox[0], "%s", f[2]);
-                if (atoi(f[0]) > st.last_inbox) { st.last_inbox = atoi(f[0]); settings_save(); }
-            }
-            line = next;
-        }
-    }
+    nnews = 0;
+    if (cloud_get("/v1/news", 16 * 1024, &r) == 200) read_news(&r, now);
     http_free(&r);
 
     nboard = 0;
@@ -99,16 +117,6 @@ static void stat_row(int x, int y, int w, const char *k, const char *v)
     gfx_str_r(FONT_BODY_SB, x + w, y - 3, C_TEXT, v);
 }
 
-static void bar(int x, int y, int w, long used, long total)
-{
-    gfx_fill_rrect((float)x, (float)y, (float)w, 6, 3, C_SURFACE2, 255);
-    if (total > 0) {
-        int pct = (int)(used * 100 / total);
-        uint32_t c = pct >= 90 ? C_BAD : pct >= 70 ? C_WARN : C_OK;
-        gfx_fill_rrect((float)x, (float)y, w * (float)used / total, 6, 3, c, 255);
-    }
-}
-
 static void card_title(int x, int y, int icon, const char *t)
 {
     icon_draw(icon, x + 14.0f, y + 15.0f, 26, C_ACCENT_HI, C_SURFACE);
@@ -122,35 +130,39 @@ static void draw(void)
     char v[64];
 
     ui_bg();
-    ui_header("Cloud", motd[0] ? motd : "Your XenithOS Cloud server");
+    ui_header("Cloud", motd[0] ? motd : "Profiles, news and leaderboards for everyone on XenithOS");
 
-    /* Server */
+    /* The service */
     ui_panel(x1, top, w, h);
-    card_title(x1 + pad, top + pad, ICON_SERVER, "Your server");
+    card_title(x1 + pad, top + pad, ICON_CLOUD, "XenithOS Cloud");
     y = top + pad + 56;
     if (have_stats) {
         int iw = w - 2 * pad;
-        stat_row(x1 + pad, y, iw, "Uptime", uptime); y += 44;
-        stat_row(x1 + pad, y, iw, "Load", load); y += 44;
-        snprintf(v, sizeof v, "%.1f / %.0f GB", mem_used / 1024.0, mem_total / 1024.0);
-        stat_row(x1 + pad, y, iw, "Memory", v); y += 30;
-        bar(x1 + pad, y, iw, mem_used, mem_total); y += 28;
-        snprintf(v, sizeof v, "%ld / %ld GB", disk_used, disk_total);
-        stat_row(x1 + pad, y, iw, "Disk", v); y += 30;
-        bar(x1 + pad, y, iw, disk_used, disk_total); y += 28;
+        gfx_str(FONT_SMALL, x1 + pad, y, C_SUB, "Status");
+        gfx_circle(x1 + w - pad - gfx_str_w(FONT_BODY_SB, "Online") - 12.0f, y + 9.0f, 4, C_OK, 255);
+        gfx_str_r(FONT_BODY_SB, x1 + w - pad, y - 3, C_TEXT, "Online");
+        y += 44;
+        stat_row(x1 + pad, y, iw, "Players", players[0] ? players : "-"); y += 44;
+        stat_row(x1 + pad, y, iw, "Online now", online[0] ? online : "-"); y += 44;
         snprintf(v, sizeof v, "%d ms", ping_ms);
         stat_row(x1 + pad, y, iw, "Ping", v); y += 44;
-        gfx_str_fit(FONT_SMALL, x1 + pad, top + h - pad - 22, C_DIM, when, iw);
+        gfx_wrap(FONT_SMALL, x1 + pad, top + h - pad - 52, iw, 2, C_DIM,
+                 "Free for everyone on XenithOS, on Xbox, PC and Raspberry Pi.", 2);
     }
 
-    /* Inbox */
+    /* News */
     ui_panel(x2, top, w, h);
-    card_title(x2 + pad, top + pad, ICON_MAIL, "Inbox");
+    card_title(x2 + pad, top + pad, ICON_MAIL, "News");
     y = top + pad + 56;
-    if (!ninbox) gfx_str(FONT_BODY, x2 + pad, y, C_SUB, cfg.key[0] ? "No messages" : "Add key= to config.txt");
-    for (i = 0; i < ninbox && y < top + h - 60; i++) {
-        int lines = gfx_wrap(FONT_BODY, x2 + pad, y, w - 2 * pad, 2, i == 0 ? C_TEXT : C_SUB, inbox[i], 3);
-        y += lines * (gfx_line_h(FONT_BODY) + 2) + 16;
+    if (!nnews) gfx_str(FONT_BODY, x2 + pad, y, C_SUB, "Nothing new right now");
+    for (i = 0; i < nnews && y < top + h - 70; i++) {
+        int lines;
+        if (news_when[i][0]) {
+            gfx_str(FONT_SMALL, x2 + pad, y, C_DIM, news_when[i]);
+            y += gfx_line_h(FONT_SMALL) + 2;
+        }
+        lines = gfx_wrap(FONT_BODY, x2 + pad, y, w - 2 * pad, 2, i == 0 ? C_TEXT : C_SUB, news[i], 3);
+        y += lines * (gfx_line_h(FONT_BODY) + 2) + 18;
     }
 
     /* Leaderboard */
@@ -174,7 +186,7 @@ void screen_cloud(void)
 {
     uint64_t last;
     if (!cloud_ready("Cloud")) return;
-    ui_busy_begin("Contacting your server", NULL);
+    ui_busy_begin("Connecting to XenithOS Cloud", NULL);
     if (!refresh()) { ui_busy_end(); return; }
     ui_busy_end();
     last = ui_ms();

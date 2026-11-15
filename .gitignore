@@ -10,3 +10,9 @@ server/store/
 sim/xsim
 sim/xvolt
 sim/out/
+sim/xdoom
+sim/xtube
+linux/xenithos
+linux/volt
+linux/doom
+linux/tube

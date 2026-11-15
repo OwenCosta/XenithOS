@@ -1,0 +1,46 @@
+#!/bin/bash
+# The XenithOS session on PCs and Raspberry Pis. install.sh sets the machine to log in by
+# itself on the first console and run this.
+#
+# Console mode: XenithOS fills the screen, with no desktop underneath.
+# Desktop mode: the Linux desktop (XFCE). "Return to XenithOS" in its menu, or logging out,
+#               comes back to console mode.
+# The mode is kept in ~/.config/xenithos/mode ("console" or "desktop").
+
+MODE_FILE="$HOME/.config/xenithos/mode"
+LOG_DIR="$HOME/.config/xenithos"
+XENITHOS=/usr/lib/xenithos/xenithos
+export XENITHOS_SESSION=1
+
+mkdir -p "$LOG_DIR"
+[ -f "$MODE_FILE" ] || echo console > "$MODE_FILE"
+quick_exits=0
+
+while true; do
+    mode=$(cat "$MODE_FILE" 2>/dev/null)
+    if [ "$mode" = desktop ] && [ -x /usr/bin/startxfce4 ] && command -v startx >/dev/null; then
+        # Coming back from the desktop always means console mode next.
+        echo console > "$MODE_FILE"
+        env -u XENITHOS_SESSION startx /usr/bin/startxfce4 -- -keeptty > "$LOG_DIR/desktop.log" 2>&1
+        continue
+    fi
+
+    echo console > "$MODE_FILE"
+    started=$(date +%s)
+    SDL_VIDEODRIVER=kmsdrm "$XENITHOS" 2> "$LOG_DIR/xenithos.log"
+    [ "$(cat "$MODE_FILE" 2>/dev/null)" = desktop ] && continue
+
+    # It quit by itself (a crash, say). Start it again, unless it keeps failing straight away
+    # (no usable display driver, for one): then fall back to the desktop, or a plain shell.
+    if [ $(( $(date +%s) - started )) -lt 5 ]; then quick_exits=$((quick_exits + 1)); else quick_exits=0; fi
+    if [ "$quick_exits" -ge 3 ]; then
+        quick_exits=0
+        if [ -x /usr/bin/startxfce4 ]; then
+            echo desktop > "$MODE_FILE"
+            continue
+        fi
+        echo "XenithOS couldn't start. What it said is in $LOG_DIR/xenithos.log"
+        exec bash --noprofile
+    fi
+    sleep 1
+done
