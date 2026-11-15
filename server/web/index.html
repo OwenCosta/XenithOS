@@ -36,21 +36,22 @@
   header.top { border-bottom: 1px solid rgba(255, 255, 255, 0.05); position: relative; }
   header.top .wrap { display: flex; align-items: center; gap: 14px; min-height: 56px; }
   header.top .home { display: inline-flex; align-items: center; margin-right: auto; }
+  .back { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; background: rgba(255, 255, 255, 0.08);
+          color: var(--text); text-decoration: none; font: 600 13px system-ui, sans-serif; white-space: nowrap; }
+  .back::before { content: "9"; font-size: 16px; line-height: 1; }
+  .back:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
   header.top nav { display: flex; gap: 16px; font-size: 14px; }
   header.top nav a { color: var(--sub); text-decoration: none; white-space: nowrap; }
   header.top nav a:hover { color: var(--text); }
   .menu-btn { display: none; background: none; border: 1px solid var(--line); color: var(--text); border-radius: 8px;
               padding: 6px 11px; font: 600 14px system-ui, sans-serif; cursor: pointer; }
-  .pill { display: inline-flex; align-items: center; gap: 7px; font: 12px var(--mono); color: var(--sub); white-space: nowrap; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
-  .pill.on .dot { background: var(--ok); }
 
   .intro.wrap { padding-top: 48px; padding-bottom: 12px; }
   #logo { display: block; width: 420px; max-width: 90%; height: auto; margin-bottom: 26px; }
   .intro p { max-width: 42em; margin: 0 0 12px; }
   .intro p.sub { color: var(--sub); }
   .facts { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 16px 0 22px; }
-  .facts span { font: 12px/1.4 var(--mono); color: var(--sub); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
+  .facts span { font: 12px/1.4 system-ui, sans-serif; color: var(--sub); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
   .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
   .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 20px; border-radius: 8px; border: 0;
          color: var(--text); background: rgba(255, 255, 255, 0.12); text-decoration: none; font: 600 14px system-ui, sans-serif; cursor: pointer; }
@@ -81,7 +82,7 @@
   .player small { color: var(--sub); font-size: 13px; }
 
   table { width: 100%; border-collapse: collapse; font-size: 15px; }
-  th { text-align: left; font: 12px var(--mono); color: var(--dim); font-weight: normal; padding: 0 12px 8px 0; }
+  th { text-align: left; font: 12px system-ui, sans-serif; color: var(--dim); font-weight: normal; padding: 0 12px 8px 0; }
   td { padding: 9px 12px 9px 0; border-top: 1px solid var(--line); vertical-align: middle; }
   td:last-child, th:last-child { padding-right: 0; }
   .num { font-family: var(--mono); text-align: right; white-space: nowrap; }
@@ -97,7 +98,7 @@
   .who .blank { width: 36px; height: 36px; background: var(--panel-2); }
   .item { display: flex; gap: 12px; align-items: center; min-width: 0; }
   .item img { width: 96px; height: 54px; border-radius: 8px; flex: none; background: var(--panel-2); }
-  .kind { font: 12px var(--mono); color: var(--dim); }
+  .kind { font: 12px system-ui, sans-serif; color: var(--dim); }
   #pc h3 { margin: 26px 0 4px; font-size: 16px; }
   .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; margin: 14px 0 6px; }
   .tile { min-width: 0; }
@@ -117,8 +118,8 @@
 
   .log { list-style: none; padding: 0; margin: 0; max-width: 46em; }
   .log li { padding: 12px 0; border-top: 1px solid var(--line); }
-  .log b { font-family: var(--mono); color: var(--link); margin-right: 8px; }
-  .log time { font: 12px var(--mono); color: var(--dim); }
+  .log b { font-family: system-ui, sans-serif; color: var(--link); margin-right: 8px; }
+  .log time { font: 12px system-ui, sans-serif; color: var(--dim); }
   .log p { margin: 4px 0 0; color: var(--sub); font-size: 15px; }
 
   footer { border-top: 1px solid var(--line); padding: 24px 0 40px; color: var(--dim); font-size: 13px; }
@@ -148,6 +149,7 @@
 
 <header class="top">
   <div class="wrap">
+    <a class="back" href="https://owencosta.diy/">Owen Costa</a>
     <a class="home" href="#" aria-label="XenithOS, top of the page"><svg id="navlogo" height="26" aria-hidden="true"></svg></a>
     <nav id="nav" aria-label="XenithOS">
       <a href="#screens">Screens</a>
@@ -158,7 +160,6 @@
       <a href="https://owencosta.diy/account/">Account</a>
       <a href="https://github.com/OwenCosta/XenithOS">GitHub</a>
     </nav>
-    <span class="pill" id="pill"><span class="dot"></span><span id="pilltext">checking</span></span>
     <button class="menu-btn" id="menu-btn" type="button" aria-expanded="false" aria-controls="nav">Menu</button>
   </div>
 </header>
@@ -177,7 +178,6 @@
     <a class="btn primary" id="dl" href="download/xenithos-xbox360.zip" download="xenithos-xbox360.zip">Download for Xbox 360</a>
     <a class="btn" href="#pc">Install on a PC or Pi</a>
     <a class="btn" href="https://github.com/OwenCosta/XenithOS">Source code</a>
-    <button class="btn" id="chime" type="button" aria-label="Play the start-up chime">&#9654; Start-up chime</button>
   </div>
   <div class="sha" id="sha"></div>
 </div>
@@ -186,7 +186,7 @@
   <div class="wrap">
     <h2>What it looks like</h2>
     <p class="lead">These come from the XenithOS simulator, which runs the exact code that goes on the console and saves the frames as images.</p>
-    <div class="shot"><img id="shot" src="static/shot-home.png" alt="The XenithOS home screen" width="1216" height="680"></div>
+    <div class="shot"><img id="shot" src="static/shot-home.png?v=2" alt="The XenithOS home screen" width="1216" height="680"></div>
     <p class="caption" id="caption"></p>
     <div class="tabs" role="tablist" id="tabs"></div>
   </div>
@@ -195,7 +195,7 @@
 <section id="players">
   <div class="wrap">
     <h2>Players</h2>
-    <p class="lead">Everyone with a XenithOS profile. Your gamertag and avatar are saved to XenithOS Cloud, so they follow you to any Xbox, PC or Pi. You can link yours to an <a href="https://owencosta.diy/account/">OwenCosta account</a>, which works across Owen's other projects too.</p>
+    <p class="lead">Everyone with a XenithOS profile. Your gamertag and avatar are saved to XenithOS Cloud, so they follow you to any Xbox, PC or Pi. You can link yours to an <a href="https://owencosta.diy/account/">OCAccount</a>, which works across Owen's other projects too.</p>
     <div class="players" id="playerlist"><p class="muted">Loading...</p></div>
   </div>
 </section>
@@ -264,7 +264,7 @@
       <li><b>Desktop mode</b> is in XenithOS's power menu: the full Linux desktop, for a browser and everything else.</li>
       <li><b>Return to XenithOS</b> in the desktop's menu goes back to console mode.</li>
       <li><b>Updates</b> come from the Store: pick <b>XenithOS update</b>, and it builds the new version on your machine and restarts into it.</li>
-      <li><b>Apps</b> from Flathub and <b>Steam</b> are in the Store too (LB and RB switch sections). They install through XenithOS, start from its home screen and get the whole screen: hold Guide for three seconds to come back.</li>
+      <li><b>Roblox</b> and <b>Minecraft</b> are in the Store's Apps section too (LB and RB switch sections). They install from Flathub through XenithOS, start from its home screen and get the whole screen: hold Guide for three seconds to come back.</li>
     </ol>
     <h3>In the Store on PCs</h3>
     <p class="muted">Apps come from <a href="https://flathub.org/">Flathub</a> and run under their own licenses. Roblox runs through <a href="https://sober.vinegarhq.org/">Sober</a>, a community project that isn't made by Roblox (use it at your own risk), and only on x86-64 PCs. Steam games install and run through Steam with your Steam account: free games only need the account, others are bought on Steam. Machines installed before 0.5.4 need the install command once more for apps.</p>
@@ -379,7 +379,7 @@ const SHOTS = [
 ];
 function showShot(i) {
   const [id, name, text] = SHOTS[i];
-  $("shot").src = `static/shot-${id}.png`;
+  $("shot").src = `static/shot-${id}.png?v=2`;
   $("shot").alt = `XenithOS ${name} screen`;
   $("caption").textContent = text;
   [...$("tabs").children].forEach((b, j) => b.setAttribute("aria-selected", i === j ? "true" : "false"));
@@ -394,10 +394,6 @@ SHOTS.forEach(([id, name], i) => {
 });
 showShot(0);
 
-/* Chime */
-const chime = new Audio("static/chime.wav");
-$("chime").addEventListener("click", () => { chime.currentTime = 0; chime.play(); });
-
 /* Live data */
 const rows = (t) => t.split("\n").filter(Boolean).map((l) => l.split("|"));
 function td(tr, text, cls) { const c = document.createElement("td"); if (cls) c.className = cls; c.textContent = text; tr.appendChild(c); return c; }
@@ -411,8 +407,6 @@ async function refresh() {
   const get = (p) => fetch(p, { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(p); return r.text(); });
   try {
     const [sc, it, pl] = await Promise.all([get("v1/scores/volt"), get("v1/store"), get("v1/players")]);
-    $("pill").className = "pill on";
-    $("pilltext").textContent = "online";
 
     const board = $("board");
     board.replaceChildren();
@@ -496,8 +490,7 @@ async function refresh() {
       list.appendChild(card);
     });
   } catch (e) {
-    $("pill").className = "pill";
-    $("pilltext").textContent = "offline";
+    /* XenithOS Cloud isn't answering: the lists keep what they last showed */
   }
 }
 refresh();

@@ -1,5 +1,6 @@
 # Screenshots for the website. Boots signed in (XSIM_PROFILE) against a local server.
-wait 300
+# The first wait outlasts the welcome toast, so the logo shows in the corner.
+wait 520
 shot shot-home
 press right
 press a
