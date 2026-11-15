@@ -90,6 +90,7 @@ static void back_to_shell(void)
 #define COLS 4
 static struct result {
     char id[16], title[100], channel[48], dur[12];
+    int seconds;
     struct img thumb;
     int tried;
 } results[MAX_RESULTS];
@@ -133,7 +134,8 @@ static int search(const char *q)
             snprintf(it->id, sizeof it->id, "%s", f[0]);
             snprintf(it->title, sizeof it->title, "%s", f[1]);
             snprintf(it->channel, sizeof it->channel, "%s", f[2]);
-            if (atoi(f[3]) > 0) clock_text(atoi(f[3]), it->dur, sizeof it->dur);
+            it->seconds = atoi(f[3]);
+            if (it->seconds > 0) clock_text(it->seconds, it->dur, sizeof it->dur);
         }
         line = next;
     }
@@ -221,7 +223,7 @@ static void draw_list(void)
 #define AUDIO_HELD (48000 * 4)        /* up to 4 s of sound waiting for the mixer */
 
 static struct {
-    char sid[40], title[100];
+    char sid[40], title[100], why[120];   /* why: the server's reason when the video won't play */
     int fps, rate, duration, start;   /* start: the second of the video this stream begins at */
     unsigned char *buf;
     int len, pos, cap;
@@ -408,6 +410,8 @@ static void draw_player(void)
     gfx_clear(0);
     if (pl.frame) gfx_blit_scaled(pl.frame, pl.fw, pl.fh, dx, dy, dw, dh);
     if (!pl.playing || pl.buffering) ui_spinner(SCR_W / 2, SCR_H / 2, 26, C_ACCENT);
+    if (!pl.next_off && !pl.paused)             /* XenithOS Cloud is still asking YouTube */
+        gfx_str_c(FONT_BODY, SCR_W / 2, SCR_H / 2 + 48, 0xC8D0DC, "Getting the video from YouTube");
     if (ui_ms() < pl.overlay_until || pl.paused || !pl.playing) {
         int by = SCR_H - 118, bw = SCR_W - 2 * M;
         gfx_rect_a(0, by - 20, SCR_W, SCR_H - by + 20, 0x000000, 170);
@@ -462,6 +466,9 @@ static void fetch(void)
         pl.fetch_fails = 0;
     } else if (code == 410) {
         pl.ended = 1;
+    } else if (code >= 400 && r.body && strstr(r.body, "error=")) {   /* the server says why */
+        snprintf(pl.why, sizeof pl.why, "%s", problem(&r, code));
+        pl.failed = 1;
     } else if (code != 204) {
         if (++pl.fetch_fails >= 4) pl.failed = 1;
     }
@@ -477,6 +484,8 @@ static int play_from(const struct result *it, int at, int *closed)
     ui_busy_begin("Starting the video", it->title);
     if (!start_session(it->id, at)) { ui_busy_end(); player_reset(); *closed = 1; return -1; }
     ui_busy_end();
+    if (!pl.title[0]) snprintf(pl.title, sizeof pl.title, "%s", it->title);
+    if (!pl.duration) pl.duration = it->seconds;
     audio_stream_open();
     audio_stream_pause(1);
     pl.overlay_until = ui_ms() + 3000;
@@ -508,7 +517,8 @@ static int play_from(const struct result *it, int at, int *closed)
         if (pl.failed) {
             net_set_idle_hook(NULL);
             sfx(SFX_ERROR);
-            ui_message("Playback stopped", "The video stream broke off. Try playing it again.");
+            if (pl.why[0]) ui_message("This video won't play", pl.why);
+            else ui_message("Playback stopped", "The video stream broke off. Try playing it again.");
             *closed = 1;
             break;
         }

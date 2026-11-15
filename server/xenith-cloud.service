@@ -11,11 +11,15 @@ Environment=XENITH_STATE_DIR=/var/lib/xenith-cloud
 Environment=XENITH_STORE_DIR=/opt/xenith-cloud/store
 Environment=XENITH_WEB_DIR=/opt/xenith-cloud/web
 Environment=XENITH_DOWNLOAD_DIR=/opt/xenith-cloud/downloads
+# Deno (yt-dlp runs it for YouTube's JavaScript challenges) keeps its cache here
+Environment=DENO_DIR=/var/cache/xenith-cloud/deno
+Environment=DENO_NO_UPDATE_CHECK=1
 Restart=always
 RestartSec=3
 
 DynamicUser=yes
 StateDirectory=xenith-cloud
+CacheDirectory=xenith-cloud
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
@@ -28,10 +32,13 @@ ProtectControlGroups=yes
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 RestrictNamespaces=yes
 LockPersonality=yes
-MemoryDenyWriteExecute=yes
+# No MemoryDenyWriteExecute: Deno compiles JavaScript as it runs. It works with
+# DENO_V8_FLAGS=--jitless too, but solving YouTube's challenge then takes about
+# 27 seconds instead of 10.
 SystemCallArchitectures=native
-# Tube's ffmpeg runs inside this service: room for a few videos, and CPU left for everything else.
-MemoryMax=1G
+# Tube's yt-dlp, Deno and ffmpeg run inside this service: room for a few videos, and CPU
+# left for everything else.
+MemoryMax=1536M
 CPUQuota=250%
 
 [Install]

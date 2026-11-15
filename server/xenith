@@ -3,10 +3,14 @@
 #   xenith send "XenithOS 0.5 is out" a news post: everyone sees it on the Cloud screen
 #   xenith motd "Welcome"             banner at the top of the Cloud screen
 #   xenith status                     service state and the last log lines
+#   xenith tube-update                newest yt-dlp, Deno and PO token provider for Tube
 set -e
 if [ "$1" = "status" ]; then
     systemctl --no-pager status xenith-cloud | head -n 12
     exit 0
+fi
+if [ "$1" = "tube-update" ]; then
+    exec bash /opt/xenith-cloud/setup-tube.sh
 fi
 set -a
 . /etc/xenith-cloud.env

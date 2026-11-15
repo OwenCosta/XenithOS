@@ -7,7 +7,9 @@ press a
 wait 400
 shot tube_results
 press a
-wait 900
+wait 90
+shot tube_wait
+wait 810
 shot tube_play
 wait 300
 shot tube_play2

@@ -1,0 +1,35 @@
+[Unit]
+Description=XenithOS Cloud token helper for Tube (bgutil PO token provider, local only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# yt-dlp's bgutil plugin asks this for YouTube PO tokens. It listens on 127.0.0.1:4416 and
+# [::1]:4416 only. setup-tube.sh installs it into /opt/xenith-cloud/pot-provider.
+WorkingDirectory=/opt/xenith-cloud/pot-provider/server/node_modules
+ExecStart=/opt/xenith-cloud/bin/deno run --allow-env --allow-net --allow-ffi=. --allow-read=. ../src/main.ts --port 4416
+Environment=DENO_DIR=/var/cache/xenith-pot
+Environment=DENO_NO_UPDATE_CHECK=1
+Environment=DENO_NO_PROMPT=1
+Restart=always
+RestartSec=5
+
+DynamicUser=yes
+CacheDirectory=xenith-pot
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+MemoryMax=768M
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target

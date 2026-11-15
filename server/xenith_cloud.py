@@ -26,8 +26,11 @@ Tube (YouTube; needs a signed-in profile)
   POST /v1/tube/search                token, q          -> id|title|channel|seconds
   GET  /v1/tube/thumb/<id>.jpg
   POST /v1/tube/start                 token, id, t      -> session, title, duration, fps, rate
+                                                        (answers at once; YouTube is asked
+                                                        in the background)
   GET  /v1/tube/chunk?s=<session>&off=<bytes>           the next piece of the AVI (204: not
-                                                        ready yet, 410: finished)
+                                                        ready yet, 410: finished, 503 with
+                                                        error=: it couldn't be played)
   GET  /v1/tube/stop?s=<session>
 
 Accounts (form posts; errors come back as "error=<message>")
@@ -60,6 +63,10 @@ Environment
   XENITH_DOWNLOAD_DIR default ./downloads   (install.sh, xenithos-source.tar.gz)
   XENITH_YTDLP, XENITH_FFMPEG  paths for Tube (default: found on PATH); Tube is off without them
   XENITH_TUBE_STREAMS default 3: videos playing at once, across everyone
+  XENITH_DENO        Deno, so yt-dlp can solve YouTube's JavaScript challenges when the quick
+                     way is refused (setup-tube.sh installs it)
+  XENITH_YTDLP_PLUGINS  a yt-dlp plugin folder: the PO token provider, whose token server is
+                     xenith-pot.service
 """
 import hashlib
 import hmac
@@ -72,6 +79,7 @@ import select
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.request
@@ -420,7 +428,19 @@ TUBE_CHUNK = 256 * 1024
 TUBE_IDLE_S = 60               # a stream nobody has asked for in this long is dropped
 TUBE_SEARCHES_PER_MIN = 10     # per profile
 TUBE_STARTS_PER_10MIN = 30     # per profile
+TUBE_LINKS_S = 3600            # a video's links are reused this long (skipping, playing it again)
+TUBE_FULL_CLIENTS = "youtube:player_client=default,mweb"   # mweb gets a PO token from the token helper
 TUBE_BLOCKED = "YouTube is turning XenithOS Cloud away right now. Try again later."
+TUBE_NO_VIDEO = "YouTube didn't hand over that video. Try another one."
+TUBE_UNPLAYABLE = "That video can't be played here."
+TUBE_BROKE = "YouTube stopped sending that video. Try playing it again."
+TUBE_UNPLAYABLE_SIGNS = ("Private video", "confirm your age", "members-only", "Join this channel",
+                         "live event will begin", "Premieres in", "has been removed")
+
+
+def log(message):
+    sys.stderr.write(message + "\n")
+    sys.stderr.flush()
 
 
 def tube_blocked(stderr):
@@ -429,26 +449,96 @@ def tube_blocked(stderr):
     return "429" in text or "not a bot" in text
 
 
-class TubeStream:
-    """One video being turned into the console's stream by ffmpeg. The console asks for it
-    in order, a chunk at a time; asking for the last chunk again (after a network hiccup)
-    gets the same bytes."""
+def tube_unplayable(stderr):
+    """Videos no player client gets without an account: private, age-checked, members only,
+    not started yet, taken down. Asking again the slow way won't help."""
+    text = (stderr or b"").decode("utf-8", "replace")
+    return any(sign in text for sign in TUBE_UNPLAYABLE_SIGNS)
 
-    def __init__(self, proc, owner, title, duration):
-        self.proc, self.owner, self.title, self.duration = proc, owner, title, duration
+
+def tube_reason(stderr):
+    """yt-dlp's (or ffmpeg's) last error line, for the server log."""
+    lines = [line for line in (stderr or b"").decode("utf-8", "replace").splitlines() if line.strip()]
+    errors = [line for line in lines if line.startswith("ERROR")] or lines[-1:] or ["no message"]
+    return clean(errors[-1], 200)
+
+
+def link_expiry(url):
+    """googlevideo links say when they stop working (unix time), as ?expire= or /expire/."""
+    m = re.search(r"[?&/]expire[=/](\d{9,11})", url or "")
+    return int(m.group(1)) if m else 0
+
+
+class TubeStream:
+    """One video on its way to a console. YouTube is asked for it in the background (that
+    can take a while), so the console starts asking for chunks at once and hears "not ready
+    yet" until ffmpeg has something. Chunks come in order; asking for the last one again
+    (after a network hiccup) gets the same bytes."""
+
+    def __init__(self, vid, owner, title, duration):
+        self.vid, self.owner, self.title, self.duration = vid, owner, title, duration
+        self.proc = self.errors = self.helper = None   # ffmpeg, its error output, yt-dlp while it works
+        self.problem, self.stopped, self.on_empty = "", False, None
+        self.ready = threading.Event()                 # ffmpeg runs, or it couldn't start, or it stopped
         self.sent, self.last_off, self.last_data, self.eof = 0, -1, b"", False
         self.touched = time.monotonic()
-        self.lock = threading.Lock()
+        self.lock = threading.Lock()                   # one reader at a time
+        self.plock = threading.Lock()                  # the processes
+
+    def active(self):
+        """Counts towards Tube's limit: still getting ready, or playing."""
+        return not self.problem and not self.stopped and not self.eof
+
+    def run(self, cmd, timeout):
+        """Run yt-dlp where stop() can end it. Returns (exit code, stdout, stderr)."""
+        with self.plock:
+            if self.stopped:
+                return -1, b"", b""
+            p = self.helper = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            out, err = p.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            out, err = p.communicate()
+            err += b"\nERROR: yt-dlp took too long"
+        with self.plock:
+            self.helper = None
+        return p.returncode, out, err
+
+    def attach(self, proc, errors):
+        """ffmpeg is running: chunks can flow."""
+        with self.plock:
+            late = self.stopped
+            if not late:
+                self.proc, self.errors = proc, errors
+        if late:                                       # the console left while YouTube was asked
+            proc.kill()
+            proc.wait()
+            errors.close()
+        self.ready.set()
+
+    def fail(self, problem):
+        self.problem = problem
+        self.ready.set()
 
     def read(self, off, wait=2.5):
-        """Bytes from `off`: b"" if nothing is ready yet, None once the stream is over."""
+        """Bytes from `off`: b"" if nothing is ready yet, None once the stream is over.
+        RuntimeError (with a message for people) when the video couldn't be played."""
+        end = time.monotonic() + wait
+        self.touched = time.monotonic()
+        if not self.ready.wait(wait):
+            return b""
+        if self.problem:
+            raise RuntimeError(self.problem)
+        if not self.proc:
+            return None
         with self.lock:
             self.touched = time.monotonic()
             if off == self.last_off:
                 return self.last_data
             if off != self.sent:
                 raise ValueError("out of order")
-            data, fd, end = bytearray(), self.proc.stdout.fileno(), time.monotonic() + wait
+            data, fd = bytearray(), self.proc.stdout.fileno()
             while len(data) < TUBE_CHUNK and not self.eof:
                 left = end - time.monotonic() if not data else 0.05
                 if left <= 0:
@@ -462,38 +552,81 @@ class TubeStream:
                     break
                 data += more
             if not data:
+                if self.eof and not self.sent:         # ffmpeg gave up before the first byte
+                    self.gave_up()
+                    raise RuntimeError(self.problem)
                 return None if self.eof else b""
             self.last_off, self.last_data = off, bytes(data)
             self.sent += len(data)
             return self.last_data
 
+    def gave_up(self):
+        self.problem = TUBE_BROKE
+        why = b""
+        if self.errors:
+            self.errors.seek(0)
+            why = self.errors.read()[-400:]
+        log(f"tube: {self.vid}: ffmpeg sent nothing: {tube_reason(why)}")
+        if self.on_empty:
+            self.on_empty(self.vid)                    # its links don't work any more
+
     def stop(self):
-        if self.proc.poll() is None:
-            self.proc.kill()
-        try:
-            self.proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            pass
-        if self.proc.stdout:
-            self.proc.stdout.close()
+        with self.plock:
+            self.stopped = True
+            helper, proc = self.helper, self.proc
+        self.ready.set()
+        if helper and helper.poll() is None:
+            helper.kill()
+        if proc:
+            if proc.poll() is None:
+                proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            if proc.stdout:
+                proc.stdout.close()
+        if self.errors:
+            self.errors.close()
 
 
 class Tube:
     """YouTube for XenithOS. yt-dlp finds videos, ffmpeg turns one into a stream the Xbox can
     play: 426x240 JPEG pictures at 20 a second and 24 kHz mono sound, in an AVI. Profiles
-    only, a few streams at a time, so the server can't be used as an open proxy."""
+    only, a few streams at a time, so the server can't be used as an open proxy.
 
-    def __init__(self, ytdlp, ffmpeg, max_streams=3):
+    With Deno set up, a video is asked for at most twice: the quick way first (no
+    JavaScript, a few seconds), then, if YouTube refuses that, the full way: Deno solves
+    YouTube's JavaScript challenges and the token helper (xenith-pot.service) gives the
+    mweb client a PO token. A video's links are kept for a while, so skipping ahead or
+    playing it again doesn't ask YouTube at all."""
+
+    def __init__(self, ytdlp, ffmpeg, max_streams=3, deno="", plugins=""):
         self.ytdlp, self.ffmpeg, self.max_streams = ytdlp, ffmpeg, max_streams
+        self.deno, self.plugins = deno, plugins
         self.lock = threading.Lock()
         self.streams = {}
         self.search_cache = {}
         self.thumbs = {}
+        self.known = {}               # video id -> (title, seconds), from searches and plays
+        self.links = {}               # video id -> formats, title, duration, until
+        self.full_until = 0.0         # YouTube refused a quick ask lately: go straight to the full way
         self.searches = RateLimit(TUBE_SEARCHES_PER_MIN, 60)
         self.starts = RateLimit(TUBE_STARTS_PER_10MIN, 600)
 
     def available(self):
         return bool(self.ytdlp and self.ffmpeg)
+
+    def command(self, mode, args):
+        """yt-dlp for a search, a plain ask (no Deno set up), a quick ask or a full one."""
+        cmd = [self.ytdlp, "--no-warnings", "--no-cache-dir"]
+        if self.deno and mode in ("search", "quick"):
+            cmd.append("--no-js-runtimes")
+        if self.plugins and mode in ("plain", "full"):
+            cmd += ["--plugin-dirs", self.plugins]
+        if mode == "full":
+            cmd += ["--js-runtimes", f"deno:{self.deno}", "--extractor-args", TUBE_FULL_CLIENTS]
+        return cmd + args
 
     def search(self, query):
         key = query.lower()
@@ -501,10 +634,12 @@ class Tube:
             hit = self.search_cache.get(key)
         if hit and time.time() - hit[0] < 600:
             return hit[1]
-        out = subprocess.run([self.ytdlp, "--flat-playlist", "-J", "--no-warnings", "--no-cache-dir", f"ytsearch16:{query}"],
+        out = subprocess.run(self.command("search", ["--flat-playlist", "-J", f"ytsearch16:{query}"]),
                              capture_output=True, timeout=40)
-        if out.returncode != 0 and tube_blocked(out.stderr):
-            raise RuntimeError(TUBE_BLOCKED)
+        if out.returncode != 0:
+            log(f"tube: search: {tube_reason(out.stderr)}")
+            if tube_blocked(out.stderr):
+                raise RuntimeError(TUBE_BLOCKED)
         data = json.loads(out.stdout or b"{}")
         rows = []
         for e in data.get("entries") or []:
@@ -517,6 +652,10 @@ class Tube:
             if len(self.search_cache) > 500:
                 self.search_cache.clear()
             self.search_cache[key] = (time.time(), rows)
+            if len(self.known) > 5000:
+                self.known.clear()
+            for vid, title, _, seconds in rows:
+                self.known[vid] = (title, seconds)
         return rows
 
     def thumb(self, vid):
@@ -537,7 +676,8 @@ class Tube:
     def reap(self):
         now = time.monotonic()
         with self.lock:
-            dead = [sid for sid, s in self.streams.items() if now - s.touched > TUBE_IDLE_S]
+            dead = [sid for sid, s in self.streams.items()
+                    if now - s.touched > (15 if s.problem else TUBE_IDLE_S)]
             gone = [self.streams.pop(sid) for sid in dead]
         for s in gone:
             s.stop()
@@ -553,51 +693,123 @@ class Tube:
             return self.streams.get(sid)
 
     def start(self, vid, at, owner):
-        """Returns (session id, title, duration) or raises RuntimeError with a message for people."""
+        """Returns (session id, title, duration) at once and asks YouTube in the background;
+        the console's chunk requests hear how that went. RuntimeError (with a message for
+        people) when Tube is full."""
         self.reap()
         with self.lock:
             mine = [sid for sid, s in self.streams.items() if s.owner == owner]
         for sid in mine:                          # one video per profile at a time
             self.stop(sid)
         with self.lock:
-            if len(self.streams) >= self.max_streams:
+            if sum(s.active() for s in self.streams.values()) >= self.max_streams:
                 raise RuntimeError("Tube is busy right now. Try again in a few minutes.")
-        try:
-            out = subprocess.run([self.ytdlp, "-j", "--no-warnings", "--no-cache-dir", "--no-playlist", "-f", TUBE_FORMAT, "--",
-                                  f"https://www.youtube.com/watch?v={vid}"], capture_output=True, timeout=60)
-            if out.returncode != 0 and tube_blocked(out.stderr):
-                raise RuntimeError(TUBE_BLOCKED)
-            info = json.loads(out.stdout)
-        except (subprocess.TimeoutExpired, ValueError):
-            raise RuntimeError("YouTube didn't hand over that video. Try another one.")
-        fmts = info.get("requested_formats") or [info]
-        if not all(f.get("url") for f in fmts):
-            raise RuntimeError("That video can't be played here.")
-        args = [self.ffmpeg, "-nostdin", "-loglevel", "error"]
-        for f in fmts:
-            if at > 0:
-                args += ["-ss", str(at)]
-            headers = "".join(f"{k}: {v}\r\n" for k, v in (f.get("http_headers") or {}).items())
-            if headers:
-                args += ["-headers", headers]
-            args += ["-i", f["url"]]
-        vi = next((i for i, f in enumerate(fmts) if f.get("vcodec") not in (None, "none")), 0)
-        ai = next((i for i, f in enumerate(fmts) if f.get("acodec") not in (None, "none")), None)
-        args += ["-map", f"{vi}:v:0"] + (["-map", f"{ai}:a:0"] if ai is not None else [])
-        args += ["-vf", f"scale={TUBE_W}:{TUBE_H}:force_original_aspect_ratio=decrease,"
-                        f"pad={TUBE_W}:{TUBE_H}:(ow-iw)/2:(oh-ih)/2:black,fps={TUBE_FPS}",
-                 "-c:v", "mjpeg", "-q:v", "5", "-pix_fmt", "yuvj420p", "-threads", "2"]
-        if ai is not None:
-            args += ["-c:a", "pcm_s16le", "-ar", str(TUBE_RATE), "-ac", "1"]
-        args += ["-f", "avi", "pipe:1"]
-        nice = shutil.which("nice")                # keep the website and API quick while it works
-        proc = subprocess.Popen(([nice, "-n", "10"] if nice else []) + args,
-                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        sid = secrets.token_hex(8)
-        stream = TubeStream(proc, owner, clean(info.get("title") or "", 96), int(info.get("duration") or 0))
-        with self.lock:
-            self.streams[sid] = stream
+            title, seconds = self.known.get(vid, ("", 0))
+            sid = secrets.token_hex(8)
+            stream = self.streams[sid] = TubeStream(vid, owner, title, seconds)
+        threading.Thread(target=self.prepare, args=(stream, at), daemon=True).start()
         return sid, stream.title, stream.duration
+
+    def prepare(self, stream, at):
+        """Background: get the video's links, then start ffmpeg on them."""
+        errors = None
+        try:
+            fmts = self.ask(stream)["formats"]
+            args = [self.ffmpeg, "-nostdin", "-loglevel", "error"]
+            for f in fmts:
+                if at > 0:
+                    args += ["-ss", str(at)]
+                headers = "".join(f"{k}: {v}\r\n" for k, v in (f.get("http_headers") or {}).items())
+                if headers:
+                    args += ["-headers", headers]
+                args += ["-i", f["url"]]
+            vi = next((i for i, f in enumerate(fmts) if f.get("vcodec") not in (None, "none")), 0)
+            ai = next((i for i, f in enumerate(fmts) if f.get("acodec") not in (None, "none")), None)
+            args += ["-map", f"{vi}:v:0"] + (["-map", f"{ai}:a:0"] if ai is not None else [])
+            args += ["-vf", f"scale={TUBE_W}:{TUBE_H}:force_original_aspect_ratio=decrease,"
+                            f"pad={TUBE_W}:{TUBE_H}:(ow-iw)/2:(oh-ih)/2:black,fps={TUBE_FPS}",
+                     "-c:v", "mjpeg", "-q:v", "5", "-pix_fmt", "yuvj420p", "-threads", "2"]
+            if ai is not None:
+                args += ["-c:a", "pcm_s16le", "-ar", str(TUBE_RATE), "-ac", "1"]
+            args += ["-f", "avi", "pipe:1"]
+            nice = shutil.which("nice")            # keep the website and API quick while it works
+            errors = tempfile.TemporaryFile()
+            proc = subprocess.Popen(([nice, "-n", "10"] if nice else []) + args,
+                                    stdout=subprocess.PIPE, stderr=errors)
+            stream.on_empty = self.forget
+            stream.attach(proc, errors)
+        except RuntimeError as e:
+            stream.fail(str(e))
+        except Exception as e:                     # never leave a console waiting for nothing
+            log(f"tube: {stream.vid}: {type(e).__name__}: {e}")
+            if errors:
+                errors.close()
+            stream.fail(TUBE_NO_VIDEO)
+
+    def ask(self, stream):
+        """The video's formats: kept from a recent ask, or from YouTube."""
+        vid, now = stream.vid, time.time()
+        with self.lock:
+            link = self.links.get(vid)
+        if link and link["until"] > now:
+            return link
+        if not self.deno:
+            modes = ["plain"]
+        elif now < self.full_until:
+            modes = ["full"]
+        else:
+            modes = ["quick", "full"]
+        blocked = False
+        for mode in modes:
+            code, out, err = stream.run(self.command(mode, ["-j", "--no-playlist", "-f", TUBE_FORMAT, "--",
+                                                            f"https://www.youtube.com/watch?v={vid}"]),
+                                        90 if mode == "full" else 45)
+            if stream.stopped:
+                raise RuntimeError("Stopped.")
+            link = self.parse(out) if code == 0 else None
+            if link:
+                self.remember(vid, link)
+                return link
+            log(f"tube: {vid} ({mode}): {tube_reason(err) if code else 'no formats with links'}")
+            if code and tube_unplayable(err):
+                raise RuntimeError(TUBE_UNPLAYABLE)
+            if tube_blocked(err):
+                blocked = True
+                if mode == "quick":
+                    self.full_until = time.time() + 600
+        raise RuntimeError(TUBE_BLOCKED if blocked else TUBE_NO_VIDEO)
+
+    @staticmethod
+    def parse(out):
+        """What ffmpeg needs from yt-dlp's -j answer, or None."""
+        try:
+            info = json.loads(out or b"null")
+        except ValueError:
+            return None
+        if not isinstance(info, dict):
+            return None
+        fmts = [{k: f.get(k) for k in ("url", "http_headers", "vcodec", "acodec")}
+                for f in info.get("requested_formats") or [info]]
+        if not all(f["url"] for f in fmts):
+            return None
+        return {"formats": fmts, "title": clean(info.get("title") or "", 96) or "Untitled",
+                "duration": int(info.get("duration") or 0)}
+
+    def remember(self, vid, link):
+        now = time.time()
+        ends = [link_expiry(f["url"]) for f in link["formats"]]
+        link["until"] = min([now + TUBE_LINKS_S] + [end - 300 for end in ends if end])
+        with self.lock:
+            if len(self.links) > 300:
+                self.links.clear()
+            if link["until"] > now + 60:
+                self.links[vid] = link
+            self.known[vid] = (link["title"], link["duration"])
+
+    def forget(self, vid):
+        """Its links stopped working: ask YouTube again next time."""
+        with self.lock:
+            self.links.pop(vid, None)
 
 
 # ---------------------------------------------------------------------- downloads
@@ -748,6 +960,8 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                     data = stream.read(int(q.get("off", ["0"])[0]))
                 except ValueError:
                     return self.error(400, "Out of order.")
+                except RuntimeError as e:            # kept, so a console that retries hears it again
+                    return self.error(503, str(e))
                 if data is None:
                     tube.stop(sid)
                     return self.error(410, "The end.")
@@ -976,9 +1190,14 @@ def serve():
     admin_key = os.environ.get("XENITH_ADMIN_KEY", "")
     console_key = os.environ.get("XENITH_CONSOLE_KEY", "")
     web_dir = os.environ.get("XENITH_WEB_DIR", "web")
+    deno = os.environ.get("XENITH_DENO", "")
+    if deno and not os.access(deno, os.X_OK):
+        log(f"XENITH_DENO is set but {deno} can't run; Tube asks YouTube the quick way only")
+        deno = ""
+    plugins = os.environ.get("XENITH_YTDLP_PLUGINS", "")
     tube = Tube(os.environ.get("XENITH_YTDLP") or shutil.which("yt-dlp") or "",
                 os.environ.get("XENITH_FFMPEG") or shutil.which("ffmpeg") or "",
-                int(os.environ.get("XENITH_TUBE_STREAMS", "3")))
+                int(os.environ.get("XENITH_TUBE_STREAMS", "3")), deno, plugins if os.path.isdir(plugins) else "")
     public = os.environ.get("XENITH_PUBLIC_ADDR", "")
     downloads = os.environ.get("XENITH_DOWNLOAD_DIR", "downloads")
 
@@ -991,8 +1210,10 @@ def serve():
     httpd = ThreadingHTTPServer(("0.0.0.0", port),
                                 make_handler(state, store, admin_key, web_dir, console_key, tube, public, downloads))
     httpd.daemon_threads = True
+    tube_mode = ("on, Deno and PO tokens when needed" if tube.deno and tube.plugins else
+                 "on, Deno when needed" if tube.deno else "on") if tube.available() else "off"
     print(f"XenithOS Cloud {VERSION} on :{port} (admin routes {'on' if admin_key else 'off'}, "
-          f"Tube {'on' if tube.available() else 'off'})", flush=True)
+          f"Tube {tube_mode})", flush=True)
     httpd.serve_forever()
 
 
@@ -1029,25 +1250,47 @@ def selftest():
 
     dl_dir = os.path.join(tmp, "downloads")
     os.makedirs(dl_dir)
+    # Stand-ins for yt-dlp and ffmpeg. The yt-dlp one notes every call, and a few video ids
+    # act out what YouTube does: refuse the quick ask, refuse everything, private, slow.
     fake_ytdlp, fake_ffmpeg = os.path.join(tmp, "yt-dlp"), os.path.join(tmp, "ffmpeg")
     with open(fake_ytdlp, "w") as f:
-        f.write("#!/usr/bin/env python3\nimport json, sys\n"
-                "if '--flat-playlist' in sys.argv:\n"
-                "    print(json.dumps({'entries': [{'id': 'abcdefghijk', 'title': 'Test|video\\nOne', 'channel': 'Chan',"
-                " 'duration': 61}, {'id': 'bad'}]}))\n"
-                "else:\n"
-                "    print(json.dumps({'title': 'Test video', 'duration': 61, 'url': 'http://example.invalid/v',"
-                " 'vcodec': 'avc1', 'acodec': 'mp4a'}))\n")
+        f.write(r'''#!/usr/bin/env python3
+import json, os, sys, time
+a = sys.argv[1:]
+with open(os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "calls.txt"), "a") as calls:
+    calls.write(" ".join(a) + "\n")
+if "--flat-playlist" in a:
+    print(json.dumps({"entries": [{"id": "abcdefghijk", "title": "Test|video\nOne", "channel": "Chan",
+                                   "duration": 61}, {"id": "bad"}]}))
+    sys.exit()
+vid, full = a[-1][-11:], "--js-runtimes" in a
+if vid == "slowvideo11":
+    time.sleep(20)
+if vid == "privatevid1":
+    print("ERROR: [youtube] privatevid1: Private video. Sign in if you've been granted access", file=sys.stderr)
+    sys.exit(1)
+if vid == "blockedall1" or (vid == "quickfails1" and not full):
+    print("ERROR: [youtube] " + vid + ": Sign in to confirm you're not a bot", file=sys.stderr)
+    sys.exit(1)
+url = "http://example.invalid/" + ("empty" if vid == "emptystream" else "v") + "?expire=%d" % (time.time() + 7200)
+print(json.dumps({"title": "Test video", "duration": 61, "url": url, "vcodec": "avc1", "acodec": "mp4a"}))
+''')
     with open(fake_ffmpeg, "w") as f:
-        f.write("#!/usr/bin/env python3\nimport sys\n"
-                "sys.stdout.buffer.write(b'RIFF\\0\\0\\0\\0AVI LIST\\0\\0\\0\\0movi00dc\\4\\0\\0\\0\\xff\\xd8\\xff\\xd9')\n")
+        f.write(r'''#!/usr/bin/env python3
+import sys
+if any("/empty" in arg for arg in sys.argv):
+    print("http://example.invalid/empty: Server returned 403 Forbidden (access denied)", file=sys.stderr)
+else:
+    sys.stdout.buffer.write(b"RIFF\0\0\0\0AVI LIST\0\0\0\0movi00dc\4\0\0\0\xff\xd8\xff\xd9")
+''')
     os.chmod(fake_ytdlp, 0o755)
     os.chmod(fake_ffmpeg, 0o755)
 
     state = State(os.path.join(tmp, "state"))
     store = Store(store_dir)
+    tube = Tube(fake_ytdlp, fake_ffmpeg, 3, deno=fake_ytdlp, plugins=tmp)   # the stand-in never runs "Deno"
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state, store, "k3y", web_dir, "c0nsole",
-                                                               Tube(fake_ytdlp, fake_ffmpeg), "", dl_dir))
+                                                               tube, "", dl_dir))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{httpd.server_address[1]}"
 
@@ -1194,23 +1437,86 @@ def selftest():
           and b"/download/xenithos-source.tar.gz" in body)
 
     # Tube, with stand-in yt-dlp and ffmpeg
+    calls_file = os.path.join(tmp, "calls.txt")
+
+    def yt_calls(vid=None):
+        """The stand-in yt-dlp's calls (argument lists); asks for one video when vid is given."""
+        if not os.path.exists(calls_file):
+            return []
+        with open(calls_file) as f:
+            rows = [line.split() for line in f]
+        return [r for r in rows if vid is None or ("-j" in r and r[-1].endswith(vid))]
+
+    def kind(row):
+        return "full" if "--js-runtimes" in row and "--plugin-dirs" in row else \
+               "quick" if "--no-js-runtimes" in row and "--plugin-dirs" not in row else "?"
+
+    def play(vid, at=0):
+        """Start a video and ask for its first chunk until it's more than "not ready yet"."""
+        code, body = req("POST", "/v1/tube/start", tform + f"&id={vid}&t={at}")
+        sid = kvparse(body).get("session", "") if code == 200 else ""
+        for _ in range(12):
+            got = req("GET", f"/v1/tube/chunk?s={sid}&off=0")
+            if got[0] != 204:
+                return code, sid, got
+        return code, sid, (204, b"")
+
     tform = f"token={token}"
     check("tube needs a profile", req("POST", "/v1/tube/search", "q=doom")[0] == 401)
     code, body = req("POST", "/v1/tube/search", tform + "&q=doom")
     check("tube search", code == 200 and body == b"abcdefghijk|Test video One|Chan|61\n")
+    check("tube search leaves Deno out", any("--flat-playlist" in r and "--no-js-runtimes" in r and
+                                             "--plugin-dirs" not in r for r in yt_calls()))
     check("tube bad id", req("POST", "/v1/tube/start", tform + "&id=../x")[0] == 400)
+    t0 = time.monotonic()
     code, body = req("POST", "/v1/tube/start", tform + "&id=abcdefghijk&t=5")
     sess = kvparse(body)
-    check("tube start", code == 200 and TUBE_SID_RE.match(sess.get("session", "")) and sess.get("fps") == "20"
-          and sess.get("title") == "Test video" and sess.get("duration") == "61")
+    check("tube start answers at once, with what the search said", code == 200 and time.monotonic() - t0 < 1
+          and TUBE_SID_RE.match(sess.get("session", "")) and sess.get("fps") == "20"
+          and sess.get("title") == "Test video One" and sess.get("duration") == "61")
     sid = sess.get("session", "")
     code, first = req("GET", f"/v1/tube/chunk?s={sid}&off=0")
     check("tube chunk", code == 200 and first.startswith(b"RIFF") and b"movi00dc" in first)
+    check("tube asks the quick way first", [kind(r) for r in yt_calls("abcdefghijk")] == ["quick"])
     check("tube chunk again", req("GET", f"/v1/tube/chunk?s={sid}&off=0") == (200, first))
     check("tube chunk out of order", req("GET", f"/v1/tube/chunk?s={sid}&off=3")[0] == 400)
     code, _ = req("GET", f"/v1/tube/chunk?s={sid}&off={len(first)}")
     check("tube stream ends", code == 410 and req("GET", f"/v1/tube/chunk?s={sid}&off={len(first)}")[0] == 410)
     check("tube stop", req("GET", f"/v1/tube/stop?s={sid}")[0] == 200)
+    code, sid, got = play("abcdefghijk", 30)
+    check("tube skipping ahead reuses the links", got[0] == 200 and len(yt_calls("abcdefghijk")) == 1)
+
+    code, sid, got = play("quickfails1")
+    check("tube refused the quick way: the full way gets it", got[0] == 200
+          and [kind(r) for r in yt_calls("quickfails1")] == ["quick", "full"] and tube.full_until > time.time())
+    code, sid, got = play("privatevid1")
+    check("tube goes straight to the full way for a while", [kind(r) for r in yt_calls("privatevid1")] == ["full"])
+    check("tube says when a video can't be played", got[0] == 503 and b"can't be played" in got[1])
+    check("tube says it again to a console that retries",
+          req("GET", f"/v1/tube/chunk?s={sid}&off=0") == got)
+    tube.full_until = 0
+    code, sid, got = play("blockedall1")
+    check("tube says when YouTube refuses both ways", got[0] == 503 and b"turning XenithOS Cloud away" in got[1]
+          and [kind(r) for r in yt_calls("blockedall1")] == ["quick", "full"])
+    code, sid, got = play("emptystream")
+    code, sid, again = play("emptystream")
+    check("tube links that stop working are asked for again", got[0] == 503 and b"stopped sending" in got[1]
+          and again[0] == 503 and len(yt_calls("emptystream")) == 2)
+    code, body = req("POST", "/v1/tube/start", tform + "&id=slowvideo11")
+    sid = kvparse(body).get("session", "")
+    slow = tube.get(sid)
+    for _ in range(40):                            # wait for the stand-in yt-dlp to be running
+        if slow and slow.helper:
+            break
+        time.sleep(0.05)
+    t0 = time.monotonic()
+    req("GET", f"/v1/tube/stop?s={sid}")
+    for _ in range(60):
+        if not slow or not slow.helper:
+            break
+        time.sleep(0.05)
+    check("tube stop ends a slow ask", slow and not slow.helper and time.monotonic() - t0 < 3
+          and req("GET", f"/v1/tube/chunk?s={sid}&off=0")[0] == 410)
     check("tube thumb bad id", req("GET", "/v1/tube/thumb/..x.jpg")[0] == 404)
 
     reloaded = State(os.path.join(tmp, "state"))

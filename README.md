@@ -92,8 +92,17 @@ keyboard controls and how to undo it are in [linux/README.md](linux/README.md).
 leaderboards, the downloads and the website (`server/web/`) over plain HTTP, because the Xbox has no TLS. Tube
 also needs `yt-dlp` and `ffmpeg` on the server; it switches itself off without them.
 
+YouTube is hard on server addresses, so Tube asks for a video at most twice. First it tries the quick way, without
+JavaScript, which takes a few seconds. If YouTube refuses, it tries the full way: Deno solves YouTube's
+JavaScript challenges, and a local token helper (`server/xenith-pot.service`, the
+[bgutil PO token provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider)) gives the mobile web
+client a PO token. Starting a video answers at once, and the console waits on the chunk requests. A video's
+links are kept for an hour, so skipping ahead doesn't ask YouTube again. `server/setup-tube.sh` installs or
+updates all of it (ffmpeg, Deno, the yt-dlp standalone build, the plugin and the token helper), checking each
+download against its published checksum.
+
 ```bash
-python3 server/xenith_cloud.py --selftest      # 80 checks, no network needed
+python3 server/xenith_cloud.py --selftest      # 90 checks, no network needed
 ```
 
 Profiles: passcodes are stored as salted PBKDF2 hashes and sign-in tokens as SHA-256 hashes, so the state
@@ -117,9 +126,13 @@ echo "XENITH_PUBLIC_ADDR=<this server's ip>:8795" >> /etc/xenith-cloud.env
 # store files: the .elf32/.wad files, art/thumbs/*.png and *.ximg, and a store.json (see server/store.example.json)
 systemctl daemon-reload && systemctl enable --now xenith-cloud
 ufw allow 8795/tcp
+# Tube: ffmpeg, Deno, yt-dlp and the PO token helper (run it again later to update them)
+cp server/setup-tube.sh server/xenith-pot.service /opt/xenith-cloud/
+bash /opt/xenith-cloud/setup-tube.sh
 ```
 
-From the server: `xenith send "XenithOS 0.5 is out"` (news), `xenith motd "Welcome"` (banner), `xenith status`.
+From the server: `xenith send "XenithOS 0.5 is out"` (news), `xenith motd "Welcome"` (banner), `xenith status`,
+`xenith tube-update` (newest yt-dlp, Deno and token helper, when YouTube changes something).
 
 ## Building
 
