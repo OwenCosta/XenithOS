@@ -30,6 +30,8 @@ for app in apps/*/; do
     echo "== $name"
     make --no-print-directory -C "$app"
     cp "$app/$name.elf32" "usb/apps/$name.elf32"
+    [ -f "$app/app.txt" ] && cp "$app/app.txt" "usb/apps/$name.txt"
+    [ -f "art/thumbs/$name.ximg" ] && cp "art/thumbs/$name.ximg" "usb/apps/$name.ximg"
 done
 
 echo

@@ -1,136 +1,48 @@
-/* VOLT: the first XENITH app.
+/* VOLT: a XenithOS game.
  *
- * Steer a streak of light around the grid, collect sparks to grow, and don't hit
- * the walls or yourself. Every 5 sparks the streak gets faster.
+ * Steer a streak of light around the grid, collect sparks to grow, and don't hit the
+ * walls or yourself. Every 5 sparks the streak speeds up and sparks are worth more.
  *
- * Controls: D-pad / left stick steer, START pause, A start / retry, BACK returns to XENITH.
- * After a crash, X uploads the score to the XENITH Cloud leaderboard.
- *
- * Drawing is incremental (only the head, the old tail and the spark change per step),
- * which keeps it fast and flicker-free on a single framebuffer.
+ * D-pad / left stick steer. START pauses. After a crash: A plays again, X uploads your
+ * score to XenithOS Cloud, B goes back to XenithOS.
  */
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <xenos/xenos.h>
-#include <console/console.h>
-#include <input/input.h>
-#include <usb/usbmain.h>
-#include <time/time.h>
-#include <elf/elf.h>
-#include <libfat/fat.h>
-#include <ppc/timebase.h>
-#include <xenon_soc/xenon_power.h>
-
-#include "gfx.h"
-#include "theme.h"
-#include "net.h"
+#include "audio.h"
+#include "avatar.h"
 #include "config.h"
+#include "gfx.h"
+#include "net.h"
+#include "platform.h"
+#include "theme.h"
+#include "ui.h"
 
-static const uint32_t C_FIELD = RGB(16, 16, 21);
-static const uint32_t C_SPARK = RGB(255, 214, 90);
-
-/* ------------------------------------------------------------------ layout */
-static int S, M, TOP;
-static int CELL, GW, GH, OX, OY;
-
-#define GW_MAX 160
-#define GH_MAX 90
+#define C_SPARK RGB(255, 214, 90)
+#define GW_MAX 64
+#define GH_MAX 40
 #define CAP (GW_MAX * GH_MAX)
 
-/* ------------------------------------------------------------------- state */
 enum { UP, DOWN, LEFT, RIGHT };
+enum { S_TITLE, S_PLAY, S_PAUSE, S_OVER };
 
-static unsigned char occ[CAP];          /* 1 where the streak is */
-static short body_x[CAP], body_y[CAP];  /* ring buffer, head at index `head` */
-static int head, len, grow;
-static int dir, want;
-static int spark_x, spark_y;
-static int score, best, sparks_eaten;
-static int period;                      /* frames per step */
-static int rumble_frames;
+static int CELL, GW, GH, OX, OY;
+static unsigned char occ[CAP];
+static short bx[CAP], by[CAP];       /* ring buffer, head at index `head` */
+static int head, len, grow, dir, want, spark_x, spark_y;
+static int score, best, sparks, state;
+static uint64_t next_step, rumble_until;
+static char result_line[96];
 
-/* ------------------------------------------------------------------- input */
-static struct controller_data_s cur, prev;
-#define PRESSED(f) (cur.f && !prev.f)
-#define STICK_TH 20000
-
-static void poll_input(void)
-{
-    prev = cur;
-    usb_do_poll();
-    get_controller_data(&cur, 0);
-    mdelay(16);
-    if (rumble_frames > 0 && --rumble_frames == 0)
-        set_controller_rumble(0, 0, 0);
-}
-
-static void read_direction(void)
-{
-    int d = -1;
-    if (cur.up || cur.s1_y > STICK_TH) d = UP;
-    else if (cur.down || cur.s1_y < -STICK_TH) d = DOWN;
-    else if (cur.left || cur.s1_x < -STICK_TH) d = LEFT;
-    else if (cur.right || cur.s1_x > STICK_TH) d = RIGHT;
-    if (d < 0) return;
-    /* no reversing straight into yourself */
-    if ((d == UP && dir == DOWN) || (d == DOWN && dir == UP) ||
-        (d == LEFT && dir == RIGHT) || (d == RIGHT && dir == LEFT))
-        return;
-    want = d;
-}
-
-static void buzz(int strength, int frames)
-{
-    set_controller_rumble(0, strength / 2, strength);
-    rumble_frames = frames;
-}
-
-/* --------------------------------------------------------------- drawing */
-static void cell(int x, int y, uint32_t c)
-{
-    gfx_rect(OX + x * CELL + 1, OY + y * CELL + 1, CELL - 2, CELL - 2, c);
-}
-
-static void draw_hud(void)
-{
-    char buf[48];
-    int y = M / 2;
-    gfx_rect(SCR_W / 2, y, SCR_W / 2 - M, GFX_TEXT_H(S), C_BG);
-    snprintf(buf, sizeof buf, "SCORE %d   BEST %d", score, best);
-    gfx_text(SCR_W - M - gfx_text_w(S, buf), y, S, C_TEXT, buf);
-}
-
-static void draw_chrome(void)
-{
-    int y = M / 2;
-    gfx_clear(C_BG);
-    int x = M + gfx_brand(M, y, S, C_ACCENT, C_TEXT);
-    x += S * 6;
-    x += gfx_text(x, y, S, C_DIM, "/") + S * 6;
-    gfx_text(x, y, S, C_TEXT, "VOLT");
-    gfx_text(M, SCR_H - M / 2 - GFX_TEXT_H(S - 1), S - 1, C_DIM,
-             "STEER WITH STICK OR D-PAD     START PAUSE     BACK RETURN TO XENITHOS");
-    gfx_rect(OX - 2, OY - 2, GW * CELL + 4, GH * CELL + 4, C_PANEL);
-    gfx_rect(OX, OY, GW * CELL, GH * CELL, C_FIELD);
-    draw_hud();
-}
-
-/* Centered message box over the field. Pass NULL for line2 to skip it. */
-static void banner(const char *line1, const char *line2, uint32_t c1)
-{
-    int w = SCR_W / 2, h = GFX_TEXT_H(S + 2) + GFX_TEXT_H(S - 1) + S * 18;
-    int x = (SCR_W - w) / 2, y = OY + (GH * CELL - h) / 2;
-    gfx_rect(x, y, w, h, C_PANEL);
-    gfx_rect(x, y, w, S, C_ACCENT);
-    gfx_text_c(SCR_W / 2, y + S * 7, S + 2, c1, line1);
-    if (line2)
-        gfx_text_c(SCR_W / 2, y + h - S * 6 - GFX_TEXT_H(S - 1), S - 1, C_DIM, line2);
-}
-
-/* ------------------------------------------------------------------ logic */
 static int idx(int x, int y) { return y * GW + x; }
+
+static int step_ms(void)
+{
+    int ms = 115 - (sparks / 5) * 9;
+    return ms < 55 ? 55 : ms;
+}
 
 static void place_spark(void)
 {
@@ -139,218 +51,252 @@ static void place_spark(void)
     n = rand() % free_cells;
     for (i = 0; i < GW * GH; i++) {
         if (occ[i]) continue;
-        if (n-- == 0) {
-            spark_x = i % GW;
-            spark_y = i / GW;
-            cell(spark_x, spark_y, C_SPARK);
-            return;
-        }
+        if (n-- == 0) { spark_x = i % GW; spark_y = i / GW; return; }
     }
 }
 
 static void new_game(void)
 {
     int i, sx = GW / 4, sy = GH / 2;
-
     memset(occ, 0, sizeof occ);
-    head = 0;
-    len = 0;
-    grow = 0;
-    score = 0;
-    sparks_eaten = 0;
-    period = 7;
+    head = len = grow = score = sparks = 0;
     dir = want = RIGHT;
-
-    draw_chrome();
-    for (i = 0; i < 4; i++) {                /* start 4 cells long, heading right */
+    for (i = 0; i < 4; i++) {
         head = i;
-        body_x[head] = sx + i;
-        body_y[head] = sy;
+        bx[head] = sx + i;
+        by[head] = sy;
         occ[idx(sx + i, sy)] = 1;
         len++;
-        cell(sx + i, sy, i == 3 ? C_TEXT : C_ACCENT);
     }
     place_spark();
-    gfx_flush();
+    result_line[0] = 0;
+    next_step = ui_ms() + 400;
+    state = S_PLAY;
 }
 
-/* Advance one step. Returns 0 when the streak crashes. */
+static void read_direction(void)
+{
+    int d = -1;
+    if (cur.up || cur.ly > STICK_TH) d = UP;
+    else if (cur.down || cur.ly < -STICK_TH) d = DOWN;
+    else if (cur.left || cur.lx < -STICK_TH) d = LEFT;
+    else if (cur.right || cur.lx > STICK_TH) d = RIGHT;
+    if (d < 0) return;
+    if ((d == UP && dir == DOWN) || (d == DOWN && dir == UP) || (d == LEFT && dir == RIGHT) || (d == RIGHT && dir == LEFT))
+        return;
+    want = d;
+}
+
+static void rumble(int l, int r, int ms)
+{
+    plat_rumble(l, r);
+    rumble_until = ui_ms() + ms;
+}
+
+/* One step. Returns 0 on a crash. */
 static int step(void)
 {
-    int hx = body_x[head], hy = body_y[head];
-    int nx = hx, ny = hy;
-
+    int nx = bx[head], ny = by[head], eating;
     dir = want;
     if (dir == UP) ny--;
     else if (dir == DOWN) ny++;
     else if (dir == LEFT) nx--;
     else nx++;
-
     if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) return 0;
 
-    int eating = (nx == spark_x && ny == spark_y);
-
-    /* Move the tail first (unless growing), so following your own tail is legal. */
-    if (!eating && grow == 0) {
+    eating = nx == spark_x && ny == spark_y;
+    if (!eating && grow == 0) {                  /* the tail moves first, so chasing it is fine */
         int tail = (head - len + 1 + CAP) % CAP;
-        occ[idx(body_x[tail], body_y[tail])] = 0;
-        cell(body_x[tail], body_y[tail], C_FIELD);
+        occ[idx(bx[tail], by[tail])] = 0;
         len--;
     } else if (grow > 0) {
         grow--;
     }
-
     if (occ[idx(nx, ny)]) return 0;
 
-    cell(hx, hy, C_ACCENT);                   /* old head becomes body */
     head = (head + 1) % CAP;
-    body_x[head] = nx;
-    body_y[head] = ny;
+    bx[head] = nx;
+    by[head] = ny;
     occ[idx(nx, ny)] = 1;
     len++;
-    cell(nx, ny, C_TEXT);
 
     if (eating) {
-        sparks_eaten++;
-        score += 10 * (8 - period);           /* faster = more points */
+        sparks++;
+        score += 10 * (1 + sparks / 5);
         grow += 2;
-        if (sparks_eaten % 5 == 0 && period > 3) period--;
         if (score > best) best = score;
-        draw_hud();
-        buzz(180, 6);
+        sfx(SFX_SPARK);
+        rumble(60, 160, 90);
         place_spark();
     }
     return 1;
 }
 
-/* Send the last score to XENITH Cloud and show the rank. */
-static void upload_score(void)
-{
-    char body[64];
-    struct http_resp r;
-    int st;
+/* ------------------------------------------------------------------ cloud */
 
-    if (!cfg.server[0]) {
-        banner("NO SERVER", "SET server= IN XENITH/CONFIG.TXT", C_WARN);
-        gfx_flush();
+static void upload(void)
+{
+    char form[160];
+    struct http_resp r;
+    int code;
+    if (!cfg.server[0]) { snprintf(result_line, sizeof result_line, "No server set in xenith/config.txt"); return; }
+    if (prof.signed_in) snprintf(form, sizeof form, "token=%s&score=%d", prof.token, score);
+    else snprintf(form, sizeof form, "name=%s&score=%d", cfg.name, score);
+    ui_busy_begin("Uploading your score", prof.signed_in ? prof.name : cfg.name);
+    if (!net_up()) {
+        ui_busy_end();
+        snprintf(result_line, sizeof result_line, "No network. Plug in an Ethernet cable.");
+        sfx(SFX_ERROR);
         return;
     }
-    banner("UPLOADING", "CONNECTING TO XENITHOS CLOUD", C_TEXT);
-    gfx_flush();
-    snprintf(body, sizeof body, "name=%s&score=%d", cfg.name, score);
-    st = http_request(cfg.server, "POST", "/v1/scores/volt", body, strlen(body), 4096, NULL, NULL, &r);
-    if (st == 200) {
-        char msg[64];
+    code = http_request(cfg.server, "POST", "/v1/scores/volt", form, (int)strlen(form), 4096, NULL, NULL, &r);
+    ui_busy_end();
+    if (code == 200) {
         int rank = atoi(r.body);
-        if (rank > 0) snprintf(msg, sizeof msg, "%s IS RANK #%d     A PLAY AGAIN", cfg.name, rank);
-        else snprintf(msg, sizeof msg, "NOT IN THE TOP 50 YET     A PLAY AGAIN");
-        banner("UPLOADED", msg, C_OK);
+        if (rank > 0) snprintf(result_line, sizeof result_line, "Uploaded. You're #%d on the leaderboard.", rank);
+        else snprintf(result_line, sizeof result_line, "Uploaded. Not in the top 50 yet.");
+        sfx(SFX_SUCCESS);
     } else {
-        banner("UPLOAD FAILED", st < 0 ? net_error(st) : st == 429 ? "WAIT A FEW SECONDS" : "SERVER REFUSED IT", C_BAD);
+        char err[96] = "";
+        if (r.body) {
+            const char *e = strstr(r.body, "error=");
+            if (e) {
+                snprintf(err, sizeof err, "%s", e + 6);
+                if (strchr(err, '\n')) *strchr(err, '\n') = 0;
+            }
+        }
+        snprintf(result_line, sizeof result_line, "%s", err[0] ? err : code < 0 ? net_error(code) : "The server refused it.");
+        sfx(SFX_ERROR);
     }
     http_free(&r);
-    gfx_flush();
 }
 
-static void return_to_xenith(void)
+/* ------------------------------------------------------------------ drawing */
+
+static void cell(int x, int y, uint32_t c, float pad)
 {
-    set_controller_rumble(0, 0, 0);
-    draw_chrome();
-    banner("RETURNING", NULL, C_TEXT);
-    gfx_flush();
-    elf_runFromDisk(XENITH_SHELL_PATH);
-    /* If XENITH isn't found, falling out of main() drops back to XeLL. */
+    gfx_fill_rrect(OX + x * CELL + pad, OY + y * CELL + pad, CELL - 2 * pad, CELL - 2 * pad, CELL * 0.28f, c, 255);
 }
 
-/* ------------------------------------------------------------------- main */
+static void overlay(const char *title, const char *big, const char *line1, const char *line2)
+{
+    int w = 520, h = 250, x = (SCR_W - w) / 2, y = OY + (GH * CELL - h) / 2;
+    gfx_fill_rrect(OX - 8.0f, OY - 8.0f, GW * CELL + 16.0f, GH * CELL + 16.0f, 16, C_BG, 150);
+    gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 18, C_SURFACE, 255);
+    gfx_str_c(FONT_BODY_SB, SCR_W / 2, y + 26, C_SUB, title);
+    gfx_str_c(FONT_BIG, SCR_W / 2, y + 56, C_TEXT, big);
+    if (line1) gfx_str_c(FONT_BODY, SCR_W / 2, y + 150, C_SUB, line1);
+    if (line2) gfx_str_c(FONT_BODY_SB, SCR_W / 2, y + 186, C_ACCENT_HI, line2);
+}
+
+static void draw(void)
+{
+    int i;
+    char buf[64];
+    float t = (ui_ms() % 100000) / 1000.0f;
+
+    ui_bg();
+    gfx_str(FONT_TITLE, M, 26, C_TEXT, "VOLT");
+    snprintf(buf, sizeof buf, "Score %d", score);
+    gfx_str(FONT_LABEL, M + 120, 30, C_TEXT, buf);
+    snprintf(buf, sizeof buf, "Best %d", best);
+    gfx_str(FONT_BODY, M + 300, 33, C_SUB, buf);
+    ui_profile_chip(SCR_W - M, 46);
+
+    gfx_fill_rrect(OX - 8.0f, OY - 8.0f, GW * CELL + 16.0f, GH * CELL + 16.0f, 16, C_SURFACE, 255);
+    for (i = 0; i < GW * GH; i++)
+        gfx_rect(OX + (i % GW) * CELL + CELL / 2, OY + (i / GW) * CELL + CELL / 2, 2, 2, C_SURFACE2);
+
+    for (i = len - 1; i >= 0; i--) {
+        int k = (head - i + CAP) % CAP;
+        cell(bx[k], by[k], i == 0 ? 0xFFFFFF : gfx_mix(C_ACCENT, RGB(30, 80, 190), i * 128 / (len + 1)), 1.5f);
+    }
+    {
+        float pulse = 3.0f + 1.5f * sinf(t * 7);
+        cell(spark_x, spark_y, C_SPARK, pulse);
+    }
+
+    if (state == S_TITLE)
+        overlay("XenithOS game", "VOLT", "Grab the sparks. Don't hit the walls or yourself.", "Press A to start");
+    else if (state == S_PAUSE)
+        overlay("Take a breather", "Paused", "Press START to keep going", NULL);
+    else if (state == S_OVER) {
+        snprintf(buf, sizeof buf, "%d", score);
+        overlay("You crashed", buf, result_line[0] ? result_line : (score >= best && score ? "New best!" : "So close."),
+                cfg.server[0] && score && !result_line[0] ? "X uploads your score" : NULL);
+    }
+
+    if (state == S_OVER) ui_hints(cfg.server[0] ? "A=Play again;X=Upload score;B=XenithOS" : "A=Play again;B=XenithOS");
+    else if (state == S_PLAY) ui_hints("START=Pause");
+    else ui_hints("A=Start;B=XenithOS");
+}
+
+static void back_to_shell(void)
+{
+    plat_rumble(0, 0);
+    ui_loading_frame("Returning to XenithOS", NULL);
+    plat_launch(XENITH_SHELL_PATH);
+}
+
 int main(void)
 {
-    int frame = 0, paused = 0, alive = 0, crashed = 0, uploaded = 0;
+    int uploaded = 0;
 
-    xenos_init(VIDEO_MODE_AUTO);
-    console_init();
-    console_close();
-    xenon_make_it_faster(XENON_SPEED_FULL);
+    plat_init();
     gfx_init();
+    ui_init();
+    plat_storage_init();
+    config_load();
+    settings_load();
+    profile_load();
+    audio_init();
+    audio_set_volume(st.volume);
+    srand((unsigned)plat_time_us());
 
-    S = SCR_H >= 600 ? 3 : 2;
-    M = SCR_W / 16;
-    TOP = M / 2 + GFX_TEXT_H(S) + S * 10;
-    CELL = S * 6;
+    CELL = SCR_H >= 600 ? 24 : 16;
     GW = (SCR_W - 2 * M) / CELL;
-    GH = (SCR_H - TOP - M) / CELL;
+    GH = (SCR_H - 120 - 70) / CELL;
     if (GW > GW_MAX) GW = GW_MAX;
     if (GH > GH_MAX) GH = GH_MAX;
     OX = (SCR_W - GW * CELL) / 2;
-    OY = TOP;
-
-    usb_init();
-    usb_do_poll();
-    fatInitDefault();
-    config_load();
-    srand((unsigned)mftb());
-
-    /* Title */
-    draw_chrome();
-    banner("VOLT", "PRESS A TO START", C_ACCENT);
-    gfx_flush();
+    OY = 120;
+    new_game();
+    state = S_TITLE;
+    ui_fade_in();
 
     for (;;) {
-        poll_input();
+        ui_poll();
+        if (rumble_until && ui_ms() > rumble_until) { plat_rumble(0, 0); rumble_until = 0; }
 
-        if (PRESSED(back)) { return_to_xenith(); return 0; }
-
-        if (!alive) {
-            if (PRESSED(a) || PRESSED(start)) {
-                new_game();
-                alive = 1;
-                paused = 0;
-                frame = 0;
-                crashed = 0;
-                uploaded = 0;
-            } else if (PRESSED(x) && crashed && !uploaded && score > 0) {
-                set_controller_rumble(0, 0, 0);
-                upload_score();
-                uploaded = 1;
-            }
-            continue;
-        }
-
-        if (PRESSED(start)) {
-            paused = !paused;
-            if (paused) {
-                banner("PAUSED", "START TO RESUME", C_TEXT);
-                gfx_flush();
-            } else {
-                /* Redraw the whole field under the banner. */
-                int i;
-                gfx_rect(OX, OY, GW * CELL, GH * CELL, C_FIELD);
-                for (i = 0; i < len; i++) {
-                    int k = (head - i + CAP) % CAP;
-                    cell(body_x[k], body_y[k], i == 0 ? C_TEXT : C_ACCENT);
+        switch (state) {
+        case S_TITLE:
+            if (PRESSED(a) || PRESSED(start)) { sfx(SFX_SELECT); new_game(); }
+            else if (PRESSED(b) || PRESSED(back)) { sfx(SFX_BACK); back_to_shell(); return 0; }
+            break;
+        case S_PLAY:
+            if (PRESSED(start)) { state = S_PAUSE; sfx(SFX_SELECT); break; }
+            read_direction();
+            while (ui_ms() >= next_step && state == S_PLAY) {
+                next_step += step_ms();
+                if (!step()) {
+                    state = S_OVER;
+                    uploaded = 0;
+                    sfx(SFX_CRASH);
+                    rumble(200, 255, 350);
                 }
-                cell(spark_x, spark_y, C_SPARK);
-                gfx_flush();
             }
+            break;
+        case S_PAUSE:
+            if (PRESSED(start)) { state = S_PLAY; next_step = ui_ms() + 300; sfx(SFX_SELECT); }
+            else if (PRESSED(back)) { back_to_shell(); return 0; }
+            break;
+        case S_OVER:
+            if (PRESSED(a)) { sfx(SFX_SELECT); new_game(); }
+            else if (PRESSED(x) && cfg.server[0] && score && !uploaded) { sfx(SFX_SELECT); upload(); uploaded = 1; }
+            else if (PRESSED(b) || PRESSED(back)) { sfx(SFX_BACK); back_to_shell(); return 0; }
+            break;
         }
-        if (paused) continue;
-
-        read_direction();
-        if (++frame < period) continue;
-        frame = 0;
-
-        if (!step()) {
-            char buf[48];
-            alive = 0;
-            crashed = 1;
-            cell(body_x[head], body_y[head], C_BAD);
-            buzz(255, 20);
-            if (score > 0 && cfg.server[0])
-                snprintf(buf, sizeof buf, "SCORE %d   A RETRY   X UPLOAD", score);
-            else
-                snprintf(buf, sizeof buf, "SCORE %d     A TO RETRY", score);
-            banner("CRASHED", buf, C_BAD);
-        }
-        gfx_flush();
+        draw();
+        ui_end_frame();
     }
 }

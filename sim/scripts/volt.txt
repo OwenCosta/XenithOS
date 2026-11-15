@@ -1,0 +1,19 @@
+# VOLT: title, a bit of play, pause, crash into the wall.
+wait 40
+shot volt_title
+press a
+wait 30
+press down
+wait 25
+press right
+wait 40
+shot volt_play
+press start
+wait 10
+shot volt_pause
+press start
+wait 5
+press up
+wait 400
+shot volt_over
+quit

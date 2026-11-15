@@ -21,7 +21,7 @@ CFLAGS		=	-g -O2 -Wall -Wno-unused -Wno-pointer-sign -Wno-format-truncation -Wno
 CXXFLAGS	=	$(CFLAGS)
 LDFLAGS		=	-g $(MACHDEP) -Wl,--gc-sections -Wl,-Map,$(notdir $@).map
 
-LIBS		:=	-lfat -lxenon -lm
+LIBS		:=	-lfat -lz -lxenon -lm
 LIBDIRS		:=
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))

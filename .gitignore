@@ -7,3 +7,6 @@ config.local.txt
 server/state/
 server/store/
 .claude/
+sim/xsim
+sim/xvolt
+sim/out/

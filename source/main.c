@@ -1,446 +1,239 @@
-/* XENITH OS: a custom console shell for the Xbox 360, built on LibXenon.
+/* XenithOS: a homebrew shell for the Xbox 360, built on libxenon.
  *
- * Boots from XeLL, shows the XENITH splash, then a home menu:
- *   APPS        find .elf programs on USB/HDD and launch them
- *   STORE       browse and install apps from XENITH Cloud (screens_cloud.c)
- *   CLOUD       live server stats, inbox, leaderboards (screens_cloud.c)
- *   SYSTEM      live temperatures, video output, hardware info
- *   CONTROLLER  button/stick/trigger tester, triggers drive rumble
- *   RESTART / POWER OFF
- * GUIDE on the home screen exits back to XeLL (handy while developing).
+ * Boot: the wordmark and start-up chime, while storage and settings load.
+ * Home: profile at the top, five tiles (Apps, Store, Cloud, Profile, Settings),
+ *       and a "Jump back in" row of installed apps with their thumbnails.
+ * Guide or Back on the home screen opens the power menu.
  */
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <strings.h>
-#include <dirent.h>
 
-#include <xenos/xenos.h>
-#include <console/console.h>
-#include <input/input.h>
-#include <usb/usbmain.h>
-#include <time/time.h>
-#include <diskio/ata.h>
-#include <elf/elf.h>
-#include <libfat/fat.h>
-#include <xenon_soc/xenon_power.h>
-#include <xenon_smc/xenon_smc.h>
-
+#include "apps.h"
+#include "audio.h"
+#include "avatar.h"
+#include "config.h"
 #include "gfx.h"
+#include "icons.h"
+#include "net.h"
+#include "platform.h"
+#include "screens.h"
 #include "theme.h"
 #include "ui.h"
-#include "net.h"
-#include "config.h"
-#include "screens.h"
 
-#define XENITH_VERSION "0.3.2"
+/* ------------------------------------------------------------------ boot */
 
-int bdev_enum(int handle, const char **name);
-
-/* ------------------------------------------------------------ boot splash */
-static void boot_splash(void)
+static void boot(void)
 {
-    int L = S * 5;
-    int y = SCR_H / 2 - GFX_TEXT_H(L) / 2 - L;
-    int bw = GFX_BRAND_W(L);
-    int bx = SCR_W / 2 - bw / 2;
-    int by = y + GFX_TEXT_H(L) + L * 2;
-    int t, i;
+    int s = SCR_W / 170, bw, bx, by;
+    uint64_t start;
+    if (s < 4) s = 4;
+    bw = GFX_BRAND_W(s);
+    bx = (SCR_W - bw) / 2;
+    by = SCR_H / 2 - GFX_TEXT_H(s) / 2 - 20;
 
-    gfx_clear(C_BG);
-    gfx_flush();
+    ui_bg();
+    gfx_present();
 
-    for (t = 0; t <= 16; t++) {
-        gfx_brand(bx, y, L, gfx_mix(C_BG, C_TEXT, t * 16), gfx_mix(C_BG, C_ACCENT, t * 16));
-        gfx_flush();
-        usb_do_poll();
-        mdelay(35);
-    }
+    plat_storage_init();
+    config_load();
+    settings_load();
+    profile_load();
+    audio_init();
+    audio_set_volume(st.volume);
+    audio_set_ui_sounds(st.ui_sounds);
+    if (st.boot_sound) sfx(SFX_BOOT);
 
-    /* Storage init is slow-ish; do it while the accent bar sweeps. */
-    for (i = 1; i <= 24; i++) {
-        gfx_rect(bx, by, bw * i / 24, S * 2, C_ACCENT);
-        gfx_flush();
-        usb_do_poll();
-        if (i == 8) { xenon_ata_init(); xenon_atapi_init(); fatInitDefault(); config_load(); }
-        mdelay(20);
-    }
+    start = ui_ms();
+    for (;;) {
+        uint64_t t = ui_ms() - start;
+        float f;
+        int a, drift;
+        ui_poll();
+        if (t > 400 && (PRESSED(a) || PRESSED(start))) break;
+        if (t > 2500) break;
 
-    set_controller_rumble(0, 60, 160);
-    mdelay(180);
-    set_controller_rumble(0, 0, 0);
-
-    gfx_text_c(SCR_W / 2, by + S * 12, S, C_DIM, "VERSION " XENITH_VERSION);
-    gfx_flush();
-    mdelay(900);
-}
-
-/* ------------------------------------------------------------------- apps */
-#define MAX_APPS 64
-static char apps[MAX_APPS][256];
-static int napps;
-
-static int is_elf(const char *name)
-{
-    const char *dot = strrchr(name, '.');
-    return dot && (!strcasecmp(dot, ".elf") || !strcasecmp(dot, ".elf32"));
-}
-
-static void scan_dir(const char *dir)
-{
-    DIR *d = opendir(dir);
-    struct dirent *de;
-    if (!d) return;
-    while ((de = readdir(d)) && napps < MAX_APPS) {
-        if (de->d_type & DT_DIR) continue;
-        if (!is_elf(de->d_name)) continue;
-        snprintf(apps[napps++], sizeof apps[0], "%s%s", dir, de->d_name);
-    }
-    closedir(d);
-}
-
-static void scan_apps(void)
-{
-    const char *name;
-    char root[64], sub[80];
-    int h = -1;
-
-    napps = 0;
-    while ((h = bdev_enum(h, &name)) >= 0) {
-        snprintf(root, sizeof root, "%s:/", name);
-        snprintf(sub, sizeof sub, "%sapps/", root);
-        scan_dir(root);
-        scan_dir(sub);
+        ui_bg();
+        f = t < 700 ? t / 700.0f : 1.0f;
+        a = (int)(256 * f);
+        drift = (int)(14 * (1 - f) * (1 - f));
+        gfx_brand(bx, by + drift, s, gfx_mix(C_BG, C_TEXT, a), gfx_mix(C_BG, C_ACCENT, a));
+        if (t > 450) {
+            float g = t < 1100 ? (t - 450) / 650.0f : 1.0f;
+            g = 1 - (1 - g) * (1 - g);
+            gfx_fill_rrect(SCR_W / 2.0f - bw * g / 2, (float)(by + GFX_TEXT_H(s) + s * 4), bw * g, 4, 2, C_ACCENT, 255);
+        }
+        if (t > 900) {
+            int va = t < 1400 ? (int)(255 * (t - 900) / 500) : 255;
+            gfx_str_a(FONT_SMALL, SCR_W / 2 - gfx_str_w(FONT_SMALL, "Version " XENITH_VERSION) / 2,
+                      by + GFX_TEXT_H(s) + s * 4 + 24, C_SUB, va, "Version " XENITH_VERSION);
+        }
+        ui_end_frame();
     }
 }
 
-static const char *basename_of(const char *path)
+/* ------------------------------------------------------------------ home */
+
+enum { T_APPS, T_STORE, T_CLOUD, T_PROFILE, T_SETTINGS, T_COUNT };
+static const char *const tile_name[T_COUNT] = {"Apps", "Store", "Cloud", "Profile", "Settings"};
+static const int tile_icon[T_COUNT] = {ICON_APPS, ICON_STORE, ICON_CLOUD, ICON_PROFILE, ICON_SETTINGS};
+
+static int row, tile, card;
+static float lift_t[T_COUNT], lift_c[MAX_APPS];
+static const char *status_line = NULL;
+
+static void tile_sub(int t, char *out, int n)
 {
-    const char *s = strrchr(path, '/');
-    return s ? s + 1 : path;
+    switch (t) {
+    case T_APPS: snprintf(out, n, napps == 1 ? "1 installed" : "%d installed", napps); break;
+    case T_STORE: snprintf(out, n, "Apps and games"); break;
+    case T_CLOUD: snprintf(out, n, net_is_up() ? "Online" : "Offline"); break;
+    case T_PROFILE: snprintf(out, n, prof.signed_in ? "Your profile" : "Create or sign in"); break;
+    default: snprintf(out, n, "Sound and system"); break;
+    }
 }
 
-static void screen_apps(void)
+static void draw_home(void)
 {
-    int rowh = GFX_TEXT_H(S) + S * 10;
-    int visible = (SCR_H - TOP - M) / rowh;
-    int sel = 0, first = -1, i;
+    int asz = 72, tw, th = 210, gap = 16, ty = 150, i;
+    int cw = 232, ch = cw * 9 / 16, cy, cgap = 18;
+    char sub[48];
 
-    draw_chrome("APPS", "A LAUNCH     B BACK     Y RESCAN");
-    gfx_text(M, TOP, S, C_DIM, "SCANNING...");
-    gfx_flush();
-    scan_apps();
+    ui_bg();
 
-redraw:
-    gfx_rect(0, TOP, SCR_W, SCR_H - TOP - M, C_BG);
+    /* Top: who's here */
+    avatar_draw(prof.avatar, M, 34, asz);
+    gfx_str(FONT_TITLE, M + asz + 18, 38, C_TEXT, prof.signed_in ? prof.name : "Guest");
+    if (status_line) snprintf(sub, sizeof sub, "%s", status_line);
+    else if (net_is_up()) snprintf(sub, sizeof sub, "Online");
+    else if (!prof.signed_in) snprintf(sub, sizeof sub, "Press Y to create a profile");
+    else snprintf(sub, sizeof sub, "Offline");
+    gfx_circle(M + asz + 24.0f, 92, 4, net_is_up() ? C_OK : C_DIM, 255);
+    gfx_str(FONT_SMALL, M + asz + 36, 81, C_SUB, sub);
+    gfx_brand(SCR_W - M - GFX_BRAND_W(3), 58, 3, C_TEXT, C_ACCENT);
+
+    /* Tiles */
+    tw = (SCR_W - 2 * M - gap * (T_COUNT - 1)) / T_COUNT;
+    for (i = 0; i < T_COUNT; i++) {
+        int sel = row == 0 && tile == i;
+        float l = lift_t[i] = ui_ease(lift_t[i], sel ? 1.0f : 0.0f, 0.35f);
+        int g = (int)(l * 6), x = M + i * (tw + gap) - g, y = ty - g, w = tw + 2 * g, h = th + 2 * g;
+        uint32_t fill = gfx_mix(C_SURFACE, C_ACCENT, (int)(256 * l)), fg = gfx_mix(C_SUB, 0xFFFFFF, (int)(256 * l));
+        gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 18, fill, 255);
+        if (i == T_PROFILE && prof.signed_in)
+            avatar_draw(prof.avatar, x + w / 2 - 40, y + h * 42 / 100 - 40, 80);
+        else
+            icon_draw(tile_icon[i], x + w / 2.0f, y + h * 0.40f, 62, fg, fill);
+        gfx_str(FONT_LABEL, x + 20, y + h - 70, gfx_mix(C_TEXT, 0xFFFFFF, (int)(256 * l)), tile_name[i]);
+        tile_sub(i, sub, sizeof sub);
+        gfx_str_fit(FONT_SMALL, x + 20, y + h - 38, gfx_mix(C_SUB, 0xE6EEFF, (int)(256 * l)), sub, w - 36);
+    }
+
+    /* Jump back in */
+    cy = ty + th + 62;
+    gfx_str(FONT_BODY_SB, M, cy - 40, C_SUB, napps ? "Jump back in" : "Nothing installed yet");
     if (!napps) {
-        gfx_text(M, TOP, S, C_TEXT, "NO APPS FOUND");
-        gfx_text(M, TOP + rowh, S - 1, C_DIM, "PUT .ELF FILES ON A USB STICK, IN THE ROOT OR AN APPS FOLDER.");
+        int sel = row == 1;
+        float l = lift_c[0] = ui_ease(lift_c[0], sel ? 1.0f : 0.0f, 0.35f);
+        if (sel) gfx_stroke_rrect(M - 5.0f, cy - 5.0f, cw + 10.0f, ch + 10.0f, 17, 3, 0xFFFFFF, (int)(255 * l));
+        gfx_fill_rrect((float)M, (float)cy, (float)cw, (float)ch, 12, C_SURFACE, 255);
+        icon_draw(ICON_STORE, M + cw / 2.0f, cy + ch / 2.0f - 14, 40, C_SUB, C_SURFACE);
+        gfx_str_c(FONT_BODY_SB, M + cw / 2, cy + ch - 46, C_TEXT, "Open the Store");
     }
-    first = -1;
+    for (i = 0; i < napps; i++) {
+        int x = M + i * (cw + cgap), sel = row == 1 && card == i;
+        float l = lift_c[i] = ui_ease(lift_c[i], sel ? 1.0f : 0.0f, 0.35f);
+        if (x > SCR_W) break;
+        app_card(&apps[i], x, cy, cw, ch, sel, l);
+        gfx_str_fit(FONT_BODY_SB, x, cy + ch + 14, sel ? C_TEXT : C_SUB, apps[i].name, cw);
+    }
 
-    for (;;) {
-        if (napps) {
-            int top = sel < visible ? 0 : sel - visible + 1;
-            if (top != first) {
-                first = top;
-                for (i = 0; i < visible; i++) {
-                    int idx = first + i;
-                    if (idx < napps)
-                        draw_row(TOP + i * rowh, rowh - S * 2, idx == sel, S, basename_of(apps[idx]), apps[idx]);
-                    else
-                        gfx_rect(M, TOP + i * rowh, SCR_W - 2 * M, rowh, C_BG);
-                }
-                gfx_flush();
-            }
-        }
-        gfx_flush();
-        poll_input();
+    ui_hints(prof.signed_in ? "A=Select;Y=Profile;BACK=Power" : "A=Select;Y=Sign in;BACK=Power");
+}
 
-        if (PRESSED(b)) return;
-        if (PRESSED(y)) {
-            gfx_rect(0, TOP, SCR_W, SCR_H - TOP - M, C_BG);
-            gfx_text(M, TOP, S, C_DIM, "SCANNING...");
-            gfx_flush();
-            scan_apps();
-            sel = 0;
-            goto redraw;
-        }
-        if (!napps) continue;
-
-        int d = nav_y();
-        if (d) {
-            int old = sel;
-            sel = (sel + d + napps) % napps;
-            int top = sel < visible ? 0 : sel - visible + 1;
-            if (top == first) {   /* same page: redraw just the two rows */
-                draw_row(TOP + (old - first) * rowh, rowh - S * 2, 0, S, basename_of(apps[old]), apps[old]);
-                draw_row(TOP + (sel - first) * rowh, rowh - S * 2, 1, S, basename_of(apps[sel]), apps[sel]);
-            }
-        }
-
-        if (PRESSED(a)) {
-            draw_chrome("APPS", NULL);
-            gfx_text_c(SCR_W / 2, SCR_H / 2 - GFX_TEXT_H(S), S, C_DIM, "LAUNCHING");
-            gfx_text_c(SCR_W / 2, SCR_H / 2 + S * 4, S + 1, C_TEXT, basename_of(apps[sel]));
-            gfx_flush();
-            set_controller_rumble(0, 0, 0);
-            elf_runFromDisk(apps[sel]);           /* only returns if loading failed */
-            draw_chrome("APPS", NULL);
-            gfx_text_c(SCR_W / 2, SCR_H / 2, S, C_BAD, "COULD NOT LOAD THAT FILE");
-            gfx_flush();
-            mdelay(1500);
-            draw_chrome("APPS", "A LAUNCH     B BACK     Y RESCAN");
-            goto redraw;
-        }
+/* Bring the network up after the first home frame, then sync the profile and inbox. */
+static void go_online(void)
+{
+    if (!cfg.server[0] || net_is_up()) return;
+    status_line = "Connecting...";
+    draw_home();
+    ui_end_frame();
+    if (net_up()) {
+        status_line = NULL;
+        cloud_sync(1);
+    } else {
+        status_line = NULL;
     }
 }
 
-/* ----------------------------------------------------------------- system */
-static const char *av_name(int pack)
+static int power_menu(void)
 {
-    if (xenon_avpack_is_hdmi(pack)) return "HDMI";
-    switch (xenon_avpack_type(pack)) {
-    case AV_VGA:          return "VGA";
-    case AV_COMPOSITE:    return "COMPOSITE";
-    case AV_AUDIO_ONLY:   return "AUDIO ONLY";
-    case AV_COMPONENT_HD: return "COMPONENT HD";
-    case AV_COMPONENT_TV: return "COMPONENT SD";
-    case AV_SVIDEO:       return "S-VIDEO";
-    case AV_SCART_RGB:    return "SCART RGB";
-    default:              return "NONE";
+    static const char *const opts[] = {"Restart", "Turn off", "Exit to XeLL", "Cancel"};
+    int c;
+    draw_home();
+    c = ui_dialog("Power", "XenithOS stays on your USB stick. Starting it again needs the exploit unless you have RGH.", opts, 4);
+    if (c == 0) plat_reboot();
+    if (c == 1) plat_power_off();
+    return c == 2;
+}
+
+static void open_tile(int t)
+{
+    switch (t) {
+    case T_APPS: screen_apps(); break;
+    case T_STORE: screen_store(); break;
+    case T_CLOUD: screen_cloud(); break;
+    case T_PROFILE: screen_profile(); break;
+    case T_SETTINGS: screen_settings(); break;
     }
-}
-
-static void screen_system(void)
-{
-    static const char *labels[4] = {"CPU", "GPU", "MEMORY", "BOARD"};
-    char buf[64];
-    int rowh = GFX_TEXT_H(S) + S * 9;
-    int barx = M + S * 6 * 8;            /* after the label column */
-    int barw = SCR_W - barx - M - S * 6 * 6;
-    int info_y = TOP + rowh * 5;
-    int tick = 0, i;
-
-    draw_chrome("SYSTEM", "B BACK");
-    gfx_text(M, TOP, S - 1, C_DIM, "TEMPERATURES");
-
-    snprintf(buf, sizeof buf, "VIDEO OUT    %s    %dX%d", av_name(xenon_smc_read_avpack()), SCR_W, SCR_H);
-    gfx_text(M, info_y, S, C_TEXT, buf);
-    gfx_text(M, info_y + rowh, S, C_TEXT, "CPU          XENON  3 CORES  6 THREADS  3.2 GHZ");
-    gfx_text(M, info_y + rowh * 2, S, C_TEXT, "SOFTWARE     XENITHOS " XENITH_VERSION "  ON LIBXENON");
-
-    for (;;) {
-        if (tick-- <= 0) {
-            uint16_t raw[4];
-            tick = 60;
-            xenon_smc_query_sensors(raw);
-            for (i = 0; i < 4; i++) {
-                int t = raw[i] >> 8;              /* sensor reports 1/256 degree C */
-                int y = TOP + S * 10 + i * rowh;
-                uint32_t c = t >= 85 ? C_BAD : t >= 70 ? C_WARN : C_OK;
-                int fill = barw * (t > 100 ? 100 : t) / 100;
-
-                gfx_rect(M, y, SCR_W - 2 * M, GFX_TEXT_H(S), C_BG);
-                gfx_text(M, y, S, C_DIM, labels[i]);
-                gfx_rect(barx, y + S * 2, barw, S * 3, C_PANEL);
-                gfx_rect(barx, y + S * 2, fill, S * 3, c);
-                snprintf(buf, sizeof buf, "%d C", t);
-                gfx_text(barx + barw + S * 6, y, S, C_TEXT, buf);
-            }
-            gfx_flush();
-        }
-        poll_input();
-        if (PRESSED(b)) return;
-    }
-}
-
-/* ------------------------------------------------------------- controller */
-struct btn { const char *name; int on; };
-
-static void draw_stick(int x, int y, int size, int sx, int sy, int click)
-{
-    int r = size / 2;
-    int dot = S * 4;
-    int px = x + r + (sx * (r - dot)) / 32768;
-    int py = y + r - (sy * (r - dot)) / 32768;
-    gfx_rect(x, y, size, size, C_PANEL);
-    gfx_rect(x + r, y, 1, size, C_BG);
-    gfx_rect(x, y + r, size, 1, C_BG);
-    gfx_rect(px - dot / 2, py - dot / 2, dot, dot, click ? C_ACCENT : C_TEXT);
-}
-
-static void draw_trigger(int x, int y, int w, int h, int v, const char *name)
-{
-    gfx_rect(x, y, w, h, C_PANEL);
-    gfx_rect(x, y + h - h * v / 255, w, h * v / 255, C_ACCENT);
-    gfx_text_c(x + w / 2, y + h + S * 3, S - 1, C_DIM, name);
-}
-
-static void screen_controller(void)
-{
-    int last_on[16];
-    int bw = S * 6 * 6, bh = GFX_TEXT_H(S) + S * 6, gap = S * 3;
-    int stick = SCR_H / 4;
-    int right_x = M + 4 * (bw + gap) + S * 16;
-    int trig_w = S * 8, trig_h = stick;
-    int hold_b = 0, first = 1, i;
-    struct controller_data_s drawn;
-
-    memset(last_on, -1, sizeof last_on);
-    memset(&drawn, 0, sizeof drawn);
-    draw_chrome("CONTROLLER", "TRIGGERS RUMBLE THE PAD     HOLD B TO EXIT");
-
-    for (;;) {
-        poll_input();
-
-        struct btn b[] = {
-            {"A", cur.a}, {"B", cur.b}, {"X", cur.x}, {"Y", cur.y},
-            {"LB", cur.lb}, {"RB", cur.rb}, {"START", cur.start}, {"BACK", cur.back},
-            {"UP", cur.up}, {"DOWN", cur.down}, {"LEFT", cur.left}, {"RIGHT", cur.right},
-            {"LS", cur.s1_z}, {"RS", cur.s2_z}, {"GUIDE", cur.logo},
-        };
-        int n = sizeof b / sizeof b[0];
-        int dirty = 0;
-
-        for (i = 0; i < n; i++) {
-            int on = b[i].on ? 1 : 0;
-            if (on == last_on[i]) continue;
-            last_on[i] = on;
-            int x = M + (i % 4) * (bw + gap), y = TOP + (i / 4) * (bh + gap);
-            gfx_rect(x, y, bw, bh, on ? C_ACCENT : C_PANEL);
-            gfx_text_c(x + bw / 2, y + (bh - GFX_TEXT_H(S)) / 2, S, on ? C_TEXT : C_DIM, b[i].name);
-            dirty = 1;
-        }
-
-        if (first || cur.s1_x != drawn.s1_x || cur.s1_y != drawn.s1_y || cur.s1_z != drawn.s1_z) {
-            draw_stick(right_x, TOP, stick, cur.s1_x, cur.s1_y, cur.s1_z);
-            dirty = 1;
-        }
-        if (first || cur.s2_x != drawn.s2_x || cur.s2_y != drawn.s2_y || cur.s2_z != drawn.s2_z) {
-            draw_stick(right_x + stick + S * 8, TOP, stick, cur.s2_x, cur.s2_y, cur.s2_z);
-            dirty = 1;
-        }
-        if (first || cur.lt != drawn.lt || cur.rt != drawn.rt) {
-            int tx = right_x + 2 * stick + S * 20;
-            draw_trigger(tx, TOP, trig_w, trig_h, cur.lt, "LT");
-            draw_trigger(tx + trig_w + S * 8, TOP, trig_w, trig_h, cur.rt, "RT");
-            set_controller_rumble(0, cur.lt, cur.rt);
-            dirty = 1;
-        }
-
-        /* Hold-B progress bar under the grid. */
-        hold_b = cur.b ? hold_b + 1 : 0;
-        {
-            int y = TOP + 4 * (bh + gap) + S * 4;
-            int w = 4 * (bw + gap) - gap;
-            gfx_rect(M, y, w, S, C_BG);
-            if (hold_b) gfx_rect(M, y, w * hold_b / 60, S, C_ACCENT);
-            dirty = 1;
-        }
-
-        drawn = cur;
-        first = 0;
-        if (dirty) gfx_flush();
-
-        if (hold_b >= 60) {
-            set_controller_rumble(0, 0, 0);
-            wait_release();
-            return;
-        }
-    }
-}
-
-/* ------------------------------------------------------------------- home */
-enum { ITEM_APPS, ITEM_STORE, ITEM_CLOUD, ITEM_SYSTEM, ITEM_CONTROLLER, ITEM_RESTART, ITEM_POWER, ITEM_COUNT };
-
-static const char *home_items[ITEM_COUNT] = {"APPS", "STORE", "CLOUD", "SYSTEM", "CONTROLLER", "RESTART", "POWER OFF"};
-static const char *home_desc[ITEM_COUNT] = {
-    "LAUNCH PROGRAMS FROM USB OR HARD DRIVE",
-    "GET NEW APPS AND GAMES FROM XENITHOS CLOUD",
-    "YOUR SERVER: LIVE STATS, MESSAGES, LEADERBOARDS",
-    "TEMPERATURES, VIDEO OUTPUT AND HARDWARE",
-    "TEST EVERY BUTTON, STICK AND TRIGGER",
-    "REBOOT THE CONSOLE",
-    "TURN THE CONSOLE OFF",
-};
-
-static int home_rowh(void) { return GFX_TEXT_H(S + 1) + S * 10; }
-
-static void draw_home_item(int i, int sel)
-{
-    draw_row(TOP + i * home_rowh(), home_rowh() - S * 2, i == sel, S + 1, home_items[i], NULL);
-}
-
-static void draw_home_desc(int sel)
-{
-    int y = TOP + ITEM_COUNT * home_rowh() + S * 6;
-    gfx_rect(M, y, SCR_W - 2 * M, GFX_TEXT_H(S), C_BG);
-    gfx_text(M + S * 8, y, S, C_DIM, home_desc[sel]);
-}
-
-static void draw_home(int sel)
-{
-    int i;
-    draw_chrome(NULL, "A SELECT     GUIDE EXIT TO XELL");
-    for (i = 0; i < ITEM_COUNT; i++) draw_home_item(i, sel);
-    draw_home_desc(sel);
-    gfx_flush();
+    apps_scan();
+    if (card >= napps) card = napps ? napps - 1 : 0;
+    ui_fade_in();
 }
 
 int main(void)
 {
-    int sel = 0;
-
-    xenos_init(VIDEO_MODE_AUTO);
-    console_init();
-    console_close();                 /* stop printf from drawing over the UI */
-    xenon_make_it_faster(XENON_SPEED_FULL);
-
+    plat_init();
     gfx_init();
     ui_init();
+    boot();
 
-    usb_init();
-    usb_do_poll();
-
-    boot_splash();
-    draw_home(sel);
+    apps_scan();
+    ui_fade_in();
+    draw_home();
+    ui_end_frame();
+    if (st.auto_connect) go_online();
 
     for (;;) {
-        poll_input();
+        int dx, dy;
+        ui_poll();
+        dx = ui_nav_x();
+        dy = ui_nav_y();
 
-        int d = nav_y();
-        if (d) {
-            int old = sel;
-            sel = (sel + d + ITEM_COUNT) % ITEM_COUNT;
-            draw_home_item(old, sel);
-            draw_home_item(sel, sel);
-            draw_home_desc(sel);
-            gfx_flush();
+        if (dy > 0 && row == 0) { row = 1; if (card >= napps) card = napps ? napps - 1 : 0; sfx(SFX_MOVE); }
+        else if (dy < 0 && row == 1) { row = 0; sfx(SFX_MOVE); }
+        if (dx) {
+            if (row == 0 && tile + dx >= 0 && tile + dx < T_COUNT) { tile += dx; sfx(SFX_MOVE); }
+            else if (row == 1 && card + dx >= 0 && card + dx < napps) { card += dx; sfx(SFX_MOVE); }
         }
 
-        if (PRESSED(logo)) {
-            set_controller_rumble(0, 0, 0);
-            return 0;                /* back to XeLL */
+        if (PRESSED(a)) {
+            sfx(SFX_SELECT);
+            if (row == 0) open_tile(tile);
+            else if (napps) app_launch(&apps[card]);
+            else open_tile(T_STORE);
+        } else if (PRESSED(y)) {
+            sfx(SFX_SELECT);
+            open_tile(T_PROFILE);
+        } else if (PRESSED(guide) || PRESSED(back)) {
+            sfx(SFX_SELECT);
+            if (power_menu()) break;
         }
 
-        if (!PRESSED(a)) continue;
-        wait_release();
-
-        switch (sel) {
-        case ITEM_APPS:       screen_apps(); break;
-        case ITEM_STORE:      screen_store(); break;
-        case ITEM_CLOUD:      screen_cloud(); break;
-        case ITEM_SYSTEM:     screen_system(); break;
-        case ITEM_CONTROLLER: screen_controller(); break;
-        case ITEM_RESTART:
-            if (confirm("RESTART THE CONSOLE?")) xenon_smc_power_reboot();
-            break;
-        case ITEM_POWER:
-            if (confirm("TURN THE CONSOLE OFF?")) xenon_smc_power_shutdown();
-            break;
-        }
-        wait_release();
-        draw_home(sel);
+        draw_home();
+        ui_end_frame();
+        cloud_poll_inbox();
     }
+
+    plat_rumble(0, 0);
+    return 0;   /* back to XeLL */
 }

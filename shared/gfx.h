@@ -1,34 +1,63 @@
 #ifndef XENITH_GFX_H
 #define XENITH_GFX_H
 
+/* XenithOS drawing. Everything draws into a back buffer (0x00RRGGBB); gfx_present()
+ * sends the finished frame to the screen. Shapes are anti-aliased with signed distances,
+ * text uses the Inter bitmap fonts from font_data.c. Alpha values run 0..255. */
 #include <stdint.h>
+#include "font_data.h"
 
-/* Colors are plain 0xRRGGBB. */
 #define RGB(r, g, b) (((uint32_t)(r) << 16) | ((uint32_t)(g) << 8) | (uint32_t)(b))
 
-/* Usable screen area in pixels (already inside the TV overscan margin). */
 extern int SCR_W, SCR_H;
+extern uint32_t *gfx_bb;
 
-void gfx_init(void);                 /* call after xenos_init() */
-void gfx_flush(void);                /* push drawing out of the CPU cache to the screen */
+void gfx_init(void);                 /* after plat_init() */
+void gfx_present(void);
 
-void gfx_rect(int x, int y, int w, int h, uint32_t c);
+void gfx_set_clip(int x, int y, int w, int h);
+void gfx_reset_clip(void);
+void gfx_get_clip(int r[4]);                          /* x, y, w, h; restore with gfx_set_clip */
+void gfx_clip_intersect(int x, int y, int w, int h);
+
 void gfx_clear(uint32_t c);
+void gfx_rect(int x, int y, int w, int h, uint32_t c);
+void gfx_rect_a(int x, int y, int w, int h, uint32_t c, int a);
+void gfx_fill_rrect(float x, float y, float w, float h, float r, uint32_t c, int a);
+void gfx_stroke_rrect(float x, float y, float w, float h, float r, float t, uint32_t c, int a);
+void gfx_circle(float cx, float cy, float r, uint32_t c, int a);
+void gfx_ellipse(float cx, float cy, float rx, float ry, uint32_t c, int a);
+void gfx_ring(float cx, float cy, float r, float t, uint32_t c, int a);
+void gfx_arc(float cx, float cy, float r, float t, float a0, float a1, uint32_t c, int a);  /* radians, round caps */
+void gfx_line(float x0, float y0, float x1, float y1, float t, uint32_t c, int a);           /* round caps */
+void gfx_tri(float x0, float y0, float x1, float y1, float x2, float y2, uint32_t c, int a);
 
-/* Scale a 0x00RRGGBB image of sw x sh pixels into the rectangle dx,dy,dw,dh. */
-void gfx_blit_scaled(const uint32_t *src, int sw, int sh, int dx, int dy, int dw, int dh);
+/* Text. y is the top of the line box; gfx_line_h() is the box height. */
+int  gfx_str(int font, int x, int y, uint32_t c, const char *s);          /* returns width */
+int  gfx_str_a(int font, int x, int y, uint32_t c, int a, const char *s);
+int  gfx_str_w(int font, const char *s);
+int  gfx_str_fit(int font, int x, int y, uint32_t c, const char *s, int max_w);   /* adds "..." */
+void gfx_str_c(int font, int cx, int y, uint32_t c, const char *s);
+void gfx_str_r(int font, int right_x, int y, uint32_t c, const char *s);
+int  gfx_wrap(int font, int x, int y, int w, int gap, uint32_t c, const char *s, int max_lines);
+int  gfx_line_h(int font);
+int  gfx_cap_h(int font);
+int  gfx_str_vc(int font, int x, int cy, uint32_t c, const char *s);     /* caps centred on cy */
 
-/* 5x7 pixel font, each font pixel drawn as an s-by-s block. Lowercase draws as uppercase. */
-int  gfx_text(int x, int y, int s, uint32_t c, const char *str);   /* returns width drawn */
+/* The 5x7 pixel font, kept for the XenithOS wordmark. */
+int  gfx_text(int x, int y, int s, uint32_t c, const char *str);
 int  gfx_text_w(int s, const char *str);
-void gfx_text_c(int cx, int y, int s, uint32_t c, const char *str); /* centered on cx */
-int  gfx_text_fit(int x, int y, int s, uint32_t c, const char *str, int max_w);
 #define GFX_TEXT_H(s) (7 * (s))
-
-/* The XenithOS wordmark: "XENITH" in main_color, "OS" in os_color. Returns its width. */
 int  gfx_brand(int x, int y, int s, uint32_t main_color, uint32_t os_color);
 #define GFX_BRAND_W(s) gfx_text_w((s), "XENITHOS")
 
-uint32_t gfx_mix(uint32_t a, uint32_t b, int t); /* t = 0..256, a -> b */
+/* Images: 0xAARRGGBB pixels. */
+struct img { int w, h; uint32_t *px; };
+void gfx_image(const struct img *im, int x, int y, int w, int h, int a);                 /* bilinear */
+void gfx_image_rounded(const struct img *im, int x, int y, int w, int h, float r, int a);
+void gfx_blit_scaled(const uint32_t *src, int sw, int sh, int dx, int dy, int dw, int dh);  /* opaque, nearest */
+
+uint32_t gfx_mix(uint32_t a, uint32_t b, int t);     /* t = 0..256, a -> b */
+uint32_t gfx_shade(uint32_t c, int pct);              /* pct > 0 lighter, < 0 darker */
 
 #endif

@@ -1,0 +1,27 @@
+# Screenshots for the website. Boots signed in (XSIM_PROFILE) against a local server.
+wait 300
+shot shot-home
+press right
+press a
+wait 80
+shot shot-store
+press b
+wait 20
+press right
+press a
+wait 80
+shot shot-cloud
+press b
+wait 20
+press right
+press a
+wait 60
+shot shot-profile
+press a
+wait 40
+shot shot-avatar
+press b
+wait 20
+press b
+wait 20
+quit

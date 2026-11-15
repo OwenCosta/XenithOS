@@ -17,11 +17,11 @@ SOURCES		:=	source ../../shared
 DATA		:=
 INCLUDES	:=	../../shared
 
-CFLAGS		=	-g -O2 -Wall $(MACHDEP) $(INCLUDE)
+CFLAGS		=	-g -O2 -Wall -Wno-format-truncation $(MACHDEP) $(INCLUDE)
 CXXFLAGS	=	$(CFLAGS)
 LDFLAGS		=	-g $(MACHDEP) -Wl,--gc-sections -Wl,-Map,$(notdir $@).map
 
-LIBS		:=	-lfat -lxenon -lm
+LIBS		:=	-lfat -lz -lxenon -lm
 LIBDIRS		:=
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))

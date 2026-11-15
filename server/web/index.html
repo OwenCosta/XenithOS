@@ -4,121 +4,106 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>XenithOS for Xbox 360</title>
-<meta name="description" content="XenithOS is a homebrew shell for the Xbox 360 S, built on LibXenon. It has its own app store, a small cloud server, and a DOOM port.">
+<meta name="description" content="XenithOS is a homebrew shell for the Xbox 360 S, built on libxenon. It has profiles with avatars, an app store, a small cloud server, and a DOOM port.">
 <style>
   :root {
-    --bg: #0b0b0f;
-    --panel: #15151b;
-    --panel-2: #1d1d25;
-    --line: #26262f;
-    --text: #ececf1;
-    --dim: #8b8b98;
-    --accent: #7c5cff;
-    --ok: #46c878;
-    --warn: #ffaa3c;
-    --bad: #ff5050;
-    --spark: #ffd65a;
+    --bg: #090d16;
+    --panel: #131a29;
+    --panel-2: #1b2538;
+    --line: #243048;
+    --text: #ecf1fa;
+    --sub: #9ca8c0;
+    --dim: #66738d;
+    --accent: #2f7dff;
+    --link: #6ea8ff;
+    --ok: #34c774;
+    --warn: #ffb02e;
     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; scroll-padding-top: 16px; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  a { color: #a993ff; }
+  a { color: var(--link); }
   code { font: 14px var(--mono); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
-  .wrap { max-width: 960px; margin: 0 auto; padding: 0 16px; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 0 16px; }
 
   header.top { border-bottom: 1px solid var(--line); }
   header.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 56px; }
   header.top nav { display: flex; gap: 18px; font-size: 14px; }
-  header.top nav a { color: var(--dim); text-decoration: none; }
+  header.top nav a { color: var(--sub); text-decoration: none; }
   header.top nav a:hover { color: var(--text); }
-  .pill { display: inline-flex; align-items: center; gap: 7px; font: 12px var(--mono); color: var(--dim); white-space: nowrap; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; font: 12px var(--mono); color: var(--sub); white-space: nowrap; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
   .pill.on .dot { background: var(--ok); }
-  .pill.off .dot { background: var(--bad); }
 
-  .intro { padding-top: 48px; padding-bottom: 8px; }
-  #logo { display: block; width: 220px; max-width: 60%; height: auto; margin-bottom: 20px; }
-  .intro p { max-width: 40em; margin: 0 0 12px; }
-  .intro p.dim { color: var(--dim); }
-  .facts { font: 13px var(--mono); color: var(--dim); margin: 16px 0 22px; }
+  .intro.wrap { padding-top: 48px; padding-bottom: 12px; }
+  #logo { display: block; width: 300px; max-width: 75%; height: auto; margin-bottom: 22px; }
+  .intro p { max-width: 42em; margin: 0 0 12px; }
+  .intro p.sub { color: var(--sub); }
+  .facts { font: 13px var(--mono); color: var(--sub); margin: 16px 0 22px; }
   .facts span + span::before { content: " / "; color: var(--line); }
   .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-  .btn { display: inline-block; padding: 10px 16px; border-radius: 8px; border: 1px solid var(--line); color: var(--text); text-decoration: none; font-weight: 600; font-size: 15px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 10px; border: 1px solid var(--line);
+         color: var(--text); background: none; text-decoration: none; font: 600 15px system-ui, sans-serif; cursor: pointer; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .btn:hover { filter: brightness(1.1); }
+  .btn:hover { filter: brightness(1.12); }
   .sha { font: 12px var(--mono); color: var(--dim); margin-top: 10px; overflow-wrap: anywhere; }
 
   section { padding: 44px 0; }
   section + section { border-top: 1px solid var(--line); }
-  h2 { font-size: 21px; margin: 0 0 6px; }
-  .lead { color: var(--dim); margin: 0 0 22px; max-width: 42em; }
+  h2 { font-size: 22px; margin: 0 0 6px; }
+  .lead { color: var(--sub); margin: 0 0 22px; max-width: 44em; }
 
-  /* simulator */
-  .sim { display: grid; grid-template-columns: 1fr 172px; gap: 20px; align-items: start; }
-  .tv { background: #000; border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
-  #screen { display: block; width: 100%; height: auto; image-rendering: pixelated; border-radius: 4px; outline: none; }
-  #screen:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
-  .pad { display: grid; grid-template-columns: 56px; grid-template-rows: 48px 48px; gap: 6px; justify-content: center; }
-  .pad button, .face button {
-    font: 600 14px var(--mono); color: var(--text); background: var(--panel); border: 1px solid var(--line);
-    border-radius: 10px; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
-  }
-  .pad button:active, .face button:active { background: var(--panel-2); }
-  .pad .up { grid-row: 1; } .pad .down { grid-row: 2; }
-  .face { display: flex; gap: 10px; justify-content: center; margin-top: 14px; }
-  .face button { width: 52px; height: 52px; border-radius: 50%; font-size: 16px; }
-  .face .a { color: #6fdc8c; } .face .b { color: #ff7a7a; }
-  .keys { font: 12px var(--mono); color: var(--dim); text-align: center; margin-top: 14px; line-height: 1.7; }
+  .shot { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: #000; }
+  .shot img { display: block; width: 100%; height: auto; }
+  .caption { color: var(--sub); font-size: 15px; margin: 12px 2px 0; min-height: 3em; }
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  .tabs button { font: 600 14px system-ui, sans-serif; color: var(--sub); background: var(--panel); border: 1px solid var(--line);
+                 padding: 8px 14px; border-radius: 999px; cursor: pointer; }
+  .tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 
-  /* tables */
+  .players { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+  .player { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; text-align: center; min-width: 0; }
+  .player canvas { display: block; margin: 0 auto 10px; border-radius: 16px; }
+  .player b { display: block; font-size: 16px; overflow-wrap: anywhere; }
+  .player small { color: var(--sub); font-size: 13px; }
+
   table { width: 100%; border-collapse: collapse; font-size: 15px; }
   th { text-align: left; font: 12px var(--mono); color: var(--dim); font-weight: normal; padding: 0 12px 8px 0; }
-  td { padding: 9px 12px 9px 0; border-top: 1px solid var(--line); vertical-align: top; }
+  td { padding: 9px 12px 9px 0; border-top: 1px solid var(--line); vertical-align: middle; }
   td:last-child, th:last-child { padding-right: 0; }
   .num { font-family: var(--mono); text-align: right; white-space: nowrap; }
-  .yes { color: var(--ok); } .not { color: var(--warn); } .live { color: #a993ff; }
-  .note { color: var(--dim); font-size: 14px; }
+  .yes { color: var(--ok); } .not { color: var(--warn); } .live { color: var(--link); }
+  .note { color: var(--sub); font-size: 14px; }
   .scroll { overflow-x: auto; }
-  .scroll table { min-width: 600px; }
-
-  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
-  .box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; min-width: 0; }
+  .scroll table { min-width: 620px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .box { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; min-width: 0; }
   .box h3 { margin: 0 0 10px; font-size: 16px; }
-  tr.first td { color: var(--spark); }
-  .muted { color: var(--dim); }
-  .kind { font: 11px var(--mono); color: var(--dim); }
+  .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .who canvas, .who .blank { flex: none; border-radius: 9px; }
+  .who .blank { width: 36px; height: 36px; background: var(--panel-2); }
+  .item { display: flex; gap: 12px; align-items: center; min-width: 0; }
+  .item img { width: 96px; height: 54px; border-radius: 8px; flex: none; background: var(--panel-2); }
+  .kind { font: 12px var(--mono); color: var(--dim); }
+  .muted { color: var(--sub); }
 
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 22px; }
-  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
-  .stat .k { font: 11px var(--mono); color: var(--dim); }
-  .stat .v { font: 600 16px var(--mono); margin-top: 2px; overflow-wrap: anywhere; }
-  .bar { height: 4px; background: var(--panel-2); border-radius: 2px; margin-top: 8px; overflow: hidden; }
-  .bar i { display: block; height: 100%; width: 0; background: var(--ok); }
-
-  ol.steps { margin: 0; padding-left: 20px; max-width: 44em; }
+  ol.steps { margin: 0; padding-left: 20px; max-width: 46em; }
   ol.steps li { margin-bottom: 10px; }
-  .warning { margin-top: 18px; padding: 12px 14px; border-left: 3px solid var(--warn); background: #1a1409; color: #efc98f; font-size: 14px; max-width: 44em; }
+  .warning { margin-top: 18px; padding: 12px 14px; border-left: 3px solid var(--warn); background: #1a1409; color: #efc98f; font-size: 14px; max-width: 46em; }
 
-  .log { list-style: none; padding: 0; margin: 0; max-width: 44em; }
+  .log { list-style: none; padding: 0; margin: 0; max-width: 46em; }
   .log li { padding: 12px 0; border-top: 1px solid var(--line); }
-  .log b { font-family: var(--mono); color: #a993ff; margin-right: 8px; }
+  .log b { font-family: var(--mono); color: var(--link); margin-right: 8px; }
   .log time { font: 12px var(--mono); color: var(--dim); }
-  .log p { margin: 4px 0 0; color: var(--dim); font-size: 15px; }
+  .log p { margin: 4px 0 0; color: var(--sub); font-size: 15px; }
 
   footer { border-top: 1px solid var(--line); padding: 24px 0 40px; color: var(--dim); font-size: 13px; }
   footer p { margin: 4px 0; }
 
   @media (max-width: 760px) {
     header.top nav { display: none; }
-    .sim { grid-template-columns: 1fr; gap: 14px; }
-    .keys { display: none; }
-    .controls { display: flex; justify-content: center; align-items: center; gap: 18px; }
-    .pad { grid-template-columns: 56px 56px; grid-template-rows: 48px; }
-    .pad .up, .pad .down { grid-row: 1; }
-    .face { margin-top: 0; }
     .cols { grid-template-columns: 1fr; }
-    .stats { grid-template-columns: 1fr 1fr; }
   }
 </style>
 </head>
@@ -128,11 +113,11 @@
   <div class="wrap">
     <svg id="navlogo" height="16" aria-label="XenithOS"></svg>
     <nav>
-      <a href="#try">Try it</a>
-      <a href="#status">Status</a>
+      <a href="#screens">Screens</a>
+      <a href="#players">Players</a>
       <a href="#scores">Leaderboard</a>
+      <a href="#status">Status</a>
       <a href="#run">Run it</a>
-      <a href="#log">Build log</a>
       <a href="https://github.com/OwenCosta/XenithOS">GitHub</a>
     </nav>
     <span class="pill" id="pill"><span class="dot"></span><span id="pilltext">checking server</span></span>
@@ -143,63 +128,33 @@
 <div class="wrap intro">
   <svg id="logo" aria-label="XenithOS"></svg>
   <p>XenithOS is a homebrew shell for the Xbox 360. It boots from XeLL in place of the Microsoft dashboard and
-    runs its own menu, its own apps, and a small store that downloads new ones over Ethernet.</p>
-  <p class="dim">I'm building it for an old 360 S with a Trinity board. It's written in C on top of LibXenon.
-    The server this page is running on is also the console's cloud backend.</p>
-  <div class="facts"><span id="ver">v0.3.1</span><span>C + LibXenon</span><span>GPL-3.0</span><span>no soldering needed</span></div>
+    runs its own home screen, profiles with avatars, a store that installs apps over Ethernet, and a DOOM port.</p>
+  <p class="sub">I'm building it for my old 360 S with a Trinity board. It's written in C on libxenon, and the
+    server this page runs on is also the console's cloud backend: profiles, leaderboards and the store live here.</p>
+  <div class="facts"><span id="ver">v0.4.0</span><span>C + libxenon</span><span>GPL-3.0</span><span>runs from a USB stick</span></div>
   <div class="actions">
     <a class="btn primary" id="dl" href="v1/store/file/xenith" download="xenon.elf">Download XenithOS</a>
     <a class="btn" href="https://github.com/OwenCosta/XenithOS">Source code</a>
+    <button class="btn" id="chime" type="button" aria-label="Play the start-up chime">&#9654; Start-up chime</button>
   </div>
   <div class="sha" id="sha"></div>
 </div>
 
-<section id="try">
+<section id="screens">
   <div class="wrap">
-    <h2>Try the menu</h2>
-    <p class="lead">This is the XenithOS interface redrawn in your browser with the same 5x7 font and layout. The Store and
-      Cloud screens pull live data from this server, the same way the console does.</p>
-    <div class="sim">
-      <div class="tv"><canvas id="screen" width="640" height="360" tabindex="0" aria-label="XenithOS simulator. Use arrow keys, Enter and Escape."></canvas></div>
-      <div class="controls">
-        <div class="pad">
-          <button class="up" data-k="up" aria-label="Up">UP</button>
-          <button class="down" data-k="down" aria-label="Down">DN</button>
-        </div>
-        <div class="face">
-          <button class="b" data-k="b" aria-label="B, back">B</button>
-          <button class="a" data-k="a" aria-label="A, select">A</button>
-        </div>
-        <div class="keys">arrows move<br>enter = A, esc = B<br>click the screen first</div>
-      </div>
-    </div>
+    <h2>What it looks like</h2>
+    <p class="lead">These come from the XenithOS simulator, which runs the exact code that goes on the console and saves the frames as images.</p>
+    <div class="shot"><img id="shot" src="static/shot-home.png" alt="The XenithOS home screen" width="1216" height="680"></div>
+    <p class="caption" id="caption"></p>
+    <div class="tabs" role="tablist" id="tabs"></div>
   </div>
 </section>
 
-<section id="status">
+<section id="players">
   <div class="wrap">
-    <h2>Where it's at</h2>
-    <p class="lead">Everything below compiles. Running on the real console is the next step, so this table only
-      says "works" for things I've actually seen working.</p>
-    <div class="scroll">
-    <table>
-      <thead><tr><th>Part</th><th>Builds</th><th>On the Xbox</th><th>Notes</th></tr></thead>
-      <tbody>
-        <tr><td>Shell: splash, menu, apps, system, controller test</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">first boot in progress</td></tr>
-        <tr><td>Store</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">downloads are SHA-256 checked before saving</td></tr>
-        <tr><td>Cloud screen</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">needs the Ethernet cable, no Wi-Fi driver</td></tr>
-        <tr><td>VOLT</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">score upload with X</td></tr>
-        <tr><td>DOOM</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">doomgeneric port, no sound yet</td></tr>
-        <tr><td>Cloud server</td><td class="yes">yes</td><td class="live">live</td><td class="note">you're looking at it</td></tr>
-      </tbody>
-    </table>
-    </div>
-    <div class="stats">
-      <div class="stat"><div class="k">server uptime</div><div class="v" id="uptime">...</div></div>
-      <div class="stat"><div class="k">load</div><div class="v" id="load">...</div></div>
-      <div class="stat"><div class="k">memory</div><div class="v" id="mem">...</div><div class="bar"><i id="membar"></i></div></div>
-      <div class="stat"><div class="k">consoles seen</div><div class="v" id="consoles">...</div></div>
-    </div>
+    <h2>Players</h2>
+    <p class="lead">Profiles made on an Xbox running XenithOS. Your gamertag and avatar are stored here, so they follow you to any console.</p>
+    <div class="players" id="playerlist"><p class="muted">Loading...</p></div>
   </div>
 </section>
 
@@ -216,22 +171,39 @@
   </div>
 </section>
 
+<section id="status">
+  <div class="wrap">
+    <h2>Where it's at</h2>
+    <p class="lead">"Works" in the Xbox column only means I've seen it working on the real console. Everything else has only run in the simulator so far.</p>
+    <div class="scroll">
+    <table>
+      <thead><tr><th>Part</th><th>Builds</th><th>On the Xbox</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Booting XenithOS from the exploit</td><td class="yes">yes</td><td class="yes">works</td><td class="note">version 0.3.1 booted on the 360 S</td></tr>
+        <tr><td>New interface, sounds, keyboard, avatars</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">0.4.0, tested in the simulator</td></tr>
+        <tr><td>Profiles, Store, Cloud</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">needs the Ethernet cable; no Wi-Fi driver</td></tr>
+        <tr><td>VOLT</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">scores go to your profile</td></tr>
+        <tr><td>DOOM</td><td class="yes">yes</td><td class="not">not yet</td><td class="note">doomgeneric, no game sound yet</td></tr>
+        <tr><td>Cloud server and this site</td><td class="yes">yes</td><td class="live">live</td><td class="note">you're on it</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+
 <section id="run">
   <div class="wrap">
     <h2>Running it on your own 360</h2>
-    <p class="lead">You need a 360 on dashboard 17559, a FAT32 USB stick, the console's hard drive, and an Ethernet
-      cable if you want the online parts.</p>
+    <p class="lead">You need a 360 on dashboard 17559, a FAT32 USB stick, the console's hard drive (for avatar data), and an Ethernet cable for the online parts.</p>
     <ol class="steps">
       <li>Put <a href="https://github.com/shutterbug2000/ABadAvatar">ABadAvatar</a> and
-        <a href="https://github.com/FreeMyXe/FreeMyXe">FreeMyXe</a> on the stick (FreeMyXe's xex renamed to <code>default.xex</code>).</li>
+        <a href="https://github.com/FreeMyXe/FreeMyXe">FreeMyXe</a> on the stick, with FreeMyXe's xex renamed to <code>default.xex</code>.</li>
       <li>Download XenithOS above and put it in the root of the stick as <code>xenon.elf</code>.</li>
-      <li>Unplug the network, boot the 360, and leave the ABadAvatar profile highlighted on the sign-in screen.
-        It can take up to 20 minutes and often needs a few tries.</li>
-      <li>When FreeMyXe appears, pick the XeLL option. XeLL loads <code>xenon.elf</code> and XenithOS starts.</li>
-      <li>Now plug in Ethernet if you want the Store and Cloud screens.</li>
+      <li>Unplug the network, boot the 360, and leave the ABadAvatar profile highlighted on the sign-in screen. It can take up to 20 minutes and a few tries.</li>
+      <li>When FreeMyXe appears, choose <b>Launch XeLL instead</b>. XeLL loads <code>xenon.elf</code> and XenithOS starts.</li>
+      <li>Plug in Ethernet, then make a profile from the Profile tile.</li>
     </ol>
-    <div class="warning">FreeMyXe's warning applies: don't run anything that writes to the NAND, and don't flash a
-      modified NAND while using it. That bricks consoles. XenithOS only writes to the USB stick.</div>
+    <div class="warning">FreeMyXe's warning applies: don't run anything that writes to the NAND, and don't flash a modified NAND while using it. That bricks consoles. XenithOS only writes to the USB stick.</div>
   </div>
 </section>
 
@@ -239,14 +211,14 @@
   <div class="wrap">
     <h2>Build log</h2>
     <ul class="log">
-      <li><b>0.3.1</b><time datetime="2026-11-14">Nov 14, 2026</time>
-        <p>This website. Inbox is now locked to the console with a key. Status route that doesn't count web visits as consoles.</p></li>
+      <li><b>0.4.0</b><time datetime="2026-11-15">Nov 15, 2026</time>
+        <p>Blue redesign with smooth animation, the Inter typeface, and thumbnails everywhere. Sounds made in code, including the start-up chime. Profiles with passcodes and avatars, saved on the server. On-screen keyboard, settings, and a simulator for testing on a PC.</p></li>
+      <li><b>0.3.2</b><time datetime="2026-11-14">Nov 14, 2026</time>
+        <p>Renamed to XenithOS. Version 0.3.1 was the first to boot on the real Xbox.</p></li>
       <li><b>0.3</b><time datetime="2026-11-14">Nov 14, 2026</time>
-        <p>Networking over lwIP, the Store, the Cloud screen, VOLT leaderboards, and DOOM. Drawing now writes straight into the tiled framebuffer.</p></li>
-      <li><b>0.2</b><time datetime="2026-11-14">Nov 14, 2026</time>
-        <p>Named XENITH (now XenithOS). Added VOLT, the first app.</p></li>
-      <li><b>0.1</b><time datetime="2026-11-14">Nov 14, 2026</time>
-        <p>First build: boot splash, home menu, app launcher, temperatures, controller tester.</p></li>
+        <p>Networking over lwIP, the Store, the Cloud screen, VOLT leaderboards, and DOOM.</p></li>
+      <li><b>0.1 to 0.2</b><time datetime="2026-11-14">Nov 14, 2026</time>
+        <p>First builds: boot screen, home menu, app launcher, temperatures, controller test, and VOLT.</p></li>
     </ul>
   </div>
 </section>
@@ -254,109 +226,116 @@
 
 <footer>
   <div class="wrap">
-    <p>Made by <a href="https://github.com/OwenCosta">OwenCosta</a>. XenithOS is GPL-3.0. The DOOM port uses doomgeneric (GPL-2.0+), and Freedoom is BSD.</p>
+    <p>Made by <a href="https://github.com/OwenCosta">OwenCosta</a>. XenithOS is GPL-3.0. It uses the Inter typeface (OFL), doomgeneric (GPL-2.0+) and Freedoom (BSD).</p>
     <p>Not affiliated with Microsoft or id Software. Xbox and DOOM are their trademarks.</p>
   </div>
 </footer>
 
+<script src="static/avatar.js"></script>
 <script>
 "use strict";
+const $ = (id) => document.getElementById(id);
 
-/* The console's 5x7 font. Each row is 5 bits, bit 4 is the leftmost pixel. */
-const FONT = {
-  A:[14,17,17,31,17,17,17], B:[30,17,17,30,17,17,30], C:[14,17,16,16,16,17,14], D:[30,17,17,17,17,17,30],
-  E:[31,16,16,30,16,16,31], F:[31,16,16,30,16,16,16], G:[14,17,16,23,17,17,15], H:[17,17,17,31,17,17,17],
-  I:[14,4,4,4,4,4,14], J:[7,2,2,2,2,18,12], K:[17,18,20,24,20,18,17], L:[16,16,16,16,16,16,31],
-  M:[17,27,21,21,17,17,17], N:[17,17,25,21,19,17,17], O:[14,17,17,17,17,17,14], P:[30,17,17,30,16,16,16],
-  Q:[14,17,17,17,21,18,13], R:[30,17,17,30,20,18,17], S:[15,16,16,14,1,1,30], T:[31,4,4,4,4,4,4],
-  U:[17,17,17,17,17,17,14], V:[17,17,17,17,17,10,4], W:[17,17,17,21,21,21,10], X:[17,17,10,4,10,17,17],
-  Y:[17,17,17,10,4,4,4], Z:[31,1,2,4,8,16,31], "0":[14,17,19,21,25,17,14], "1":[4,12,4,4,4,4,14],
-  "2":[14,17,1,2,4,8,31], "3":[31,2,4,2,1,17,14], "4":[2,6,10,18,31,2,2], "5":[31,16,30,1,1,17,14],
-  "6":[6,8,16,30,17,17,14], "7":[31,1,2,4,8,8,8], "8":[14,17,17,14,17,17,14], "9":[14,17,17,15,1,2,12],
-  ".":[0,0,0,0,0,12,12], ",":[0,0,0,0,12,4,8], ":":[0,12,12,0,12,12,0], "-":[0,0,0,31,0,0,0],
-  "/":[1,2,2,4,8,8,16], "!":[4,4,4,4,4,0,4], "?":[14,17,1,2,4,0,4], " ":[0,0,0,0,0,0,0],
-  "%":[24,25,2,4,8,19,3], "#":[10,10,31,10,31,10,10], "(":[2,4,8,8,8,4,2], ")":[8,4,2,2,2,4,8],
-};
-const glyph = ch => FONT[ch.toUpperCase()] || FONT["?"];
-
-function svgText(svg, text, color, osColor) {
-  const ns = "http://www.w3.org/2000/svg", w = text.length * 6 - 1;
+/* Wordmark in the console's 5x7 pixel font */
+const PIX = { X:[17,17,10,4,10,17,17], E:[31,16,16,30,16,16,31], N:[17,17,25,21,19,17,17], I:[14,4,4,4,4,4,14],
+              T:[31,4,4,4,4,4,4], H:[17,17,17,31,17,17,17], O:[14,17,17,17,17,17,14], S:[15,16,16,14,1,1,30] };
+function wordmark(svg, main, os) {
+  const ns = "http://www.w3.org/2000/svg", word = "XENITHOS", w = word.length * 6 - 1;
   svg.setAttribute("viewBox", `0 0 ${w} 7`);
   svg.setAttribute("shape-rendering", "crispEdges");
   const h = svg.getAttribute("height");
   if (h) svg.setAttribute("width", Math.round(w / 7 * h));
-  [...text].forEach((ch, i) => glyph(ch).forEach((row, y) => {
+  [...word].forEach((ch, i) => PIX[ch].forEach((row, y) => {
     for (let x = 0; x < 5; x++) if (row & (16 >> x)) {
       const r = document.createElementNS(ns, "rect");
-      r.setAttribute("x", i * 6 + x); r.setAttribute("y", y);
-      r.setAttribute("width", 1); r.setAttribute("height", 1);
-      r.setAttribute("fill", osColor && i >= text.length - 2 ? osColor : color);
+      r.setAttribute("x", i * 6 + x); r.setAttribute("y", y); r.setAttribute("width", 1); r.setAttribute("height", 1);
+      r.setAttribute("fill", i >= 6 ? os : main);
       svg.appendChild(r);
     }
   }));
 }
-svgText(document.getElementById("logo"), "XENITHOS", "#ececf1", "#7c5cff");
-svgText(document.getElementById("navlogo"), "XENITHOS", "#7c5cff", "#ececf1");
+wordmark($("logo"), "#ecf1fa", "#2f7dff");
+wordmark($("navlogo"), "#ecf1fa", "#2f7dff");
 
-/* ---------------------------------------------------------------- live data */
-const $ = id => document.getElementById(id);
-const parseKV = t => Object.fromEntries(t.split("\n").filter(l => l.includes("="))
-  .map(l => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
-const rows = t => t.split("\n").filter(Boolean).map(l => l.split("|"));
-const live = { stats: null, board: [], items: [] };
-
-function fmtSize(n) {
-  n = Number(n);
-  return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.ceil(n / 1024) + " KB";
+/* Screens */
+const SHOTS = [
+  ["home", "Home", "Your profile at the top, five tiles, and the apps you've installed. A notification slides in when a message arrives."],
+  ["store", "Store", "Everything on the server, with thumbnails. Downloads are checked against their SHA-256 before they're saved."],
+  ["profile", "Profile", "Profiles live on the server and follow you to any console. Make one with a gamertag and a passcode."],
+  ["avatar", "Avatar", "Build your avatar from nine parts. Left and right change each part, Y picks something random."],
+  ["cloud", "Cloud", "Live stats from the server, the inbox, and the VOLT leaderboard with everyone's avatar."],
+  ["volt", "VOLT", "Grab sparks, don't hit the walls. Your best score goes on your profile."],
+];
+function showShot(i) {
+  const [id, name, text] = SHOTS[i];
+  $("shot").src = `static/shot-${id}.png`;
+  $("shot").alt = `XenithOS ${name} screen`;
+  $("caption").textContent = text;
+  [...$("tabs").children].forEach((b, j) => b.setAttribute("aria-selected", i === j ? "true" : "false"));
 }
-function td(tr, text, cls) {
-  const c = document.createElement("td");
-  if (cls) c.className = cls;
-  c.textContent = text;
-  tr.appendChild(c);
-  return c;
+SHOTS.forEach(([id, name], i) => {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.setAttribute("role", "tab");
+  b.textContent = name;
+  b.addEventListener("click", () => showShot(i));
+  $("tabs").appendChild(b);
+});
+showShot(0);
+
+/* Chime */
+const chime = new Audio("static/chime.wav");
+$("chime").addEventListener("click", () => { chime.currentTime = 0; chime.play(); });
+
+/* Live data */
+const rows = (t) => t.split("\n").filter(Boolean).map((l) => l.split("|"));
+function td(tr, text, cls) { const c = document.createElement("td"); if (cls) c.className = cls; c.textContent = text; tr.appendChild(c); return c; }
+function fmtSize(n) { n = Number(n); return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.ceil(n / 1024) + " KB"; }
+function fmtDate(iso) {
+  const d = new Date(iso + "T00:00:00Z");
+  return isNaN(d) ? iso : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 async function refresh() {
+  const get = (p) => fetch(p, { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(p); return r.text(); });
   try {
-    const get = p => fetch(p, { cache: "no-store" }).then(r => { if (!r.ok) throw new Error(p); return r.text(); });
-    const [st, sc, it] = await Promise.all([get("v1/status"), get("v1/scores/volt"), get("v1/store")]);
-    live.stats = parseKV(st);
-    live.board = rows(sc);
-    live.items = rows(it);
-    const s = live.stats;
+    const [sc, it, pl] = await Promise.all([get("v1/scores/volt"), get("v1/store"), get("v1/players")]);
+    $("pill").className = "pill on";
+    $("pilltext").textContent = "server online";
 
-    $("pill").className = "pill on"; $("pilltext").textContent = "server online";
-    $("uptime").textContent = (s.uptime || "?").toLowerCase();
-    $("load").textContent = (s.load || "?").split(" ")[0];
-    $("consoles").textContent = s.consoles || "0";
-    const used = +s.mem_used_mb, total = +s.mem_total_mb;
-    $("mem").textContent = total ? `${(used / 1024).toFixed(1)} of ${(total / 1024).toFixed(0)} GB` : "?";
-    const pct = total ? Math.round(used * 100 / total) : 0;
-    $("membar").style.width = pct + "%";
-    $("membar").style.background = pct >= 90 ? "var(--bad)" : pct >= 70 ? "var(--warn)" : "var(--ok)";
-
-    const board = $("board"); board.replaceChildren();
-    if (!live.board.length) {
+    const board = $("board");
+    board.replaceChildren();
+    const b = rows(sc);
+    if (!b.length) { const tr = document.createElement("tr"); td(tr, "No scores yet.", "muted").colSpan = 3; board.appendChild(tr); }
+    b.forEach(([rank, name, score, avatar]) => {
       const tr = document.createElement("tr");
-      td(tr, "No scores yet.", "muted").colSpan = 3;
-      board.appendChild(tr);
-    }
-    live.board.forEach(([rank, name, score]) => {
-      const tr = document.createElement("tr");
-      if (rank === "1") tr.className = "first";
-      td(tr, rank, "muted"); td(tr, name); td(tr, Number(score).toLocaleString(), "num");
+      td(tr, rank, "muted");
+      const who = document.createElement("div");
+      who.className = "who";
+      who.appendChild(avatar ? XAvatar.canvas(avatar, 36) : Object.assign(document.createElement("div"), { className: "blank" }));
+      who.appendChild(document.createTextNode(name));
+      td(tr, "").appendChild(who);
+      td(tr, Number(score).toLocaleString(), "num");
       board.appendChild(tr);
     });
 
-    const KIND = { app: "app", data: "game data", system: "system update" };
-    const items = $("items"); items.replaceChildren();
-    live.items.forEach(([id, kind, name, ver, size, sha, file, desc]) => {
+    const KIND = { app: "App", data: "Game data", system: "System update" };
+    const items = $("items");
+    items.replaceChildren();
+    rows(it).forEach(([id, kind, name, ver, size, sha]) => {
       const tr = document.createElement("tr");
-      const c = td(tr, "");
-      const k = document.createElement("div"); k.className = "kind"; k.textContent = `${KIND[kind] || kind}, v${ver}`;
+      const box = document.createElement("div");
+      box.className = "item";
+      const img = document.createElement("img");
+      img.src = `v1/store/icon/${encodeURIComponent(id)}.png`;
+      img.alt = "";
+      img.loading = "lazy";
+      const text = document.createElement("div");
       const n = document.createElement("div"); n.textContent = name;
-      c.append(n, k);
+      const k = document.createElement("div"); k.className = "kind"; k.textContent = `${KIND[kind] || kind}, v${ver}`;
+      text.append(n, k);
+      box.append(img, text);
+      td(tr, "").appendChild(box);
       td(tr, fmtSize(size), "num");
       items.appendChild(tr);
       if (id === "xenith") {
@@ -365,171 +344,33 @@ async function refresh() {
         $("sha").textContent = "sha256 " + sha;
       }
     });
-    draw();
-  } catch (e) {
-    $("pill").className = "pill off"; $("pilltext").textContent = "server offline";
-  }
-}
 
-/* ---------------------------------------------------------------- simulator */
-const cv = $("screen"), g = cv.getContext("2d");
-const W = cv.width, H = cv.height, M = 40, TOP = 52;
-const C = { bg: "#0b0b0f", panel: "#18181f", text: "#f2f2f5", dim: "#6e6e7c", accent: "#7c5cff",
-            ok: "#46c878", warn: "#ffaa3c", bad: "#ff5050", spark: "#ffd65a" };
-
-function text(x, y, s, col, str) {
-  g.fillStyle = col;
-  [...String(str)].forEach((ch, i) => glyph(ch).forEach((row, ry) => {
-    for (let rx = 0; rx < 5; rx++) if (row & (16 >> rx)) g.fillRect(x + (i * 6 + rx) * s, y + ry * s, s, s);
-  }));
-}
-const tw = (s, str) => String(str).length * 6 * s - s;
-function fit(str, s, maxw) {
-  str = String(str);
-  const max = Math.floor((maxw + s) / (6 * s));
-  return str.length <= max ? str : str.slice(0, Math.max(0, max - 2)) + "..";
-}
-function chrome(title, hint) {
-  g.fillStyle = C.bg; g.fillRect(0, 0, W, H);
-  text(M, 18, 2, C.accent, "XENITH"); text(M + tw(2, "XENITH") + 2, 18, 2, C.text, "OS");
-  if (title) { text(M + tw(2, "XENITHOS") + 12, 18, 2, C.dim, "/"); text(M + tw(2, "XENITHOS") + 30, 18, 2, C.text, title); }
-  g.fillStyle = C.panel; g.fillRect(M, 40, W - 2 * M, 2);
-  if (hint) text(M, H - 22, 1, C.dim, hint);
-}
-function row(y, h, selected, scale, label, sub) {
-  if (selected) { g.fillStyle = C.panel; g.fillRect(M, y, W - 2 * M, h); g.fillStyle = C.accent; g.fillRect(M, y, 4, h); }
-  const ty = y + Math.floor((h - 7 * scale) / 2);
-  text(M + 14, ty, scale, selected ? C.text : C.dim, fit(label, scale, 260));
-  if (sub) text(M + 14 + Math.min(tw(scale, label), 260) + 14, y + Math.floor((h - 7) / 2), 1, C.dim, fit(sub, 1, W - 2 * M - 300));
-}
-function panel(big, small, col) {
-  const w = 420, h = 74, x = (W - w) / 2, y = (H - h) / 2;
-  g.fillStyle = C.panel; g.fillRect(x, y, w, h);
-  g.fillStyle = C.accent; g.fillRect(x, y, w, 3);
-  text((W - tw(3, big)) / 2, y + 16, 3, col || C.text, big);
-  if (small) text((W - tw(1, small)) / 2, y + h - 18, 1, C.dim, small);
-}
-function bar(x, y, w, used, total) {
-  g.fillStyle = C.panel; g.fillRect(x, y, w, 4);
-  if (!total) return;
-  const p = used / total;
-  g.fillStyle = p >= .9 ? C.bad : p >= .7 ? C.warn : C.ok;
-  g.fillRect(x, y, Math.round(w * p), 4);
-}
-
-const HOME = [
-  ["APPS", "LAUNCH PROGRAMS FROM USB OR HARD DRIVE"],
-  ["STORE", "GET NEW APPS AND GAMES FROM XENITHOS CLOUD"],
-  ["CLOUD", "YOUR SERVER: LIVE STATS, MESSAGES, LEADERBOARDS"],
-  ["SYSTEM", "TEMPERATURES, VIDEO OUTPUT AND HARDWARE"],
-  ["CONTROLLER", "TEST EVERY BUTTON, STICK AND TRIGGER"],
-  ["RESTART", "REBOOT THE CONSOLE"],
-  ["POWER OFF", "TURN THE CONSOLE OFF"],
-];
-const sim = { screen: "home", sel: 0, sub: 0, popup: null };
-
-function draw() {
-  const s = sim;
-  if (s.screen === "home") {
-    chrome(null, "A SELECT     GUIDE EXIT TO XELL");
-    const rh = 34;
-    HOME.forEach(([label], i) => row(TOP + i * rh, rh - 4, i === s.sel, 3, label));
-    text(M + 14, TOP + HOME.length * rh + 4, 1, C.dim, HOME[s.sel][1]);
-  } else if (s.screen === "apps") {
-    chrome("APPS", "A LAUNCH     B BACK     Y RESCAN");
-    const apps = [["VOLT.ELF32", "UDA:/APPS/VOLT.ELF32"], ["DOOM.ELF32", "UDA:/APPS/DOOM.ELF32"]];
-    apps.forEach(([n, p], i) => row(TOP + i * 30, 26, i === s.sub, 2, n, p));
-  } else if (s.screen === "store") {
-    chrome("STORE", "A INSTALL     Y REFRESH     B BACK");
-    if (!live.items.length) { text(M, TOP, 2, C.dim, "LOADING STORE..."); }
-    live.items.forEach((it, i) => {
-      const [, kind, name, ver, size] = it;
-      row(TOP + i * 30, 26, i === s.sub, 2, name, `V${ver}  ${Math.ceil(size / 1024)} KB  ${kind}`);
-    });
-    const cur = live.items[s.sub];
-    if (cur) text(M + 14, TOP + live.items.length * 30 + 8, 1, C.dim, fit(cur[7], 1, W - 2 * M - 14));
-  } else if (s.screen === "cloud") {
-    chrome("CLOUD", "B BACK     UPDATES EVERY 15 SECONDS");
-    const st = live.stats || {};
-    g.fillStyle = C.panel; g.fillRect(M, TOP, W - 2 * M, 30);
-    g.fillStyle = C.accent; g.fillRect(M, TOP, 4, 30);
-    text(M + 14, TOP + 8, 2, C.text, fit(st.motd || "...", 2, W - 2 * M - 24));
-    let y = TOP + 44;
-    const col2 = W / 2 + 10, cw = W / 2 - M - 20;
-    text(M, y, 1, C.dim, "YOUR SERVER"); text(col2, y, 1, C.dim, "VOLT TOP SCORES");
-    y += 14;
-    const lines = [
-      ["UPTIME", st.uptime], ["LOAD", st.load],
-      ["MEMORY", st.mem_total_mb ? `${st.mem_used_mb} / ${st.mem_total_mb} MB` : "?"],
-      ["DISK", st.disk_total_gb ? `${st.disk_used_gb} / ${st.disk_total_gb} GB` : "?"],
-    ];
-    lines.forEach(([k, v], i) => {
-      const yy = y + i * 26;
-      text(M, yy, 2, C.text, fit(`${k} ${v || "?"}`, 2, cw));
-      if (k === "MEMORY") bar(M, yy + 17, cw, +st.mem_used_mb, +st.mem_total_mb);
-      if (k === "DISK") bar(M, yy + 17, cw, +st.disk_used_gb, +st.disk_total_gb);
-    });
-    if (!live.board.length) text(col2, y, 2, C.dim, "NO SCORES YET");
-    live.board.slice(0, 5).forEach(([r, n, sc], i) =>
-      text(col2, y + i * 26, 2, n === "OWEN" ? C.accent : C.text, fit(`${r}. ${n} ${sc}`, 2, cw)));
-  } else if (s.screen === "system") {
-    chrome("SYSTEM", "B BACK");
-    text(M, TOP, 1, C.dim, "TEMPERATURES (READ FROM THE CONSOLE'S SMC)");
-    ["CPU", "GPU", "MEMORY", "BOARD"].forEach((k, i) => {
-      const y = TOP + 16 + i * 26;
-      text(M, y, 2, C.dim, k);
-      g.fillStyle = C.panel; g.fillRect(M + 110, y + 4, 330, 6);
-      text(M + 456, y, 2, C.dim, "--");
-    });
-    text(M, TOP + 130, 2, C.text, "VIDEO OUT    HDMI");
-    text(M, TOP + 156, 2, C.text, "CPU          XENON 3 CORES 3.2 GHZ");
-    text(M, TOP + 182, 1, C.dim, "LIVE TEMPERATURES ONLY SHOW ON THE REAL CONSOLE");
-  } else if (s.screen === "controller") {
-    chrome("CONTROLLER", "HOLD B TO EXIT");
-    const names = ["A","B","X","Y","LB","RB","START","BACK","UP","DOWN","LEFT","RIGHT","LS","RS","GUIDE"];
-    names.forEach((n, i) => {
-      const x = M + (i % 4) * 70, y = TOP + Math.floor(i / 4) * 34;
-      g.fillStyle = C.panel; g.fillRect(x, y, 64, 28);
-      text(x + (64 - tw(1, n)) / 2, y + 10, 1, C.dim, n);
-    });
-    text(M + 300, TOP + 10, 1, C.dim, "PLUG A CONTROLLER INTO THE");
-    text(M + 300, TOP + 22, 1, C.dim, "REAL CONSOLE TO SEE THIS LIGHT UP");
-  }
-  if (s.popup) panel(s.popup[0], s.popup[1], s.popup[2]);
-}
-
-function press(k) {
-  const s = sim;
-  if (s.popup) { if (k === "a" || k === "b") { s.popup = null; draw(); } return; }
-  if (s.screen === "home") {
-    if (k === "up") s.sel = (s.sel + HOME.length - 1) % HOME.length;
-    if (k === "down") s.sel = (s.sel + 1) % HOME.length;
-    if (k === "a") {
-      const pick = HOME[s.sel][0];
-      if (pick === "RESTART" || pick === "POWER OFF") s.popup = ["NOT IN A BROWSER", "A OR B TO CLOSE", C.text];
-      else { s.screen = pick.toLowerCase(); s.sub = 0; }
+    const list = $("playerlist");
+    list.replaceChildren();
+    const p = rows(pl);
+    if (!p.length) {
+      const m = document.createElement("p");
+      m.className = "muted";
+      m.textContent = "No profiles yet. Make one on your Xbox from the Profile tile.";
+      list.appendChild(m);
     }
-  } else {
-    const n = s.screen === "apps" ? 2 : s.screen === "store" ? live.items.length : 0;
-    if (n && k === "up") s.sub = (s.sub + n - 1) % n;
-    if (n && k === "down") s.sub = (s.sub + 1) % n;
-    if (k === "a" && s.screen === "apps") s.popup = ["LAUNCHING", "ON THE REAL CONSOLE ONLY. A OR B TO CLOSE", C.text];
-    if (k === "a" && s.screen === "store" && n) s.popup = ["INSTALL ON XBOX", "USE THE STORE ON THE CONSOLE. A OR B TO CLOSE", C.text];
-    if (k === "b") s.screen = "home";
+    p.forEach(([name, avatar, joined, best]) => {
+      const card = document.createElement("div");
+      card.className = "player";
+      card.appendChild(XAvatar.canvas(avatar, 110));
+      const nb = document.createElement("b"); nb.textContent = name;
+      const sm = document.createElement("small");
+      sm.textContent = Number(best) > 0 ? `VOLT best ${Number(best).toLocaleString()}` : `Joined ${fmtDate(joined)}`;
+      card.append(nb, sm);
+      list.appendChild(card);
+    });
+  } catch (e) {
+    $("pill").className = "pill";
+    $("pilltext").textContent = "server offline";
   }
-  draw();
 }
-
-cv.addEventListener("keydown", e => {
-  const map = { ArrowUp: "up", ArrowDown: "down", Enter: "a", " ": "a", Escape: "b", Backspace: "b" };
-  if (map[e.key]) { e.preventDefault(); press(map[e.key]); }
-});
-cv.addEventListener("click", () => cv.focus());
-document.querySelectorAll("[data-k]").forEach(b => b.addEventListener("click", () => press(b.dataset.k)));
-
-draw();
 refresh();
-setInterval(refresh, 15000);
+setInterval(refresh, 20000);
 </script>
 </body>
 </html>

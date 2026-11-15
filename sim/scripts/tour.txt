@@ -1,0 +1,65 @@
+# A walk through the offline screens.
+wait 40
+shot boot
+wait 140
+shot home
+press right
+wait 20
+shot home_store
+press down
+wait 20
+shot home_apps_row
+press up
+press left
+press a
+wait 30
+shot apps
+press b
+wait 10
+press right 2
+press right
+press right
+press right
+wait 5
+press a
+wait 30
+shot settings
+press down
+press down
+press down
+press down
+press down
+wait 10
+press a
+wait 30
+shot system
+press b
+wait 10
+press down
+wait 5
+press a
+wait 20
+stick lx 20000 10
+shot controller
+hold b 70
+wait 10
+press down
+press a
+wait 30
+shot about
+press b
+press b
+wait 20
+press left
+wait 5
+press a
+wait 30
+shot profile_guest
+press b
+wait 10
+press back
+wait 20
+shot power
+press b
+wait 10
+quit
