@@ -1,0 +1,61 @@
+# HostMC's own-VPS route, first run, from sim/hostmc/test-vps.sh (a private sshd stands in for
+# the VPS): the choice in Internet, the setup (vps.txt already holds the answers, so START takes
+# each one), the steps on the VPS and the login test, then the EULA and the server, with the
+# tunnel coming up and checked from outside. HostMC is left with the server running.
+wait 60
+press down
+press down
+press down
+press down
+press down
+press down
+wait 10
+press a
+press down
+wait 10
+shot internet_choice
+press a
+wait 20
+shot vps_address
+press start
+wait 10
+press start
+wait 10
+press start
+wait 10
+press start
+wait 90
+shot vps_steps
+wait 120
+press a
+wait 300
+shot vps_login
+press right
+press a
+wait 20
+shot vps_page
+press b
+press up
+press up
+press up
+press up
+press up
+press up
+wait 10
+press a
+press a
+wait 40
+shot eula
+press a
+wait 900
+shot server_with_vps
+press b
+press down
+press down
+press down
+press down
+press down
+press down
+wait 30
+shot vps_checked
+quit

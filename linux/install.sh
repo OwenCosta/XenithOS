@@ -77,7 +77,8 @@ fi
 say "Installing packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-PKGS="build-essential libsdl2-dev zlib1g-dev curl ca-certificates tar"
+# openssh-client: HostMC's tunnel to a VPS of the player's own (most systems have it already)
+PKGS="build-essential libsdl2-dev zlib1g-dev curl ca-certificates tar openssh-client"
 [ "$DESKTOP" = 1 ] && PKGS="$PKGS xserver-xorg xinit xfce4 xfce4-terminal dbus-x11 libxtst6"
 # shellcheck disable=SC2086
 apt-get install -y $PKGS

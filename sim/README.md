@@ -40,6 +40,10 @@ More switches:
   what it would have downloaded already in `hostmc/` (`sim/hostmc/data`), so nothing is downloaded
   (`sim/scripts/hostmc.txt`). It runs in real time, since the stand-in does. Without `XSIM_HOSTMC`, HostMC
   downloads Java and a real server and runs it. A server a script leaves running is stopped afterwards.
+  The stand-in answers server list pings on its port (127.0.0.1 only), and `sim/hostmc/ping.py` sends one.
+- `sim/hostmc/test-vps.sh` runs HostMC's own-VPS route through the `hostmc_vps*.txt` scripts, with a private
+  sshd (run as you, on spare ports) standing in for the VPS, and checks each step; screenshots go to
+  `sim/out/hostmc-vps`.
 
 ## Scripts
 

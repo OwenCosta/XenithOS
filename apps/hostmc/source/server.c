@@ -230,6 +230,7 @@ static void take_line(const char *raw)
                 ui_toast_icon(ICON_SERVER);
                 ui_toast("Your server is running", body);
                 pi_server_started();
+                vps_server_started();
             }
         }
     } else if (event_name(msg, " joined the game", name)) {
@@ -313,6 +314,7 @@ static void stopped(void)
     read_log();                                   /* its last words */
     unlink(PIDFILE);
     pi_server_stopped();
+    vps_server_stopped();
     if (asked) {
         sv.why[0] = 0;
         sv_note("the server stopped.");

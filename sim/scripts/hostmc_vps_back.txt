@@ -1,0 +1,25 @@
+# HostMC's own-VPS route, second run, from sim/hostmc/test-vps.sh: a new HostMC finds the server
+# and the tunnel still running (the tunnel came back by itself after its ssh was killed), shows
+# them, then stops the server, which closes the tunnel.
+wait 150
+shot attached_server
+press down
+press down
+press down
+press down
+press down
+press down
+wait 20
+shot attached_vps
+press up
+press up
+press up
+press up
+press up
+press up
+wait 10
+press a
+press a
+wait 240
+shot stopped
+quit
