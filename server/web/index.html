@@ -196,7 +196,7 @@
   <div class="wrap">
     <h2>What it looks like</h2>
     <p class="lead">These come from the XenithOS simulator, which runs the exact code that goes on the console and saves the frames as images.</p>
-    <div class="shot"><img id="shot" src="static/shot-home.png?v=2" alt="The XenithOS home screen" width="1216" height="680"></div>
+    <div class="shot"><img id="shot" src="static/shot-home.png?v=4" alt="The XenithOS home screen" width="1216" height="680"></div>
     <p class="caption" id="caption"></p>
     <div class="tabs" role="tablist" id="tabs"></div>
   </div>
@@ -454,7 +454,7 @@ const SHOTS = [
 ];
 function showShot(i) {
   const [id, name, text] = SHOTS[i];
-  $("shot").src = `static/shot-${id}.png?v=3`;
+  $("shot").src = `static/shot-${id}.png?v=4`;
   $("shot").alt = `XenithOS ${name} screen`;
   $("caption").textContent = text;
   [...$("tabs").children].forEach((b, j) => b.setAttribute("aria-selected", i === j ? "true" : "false"));
