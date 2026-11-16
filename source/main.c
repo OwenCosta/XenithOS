@@ -112,9 +112,9 @@ static void boot(void)
 
 /* ------------------------------------------------------------------ home */
 
-enum { T_APPS, T_STORE, T_CLOUD, T_PROFILE, T_SETTINGS, T_COUNT };
-static const char *const tile_name[T_COUNT] = {"Apps", "Store", "Cloud", "Profile", "Settings"};
-static const int tile_icon[T_COUNT] = {ICON_APPS, ICON_STORE, ICON_CLOUD, ICON_PROFILE, ICON_SETTINGS};
+enum { T_APPS, T_STORE, T_CLOUD, T_PROFILE, T_SETTINGS, T_FEEDBACK, T_COUNT };
+static const char *const tile_name[T_COUNT] = {"Apps", "Store", "Cloud", "Profile", "Settings", "Feedback"};
+static const int tile_icon[T_COUNT] = {ICON_APPS, ICON_STORE, ICON_CLOUD, ICON_PROFILE, ICON_SETTINGS, ICON_MAIL};
 
 static int row, tile, card;
 static float lift_t[T_COUNT], lift_c[MAX_APPS];
@@ -129,7 +129,8 @@ static void tile_sub(int t, char *out, int n)
     case T_STORE: snprintf(out, n, "Apps and games"); break;
     case T_CLOUD: snprintf(out, n, net_is_up() ? "Online" : "Offline"); break;
     case T_PROFILE: snprintf(out, n, prof.signed_in ? "Your profile" : "Create or sign in"); break;
-    default: snprintf(out, n, "Sound and system"); break;
+    case T_FEEDBACK: snprintf(out, n, "Bugs and ideas"); break;
+    default: snprintf(out, n, "Sound and more"); break;
     }
 }
 
@@ -165,9 +166,9 @@ static void draw_home(void)
             avatar_draw(prof.avatar, x + w / 2 - 40, y + h * 42 / 100 - 40, 80);
         else
             icon_draw(tile_icon[i], x + w / 2.0f, y + h * 0.40f, 62, fg, fill);
-        gfx_str(FONT_LABEL, x + 20, y + h - 70, C_TEXT, tile_name[i]);
+        gfx_str(FONT_LABEL, x + 16, y + h - 70, C_TEXT, tile_name[i]);
         tile_sub(i, sub, sizeof sub);
-        gfx_str_fit(FONT_SMALL, x + 20, y + h - 38, C_SUB, sub, w - 36);
+        gfx_str_fit(FONT_SMALL, x + 16, y + h - 38, C_SUB, sub, w - 28);   /* six tiles: 137 px for these words */
     }
 
     /* Jump back in */
@@ -280,6 +281,7 @@ static void open_tile(int t)
     case T_CLOUD: screen_cloud(); break;
     case T_PROFILE: screen_profile(); break;
     case T_SETTINGS: screen_settings(); break;
+    case T_FEEDBACK: screen_feedback(); break;
     }
     apps_scan();
     if (card >= napps) card = napps ? napps - 1 : 0;

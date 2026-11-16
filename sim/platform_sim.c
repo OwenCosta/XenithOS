@@ -672,16 +672,17 @@ int plat_local_app_set(const char *id, int on)
 
 const char *plat_launch_error(void) { return ""; }
 
-/* Typing on a real keyboard: XSIM_TYPE="text" is typed the first time typing is switched on. */
-static int typing_on, typed_once;
+/* Typing on a real keyboard: XSIM_TYPE="text" is typed the first time typing is switched on, as
+ * much each frame as the caller takes (a real keyboard's text arrives in pieces too). */
+static int typing_on, typed_at, typed_done;
 void plat_text_input(int on) { typing_on = on; }
 int plat_text_take(char *out, int n)
 {
     const char *t = getenv("XSIM_TYPE");
     int i;
-    if (!typing_on || typed_once || !t) return 0;
-    typed_once = 1;
-    for (i = 0; t[i] && i < n; i++) out[i] = t[i] == '|' ? '\n' : t[i];
+    if (!typing_on || typed_done || !t) return 0;
+    for (i = 0; t[typed_at] && i < n; i++, typed_at++) out[i] = t[typed_at] == '|' ? '\n' : t[typed_at];
+    if (!t[typed_at]) typed_done = 1;
     return i;
 }
 

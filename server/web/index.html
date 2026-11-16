@@ -196,7 +196,7 @@
   <div class="wrap">
     <h2>What it looks like</h2>
     <p class="lead">These come from the XenithOS simulator, which runs the exact code that goes on the console and saves the frames as images.</p>
-    <div class="shot"><img id="shot" src="static/shot-home.png?v=4" alt="The XenithOS home screen" width="1216" height="680"></div>
+    <div class="shot"><img id="shot" src="static/shot-home.png?v=5" alt="The XenithOS home screen" width="1216" height="680"></div>
     <p class="caption" id="caption"></p>
     <div class="tabs" role="tablist" id="tabs"></div>
   </div>
@@ -336,6 +336,8 @@
   <div class="wrap">
     <h2>Build log</h2>
     <ul class="log">
+      <li><b>0.6.7</b><time datetime="2026-11-16">Nov 16, 2026</time>
+        <p>A Feedback tile on the home screen: got a recommendation or a bug? Let us know there. Report a bug or suggest something, type it with the controller or a keyboard, and it goes to the people who make XenithOS, with XenithOS's version, what it runs on, and your gamertag if you're signed in. The other tiles' words still fit beside it. Holding Esc for the guide over an app no longer closes the guide again as you let go.</p></li>
       <li><b>0.6.6</b><time datetime="2026-11-16">Nov 16, 2026</time>
         <p>On a PC, the Store's Apps section has XenithOS's own apps: VOLT, DOOM, HostMC, Tube and Photos. They come with XenithOS, so installing one puts it on the home screen straight away, and X removes it again. Updates leave alone what you removed. DOOM is one package with both Freedoom games: installing it downloads them, and removing it takes them away. Notifications and messages fit their words: a long one wraps onto another line or ends in "..." instead of running off the screen. An app started on its own, from a desktop's menu, closes when you leave it instead of starting again.</p></li>
       <li><b>0.6.5</b><time datetime="2026-11-16">Nov 16, 2026</time>
@@ -448,7 +450,7 @@ $("nav").addEventListener("click", (e) => {
 
 /* Screens */
 const SHOTS = [
-  ["home", "Home", "Your profile at the top, five tiles, and the apps you've installed. A notification slides in when there's XenithOS news."],
+  ["home", "Home", "Your profile at the top, six tiles, and the apps you've installed. A notification slides in when there's XenithOS news."],
   ["store", "Store", "Apps, game data and updates from XenithOS Cloud, with thumbnails. Downloads are checked against their SHA-256 before they're saved."],
   ["guide", "Guide", "On a PC, the Xbox button (or Esc held down) brings up the guide over any game: back to the home screen while it keeps running, another game, or the controller as a mouse or a keyboard."],
   ["profile", "Profile", "Profiles are saved to XenithOS Cloud and follow you to any Xbox, PC or Pi. Make one with a gamertag and a passcode."],
@@ -458,7 +460,7 @@ const SHOTS = [
 ];
 function showShot(i) {
   const [id, name, text] = SHOTS[i];
-  $("shot").src = `static/shot-${id}.png?v=4`;
+  $("shot").src = `static/shot-${id}.png?v=5`;
   $("shot").alt = `XenithOS ${name} screen`;
   $("caption").textContent = text;
   [...$("tabs").children].forEach((b, j) => b.setAttribute("aria-selected", i === j ? "true" : "false"));

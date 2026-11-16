@@ -50,11 +50,15 @@ Accounts (form posts; errors come back as "error=<message>")
   POST /v1/accounts/avatar            token, avatar
   POST /v1/accounts/logout            token
   POST /v1/scores/<game>              token, score  (or legacy: name, score, for names without a profile)
+  POST /v1/feedback                   kind (bug or idea), text, version, platform, and token if signed
+                                      in: kept, and passed on to Discord (feedback-webhooks.txt in the
+                                      state folder: "bug=<webhook>", "idea=<webhook>", or one for both)
 
 Admin (header X-Xenith-Key: <XENITH_ADMIN_KEY>)
   POST /v1/news (or /v1/inbox)        body is the news post
   POST /v1/inbox/clear
   POST /v1/motd                       body is the new message of the day
+  GET  /v1/feedback                   time|kind|from|version|platform|text, newest first
 
 Command line
   xenith_cloud.py send "text"         message the console inbox (through the running server)
@@ -156,6 +160,53 @@ def clean(text, limit=200):
     return " ".join(text.split())[:limit]
 
 
+# ---------------------------------------------------------------------- feedback
+
+# "Got a recommendation or a bug?" from the consoles' Feedback screen. Each one is kept in the state
+# and passed on to a Discord webhook. The webhooks' addresses are in feedback-webhooks.txt in the
+# state folder, which is never served and never in the repository: "bug=<address>" and
+# "idea=<address>", or one address on a line of its own for both.
+FEEDBACK_KINDS = {"bug": ("Bug report", 0xE50914), "idea": ("Recommendation", 0x46D369)}
+FEEDBACK_KEEP = 500
+DISCORD_HOOK_RE = re.compile(r"^https://(?:canary\.|ptb\.)?discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9_-]+$")
+
+
+def feedback_hooks(state_dir):
+    """{"bug": address, "idea": address}, for the ones that are set."""
+    hooks = {}
+    try:
+        with open(os.path.join(state_dir, "feedback-webhooks.txt"), encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                key, sep, url = line.partition("=")
+                if not sep or key.startswith("http"):
+                    key, url = "all", line
+                key, url = key.strip().lower(), url.strip()
+                if DISCORD_HOOK_RE.match(url):
+                    hooks[key] = url
+    except OSError:
+        return {}
+    return {kind: hooks.get(kind) or hooks.get("all") for kind in FEEDBACK_KINDS if hooks.get(kind) or hooks.get("all")}
+
+
+def send_feedback(hook, kind, text, who, version, platform):
+    """Posts one to Discord. Mentions in what people wrote never ping anyone."""
+    title, color = FEEDBACK_KINDS[kind]
+    payload = {"username": "XenithOS feedback", "allowed_mentions": {"parse": []},
+               "embeds": [{"title": title, "description": text, "color": color,
+                           "fields": [{"name": "From", "value": who, "inline": True},
+                                      {"name": "XenithOS", "value": f"{version} on {platform}", "inline": True}],
+                           "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}]}
+    req = urllib.request.Request(hook, data=json.dumps(payload).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", "User-Agent": "XenithOS-Cloud/1"})
+    try:
+        urllib.request.urlopen(req, timeout=15).close()
+    except (OSError, ValueError) as e:
+        log(f"feedback: Discord didn't take it: {e}")
+
+
 def check_gamertag(name):
     """Same rules as the console (source/screen_profile.c). Returns an error or None."""
     if len(name) < 3:
@@ -226,6 +277,15 @@ class State:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.data, f)
         os.replace(tmp, self.path)
+
+    # -------------------------------------------------------------- feedback
+    def add_feedback(self, kind, text, who, version, platform):
+        with self.lock:
+            kept = self.data.setdefault("feedback", [])
+            kept.append({"t": int(time.time()), "kind": kind, "text": text, "from": who,
+                         "version": version, "platform": platform})
+            del kept[:-FEEDBACK_KEEP]
+            self.save()
 
     # -------------------------------------------------------------- inbox, motd
     def set_motd(self, text):
@@ -1029,6 +1089,8 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
     last_score_lock = threading.Lock()
     creates = RateLimit(CREATE_PER_HOUR, 3600)
     logins = RateLimit(LOGIN_PER_10MIN, 600)
+    feedback_by_ip = RateLimit(30, 3600)          # consoles reached through the relay share an address
+    feedback_by_name = RateLimit(6, 3600)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "XenithOS-Cloud/" + VERSION
@@ -1106,6 +1168,12 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
             if parts == ["v1", "news"]:
                 return self.reply(200, "".join(f"{m['id']}|{m['t']}|{m['text']}\n"
                                                for m in state.data["inbox"]))
+
+            if parts == ["v1", "feedback"]:
+                if not self.is_admin():
+                    return self.error(401, "Admin key required.")
+                return self.reply(200, "".join(f"{f['t']}|{f['kind']}|{f['from']}|{f['version']}|{f['platform']}|{f['text']}\n"
+                                               for f in reversed(state.data.get("feedback", []))))
 
             if len(parts) == 4 and parts[:3] == ["v1", "tube", "thumb"] and parts[3].endswith(".jpg"):
                 vid = parts[3][:-4]
@@ -1270,6 +1338,24 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 if err:
                     return self.error(429 if "15 minutes" in err else 401, err)
                 return self.session_reply(*result)
+
+            if parts == ["v1", "feedback"]:
+                kind, text = form.get("kind", ""), clean(form.get("text", ""), 1000)
+                if kind not in FEEDBACK_KINDS:
+                    return self.error(400, "Say whether it's a bug or an idea.")
+                if len(text) < 3:
+                    return self.error(400, "Write a little more.")
+                acc = state.by_token(form.get("token", ""))
+                if not feedback_by_ip.allow(ip) or (acc and not feedback_by_name.allow(acc["name"])):
+                    return self.error(429, "That's a lot of feedback at once. Try again in a while.")
+                who = acc["name"] if acc else "Guest"
+                version, platform = clean(form.get("version", ""), 16) or "?", clean(form.get("platform", ""), 32) or "?"
+                state.add_feedback(kind, text, who, version, platform)
+                hook = feedback_hooks(os.path.dirname(state.path)).get(kind)
+                if hook:
+                    threading.Thread(target=send_feedback, args=(hook, kind, text, who, version, platform),
+                                     daemon=True).start()
+                return self.reply(200, "ok=1\n")
 
             if parts in (["v1", "tube", "search"], ["v1", "tube", "start"]):
                 if not tube or not tube.available():
@@ -1718,6 +1804,26 @@ else:
     check("news posted", req("POST", "/v1/news", "Patch notes are up", key="k3y")[0] == 200)
     code, body = req("GET", "/v1/news")
     check("news is public", code == 200 and body.decode().split("|", 2)[2] == "Patch notes are up\n")
+
+    # Feedback: kept, read back by the admin, and its webhooks file read the forgiving way
+    check("feedback needs a kind", req("POST", "/v1/feedback", "kind=other&text=Hello there")[0] == 400)
+    check("feedback needs words", req("POST", "/v1/feedback", "kind=bug&text=x")[0] == 400)
+    check("a bug report is taken", req("POST", "/v1/feedback",
+                                       f"kind=bug&text=The+Store+froze%7Conce&version=0.6.7&platform=PC&token={token}")[0] == 200)
+    check("an idea from a guest is taken", req("POST", "/v1/feedback", "kind=idea&text=More+games+please")[0] == 200)
+    check("feedback list needs admin", req("GET", "/v1/feedback")[0] == 401)
+    code, body = req("GET", "/v1/feedback", key="k3y")
+    lines = body.decode().splitlines()
+    check("feedback kept, newest first, from who", code == 200 and len(lines) == 2 and lines[0].split("|")[1:3] == ["idea", "Guest"]
+          and lines[1].split("|", 5)[1:] == ["bug", "Tuber", "0.6.7", "PC", "The Store froze once"])
+    hooks_dir = os.path.join(tmp, "hooks")
+    os.makedirs(hooks_dir)
+    check("no webhooks file, no webhooks", feedback_hooks(hooks_dir) == {})
+    with open(os.path.join(hooks_dir, "feedback-webhooks.txt"), "w") as f:
+        f.write("# feedback\nbug=https://discord.com/api/webhooks/1/abc_D-e\nhttps://discord.com/api/webhooks/2/xyz\n"
+                "idea=https://example.com/not-discord\n")
+    check("webhooks: one for bugs, one line for the rest", feedback_hooks(hooks_dir) ==
+          {"bug": "https://discord.com/api/webhooks/1/abc_D-e", "idea": "https://discord.com/api/webhooks/2/xyz"})
     hello = kvparse(req("GET", "/v1/hello?name=Owen&ver=0.5")[1])
     check("hello has players and online", int(hello.get("players", "0")) >= 1 and int(hello.get("online", "0")) >= 1
           and int(hello.get("now", "0")) > 0)

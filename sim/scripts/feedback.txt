@@ -1,0 +1,24 @@
+# The Feedback tile and screen: a bug report typed (XSIM_TYPE, "|" for Enter) and sent to a test
+# server, which keeps it (GET /v1/feedback with the admin key reads it back).
+#   XSIM_TYPE="The Store froze when I pressed Y twice|" sim/run.sh sim/scripts/feedback.txt feedback 127.0.0.1:8795
+wait 520
+press right
+press right
+press right
+press right
+press right
+wait 25
+shot home_feedback
+press a
+wait 40
+shot feedback
+press a
+wait 60
+shot feedback_confirm
+press a
+wait 40
+shot feedback_sent
+press right
+wait 25
+shot feedback_idea
+quit

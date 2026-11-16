@@ -105,8 +105,9 @@ static int others(const struct plat_guide *g, int *out, int max)
 
 int guide_run(struct plat_guide *g)
 {
-    int rows[5], nrows = 0, sel = 0, page = 0, pick = 0, first = 0, result = -1, i;
+    int rows[5], nrows = 0, sel = 0, page = 0, pick = 0, first = 0, result = -1, i, hold_off = 1;
     int list[MAX_APPS], nlist = others(g, list, MAX_APPS);
+    uint64_t opened;
     uint32_t *back = make_backdrop(g->backdrop);
     float slide = 0, hl = 0, hl2 = 0;
 
@@ -123,9 +124,19 @@ int guide_run(struct plat_guide *g)
 
     ui_settle_input();                       /* the Esc or Xbox button that opened it */
     sfx(SFX_GUIDE_OPEN);
+    opened = ui_ms();
     while (result < 0) {
         int x, y, w = PANEL_W - 64, d;
         ui_poll();
+        /* Esc held to open it over another app was pressed in that app's window, so XenithOS can
+         * see it go down only now, when the key starts repeating: that isn't a press of B. B and the
+         * Xbox button count again once they've been let go (and the opening key has had a moment
+         * to show up). */
+        if (hold_off) {
+            if (ui_ms() - opened > 400 && !cur.b && !cur.guide) hold_off = 0;
+            prev.b = cur.b;
+            prev.guide = cur.guide;
+        }
         d = ui_nav_y();
         if (page == 0) {
             if (d && sel + d >= 0 && sel + d < nrows) { sel += d; sfx(SFX_MOVE); }
