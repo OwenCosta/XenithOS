@@ -1,0 +1,19 @@
+// XenithOS Desktop: what "fastfetch" shows in a terminal.
+{
+  "logo": { "type": "file", "source": "/usr/share/xenithos-desktop/logo.txt", "color": { "1": "red", "2": "white" }, "padding": { "top": 1, "left": 2, "right": 3 } },
+  "display": { "separator": "  ", "color": { "keys": "red" } },
+  "modules": [
+    "title", "separator",
+    { "type": "os", "key": "OS" },
+    { "type": "command", "key": "Console", "text": "/usr/lib/xenithos-desktop/console-version" },
+    { "type": "kernel", "key": "Kernel" },
+    { "type": "uptime", "key": "Up for" },
+    { "type": "packages", "key": "Packages" },
+    { "type": "cpu", "key": "Processor" },
+    { "type": "gpu", "key": "Graphics" },
+    { "type": "memory", "key": "Memory" },
+    { "type": "disk", "key": "Drive", "folders": "/" },
+    { "type": "localip", "key": "Address" },
+    "break", "colors"
+  ]
+}

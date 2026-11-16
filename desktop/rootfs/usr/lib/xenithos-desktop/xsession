@@ -1,0 +1,149 @@
+#!/bin/bash
+# Runs inside XenithOS Desktop's X server (started by /usr/bin/xenithos-session) for as long as
+# the PC is on: the desktop (XFCE), or XenithOS Console as the screen's only program, one after
+# the other. The X server stays up between them and shows XenithOS's wallpaper, so switching is
+# the desktop closing and XenithOS appearing over the same picture, with no text console.
+#
+# ~/.config/xenithos/mode says which runs next:
+#   "Return to XenithOS Console" on the desktop writes "console" and ends the desktop;
+#   XenithOS's power menu, "Switch to desktop mode", writes "desktop" and quits.
+
+CONF="$HOME/.config/xenithos"
+LIB=/usr/lib/xenithos-desktop
+XENITHOS=/usr/lib/xenithos/xenithos
+WALLPAPER=/usr/share/backgrounds/xenithos/wallpaper.png
+mkdir -p "$CONF"
+
+stopping() { [ "$(systemctl is-system-running 2>/dev/null)" = stopping ]; }
+
+# What shows whenever nothing else is drawn: the wallpaper, the same picture the start-up screen
+# and the desktop use.
+paint() {
+    local picture
+    picture=$(sed -n 's/^wallpaper=//p' "$CONF/desktop.conf" 2>/dev/null | head -n 1)     # the person's own, from Settings
+    [ -f "$picture" ] || picture=$WALLPAPER
+    xsetroot -solid '#07080a' -cursor_name left_ptr 2>/dev/null
+    # --zoom: scaled to cover the screen, the way the desktop shows its wallpaper
+    if command -v xwallpaper >/dev/null && [ -f "$picture" ]; then
+        xwallpaper --zoom "$picture" >/dev/null 2>&1
+    fi
+}
+
+# Runs "$@" as its own group of programs (a systemd scope), then closes whatever it left
+# running, so one mode's apps never linger under the other.
+SCOPES=0
+systemd-run --user --scope --quiet --collect -- true >/dev/null 2>&1 && SCOPES=1
+count=0
+run_mode() {
+    local name=$1 unit
+    shift
+    count=$((count + 1))
+    unit="xenithos-$name-$$-$count"
+    if [ "$SCOPES" = 1 ]; then
+        systemd-run --user --scope --quiet --collect --unit="$unit" -p TimeoutStopSec=3 -- "$@"
+        systemctl --user stop "$unit.scope" >/dev/null 2>&1
+    else
+        "$@"
+    fi
+    # Helpers the desktop starts through D-Bus live outside that group.
+    systemctl --user stop xfce4-notifyd.service >/dev/null 2>&1
+    close_windows
+    paint
+}
+
+# Any window still open belongs to a program that outlived its mode (one started some other way
+# than from the desktop's own menus, say): close its program.
+close_windows() {
+    local id pid seen=" "
+    # The desktop's window manager takes a moment to let go of the windows it framed.
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+        pgrep -u "$(id -u)" -x xfwm4 >/dev/null 2>&1 || break
+        sleep 0.1
+    done
+    for id in $(xwininfo -root -children 2>/dev/null | awk '/^ +0x/ { print $1 }'); do
+        pid=$(xprop -id "$id" _NET_WM_PID 2>/dev/null | awk -F' = ' '/= [0-9]+$/ { print $2 }')
+        case "$pid" in ''|1|"$$"|"$PPID") continue ;; esac
+        case "$seen" in *" $pid "*) continue ;; esac
+        seen="$seen$pid "
+        [ "$(ps -o comm= -p "$pid" 2>/dev/null)" = Xorg ] && continue
+        kill "$pid" 2>/dev/null
+    done
+}
+
+# XenithOS Console writes "desktop" in the mode file and then quits. If it's still there a moment
+# later it's stuck on its way out (its sound library can wait for ever for a sound card that
+# has stalled as it closes it), and "Switch to desktop mode" would leave the screen on "One
+# moment" for good. So then it's closed for it; what it had to save, it saved before it wrote
+# the file. Runs beside XenithOS Console and ends with it.
+leave_watch() {
+    local seen=0 late=0
+    while sleep 0.25; do
+        if pgrep -u "$UID" -x xenithos >/dev/null 2>&1; then
+            seen=1
+            if [ "$(cat "$CONF/mode" 2>/dev/null)" = desktop ]; then
+                late=$((late + 1))
+                if [ "$late" -ge 6 ]; then
+                    echo "xsession: XenithOS Console didn't quit by itself after switching to desktop mode; closed it" >&2
+                    pkill -KILL -u "$UID" -x xenithos
+                    return 0
+                fi
+            else
+                late=0
+            fi
+        elif [ "$seen" = 1 ]; then
+            return 0
+        fi
+    done
+}
+
+paint
+# XenithOS's defaults and names come before XFCE's own (see the file), for this session and for
+# what D-Bus and systemd start on its behalf (the settings daemon, portals).
+. /etc/profile.d/xenithos-desktop.sh
+dbus-update-activation-environment --systemd DISPLAY XAUTHORITY XDG_CONFIG_DIRS XDG_DATA_DIRS QT_QPA_PLATFORMTHEME >/dev/null 2>&1
+"$LIB/user-migrate" >> "$CONF/migrate.log" 2>&1
+
+quick=0
+while true; do
+    stopping && exit 0
+    mode=$(cat "$CONF/mode" 2>/dev/null)
+
+    if [ "$mode" = console ] && [ -x "$XENITHOS" ]; then
+        # XenithOS Console: no screen blanking (a controller isn't input to X), no desktop.
+        # Its home screen shows the apps this person installed (XenithOS Console's own update
+        # puts all of its apps back; this takes the others off again).
+        "$LIB/console-apps" sync > /dev/null 2>&1
+        xset s off -dpms 2>/dev/null
+        began=$(date +%s)
+        leave_watch &
+        watch=$!
+        # Its sound goes straight to PipeWire, the PC's sound system, through SDL's own driver
+        # for it (SDL's others stay as fallbacks). SDL 2.30's PulseAudio and ALSA drivers,
+        # Ubuntu 24.04's, are the ones that wait for a stalled sound card as they close.
+        XENITHOS_SESSION=1 XENITHOS_KIOSK=1 XDG_SESSION_TYPE=x11 SDL_AUDIODRIVER=pipewire,pulseaudio,alsa \
+            run_mode console "$XENITHOS" 2> "$CONF/xenithos.log"
+        kill "$watch" 2>/dev/null
+        wait "$watch" 2>/dev/null
+        xset s on +dpms 2>/dev/null
+        [ "$(cat "$CONF/mode" 2>/dev/null)" = desktop ] && { quick=0; continue; }
+        # It stopped by itself (a crash, say): start it again, unless it keeps stopping straight
+        # away. Then the desktop takes over.
+        if [ $(( $(date +%s) - began )) -lt 5 ]; then quick=$((quick + 1)); else quick=0; fi
+        if [ "$quick" -ge 3 ]; then
+            quick=0
+            echo desktop > "$CONF/mode"
+        fi
+        sleep 1
+        continue
+    fi
+
+    echo desktop > "$CONF/mode"
+    run_mode desktop startxfce4 > "$CONF/desktop.log" 2>&1
+    [ "$(cat "$CONF/mode" 2>/dev/null)" = console ] && continue
+    # The desktop ended without asking for XenithOS Console: turning off, restarting, or
+    # "Log out". Give a shutdown a moment to show itself before starting the desktop again.
+    for _ in 1 2 3 4 5 6 7 8; do
+        stopping && exit 0
+        sleep 0.25
+    done
+done

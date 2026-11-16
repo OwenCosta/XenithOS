@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- XenithOS Desktop: leaving the desktop (for XenithOS Console, or to turn off) doesn't save
+     which apps were open to start them again next time, and doesn't stop to ask. The rest of
+     the session's settings are XFCE's own. -->
+<channel name="xfce4-session" version="1.0">
+  <property name="general" type="empty">
+    <property name="SaveOnExit" type="bool" value="false"/>
+    <property name="PromptOnLogout" type="bool" value="true"/>
+  </property>
+</channel>

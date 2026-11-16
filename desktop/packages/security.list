@@ -1,0 +1,122 @@
+# The security tools XenithOS Desktop comes with (the xenithos-security-tools package), all from
+# Ubuntu's own archive so they update with the system.
+# Not in Ubuntu 24.04, so not here yet: Metasploit, Burp Suite, ZAP, Ghidra, radare2, wpscan, recon-ng.
+#
+# This list is also the Apps menu's Security Tools group (the package carries a copy, and
+# /usr/lib/xenithos-desktop/desktop-entries reads it):
+#   ## Name: a few words about it {icon}     starts a group inside Security Tools
+#   package                                  a tool, in the group above it
+#   package   Name in the menu               the same, with a name of its own in the menu
+# A tool with a window keeps its own menu entry, moved into its group. One that's used by
+# typing gets an entry that opens a terminal on it (/usr/lib/xenithos-desktop/tool-terminal).
+
+## Networks: finding and looking at what's on them {network-workgroup}
+nmap
+zenmap
+wireshark
+tshark
+tcpdump
+netcat-openbsd           netcat
+ncat
+socat
+hping3
+masscan
+arp-scan
+netdiscover
+nbtscan
+dnsrecon
+dnsenum
+fierce
+whois
+traceroute
+mtr-tiny                 mtr
+sslscan
+testssl.sh               testssl
+snmp                     SNMP tools
+onesixtyone
+ike-scan
+p0f
+ngrep
+tcpflow
+dsniff
+ettercap-graphical
+bettercap
+
+## Websites {web-browser}
+nikto
+sqlmap
+dirb
+gobuster
+ffuf
+wfuzz
+whatweb
+sublist3r
+dnstwist
+
+## Passwords {dialog-password}
+john
+hashcat
+hashid
+hydra
+medusa
+ncrack
+crunch
+cewl
+
+## Wi-Fi {network-wireless}
+aircrack-ng
+wifite
+reaver
+bully
+pixiewps
+macchanger
+mdk4
+hcxtools
+hcxdumptool
+
+## Remote access: Windows networks and other PCs {preferences-desktop-remote-desktop}
+smbclient
+smbmap
+python3-impacket         impacket
+sshuttle
+remmina
+tigervnc-viewer
+
+## People and organisations: finding out about them {system-users}
+sherlock
+
+## Programs and files: taking them apart {system-search}
+gdb
+ltrace
+strace
+binwalk
+foremost
+sleuthkit
+autopsy
+testdisk
+scalpel
+steghide
+libimage-exiftool-perl   exiftool
+yara
+hexedit
+ghex
+python3-scapy            scapy
+python3-pwntools         pwntools
+
+## Protection and privacy: for this PC {security-high}
+clamav
+clamtk
+chkrootkit
+lynis
+ufw
+firejail
+apparmor-utils           AppArmor tools
+keepassxc
+bleachbit
+mat2
+tor
+torbrowser-launcher
+onionshare
+proxychains4             proxychains
+openvpn
+wireguard-tools          WireGuard tools

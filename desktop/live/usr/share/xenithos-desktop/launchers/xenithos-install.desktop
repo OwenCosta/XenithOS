@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Install XenithOS Desktop
+Comment=Install XenithOS Desktop on this PC
+Exec=/usr/bin/xenithos-installer
+Icon=xenithos
+Terminal=false
+Categories=System;

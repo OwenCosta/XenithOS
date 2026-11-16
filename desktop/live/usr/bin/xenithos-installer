@@ -1,0 +1,3 @@
+#!/bin/sh
+# Opens XenithOS Desktop's installer (on the live system: the USB stick).
+exec python3 /usr/lib/xenithos-desktop/installer.py "$@"

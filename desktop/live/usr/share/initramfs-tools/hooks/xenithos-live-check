@@ -1,0 +1,13 @@
+#!/bin/sh
+# The boot menu's "Check the USB stick for errors" has live-boot compare every file on the
+# stick with sha256sum.txt, and for that it needs sha256sum among the start-up files. Ubuntu
+# 24.04's live-boot only puts md5sum there, and the check then stops at "BOOT FAILED". Does
+# nothing once live-boot is gone (the installer takes it off the installed PC).
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+    prereqs) prereqs; exit 0 ;;
+esac
+. /usr/share/initramfs-tools/hook-functions
+[ -e /usr/share/initramfs-tools/scripts/live ] || exit 0
+[ -x "${DESTDIR}/bin/sha256sum" ] || copy_exec /usr/bin/sha256sum /bin

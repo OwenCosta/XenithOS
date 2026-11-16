@@ -1,0 +1,325 @@
+#!/bin/bash
+# XenithOS Desktop's installer, the part that does the work (the window is installer.py). It
+# erases a whole drive, copies this live system onto it, sets up one account that XenithOS runs
+# as, and puts GRUB on the drive for UEFI or BIOS, whichever this PC started with.
+#
+#   xenithos-install --disk /dev/sdX --erase --user NAME --fullname "Full Name" \
+#                    --hostname NAME --timezone Area/City --keyboard LAYOUT
+#   (as root; the password comes on standard input, one line)
+#
+# It reports on standard output, one line each:
+#   STEP <percent> <what's happening>
+#   DONE
+#   ERROR <what went wrong>
+# Everything it runs, and what that printed, goes to /var/log/xenithos-install.log, which ends up
+# on the new system too.
+set -uo pipefail
+
+LOG=/var/log/xenithos-install.log
+TARGET=/mnt/xenithos-install
+MIN_BYTES=16000000000
+
+DISK="" ERASE=0 USER_NAME="" FULL_NAME="" HOST="" TZONE="Etc/UTC" KEYMAP="us"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --disk) DISK="${2:-}"; shift ;;
+        --erase) ERASE=1 ;;
+        --user) USER_NAME="${2:-}"; shift ;;
+        --fullname) FULL_NAME="${2:-}"; shift ;;
+        --hostname) HOST="${2:-}"; shift ;;
+        --timezone) TZONE="${2:-}"; shift ;;
+        --keyboard) KEYMAP="${2:-}"; shift ;;
+        *) echo "ERROR Unknown option: $1"; exit 1 ;;
+    esac
+    shift
+done
+
+: > "$LOG"
+chmod 600 "$LOG"
+log() { printf '%s %s\n' "$(date '+%H:%M:%S')" "$*" >> "$LOG"; }
+step() { echo "STEP $1 $2"; log "== $2"; }
+fail() {
+    echo "ERROR $*"
+    log "ERROR $*"
+    cleanup
+    exit 1
+}
+# Runs a command with its output in the log, and stops the install if it fails.
+run() {
+    log "\$ $*"
+    "$@" >> "$LOG" 2>&1 || fail "$FAILED_AT (it said: $(tail -n 1 "$LOG"))"
+}
+in_target() {
+    chroot "$TARGET" /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C.UTF-8 \
+        DEBIAN_FRONTEND=noninteractive "$@"
+}
+cleanup() {
+    sync
+    for m in $(awk -v t="$TARGET" '$2 == t || index($2, t "/") == 1 { print $2 }' /proc/mounts | sort -r); do
+        umount "$m" 2>/dev/null || umount -l "$m" 2>/dev/null || true
+    done
+}
+
+# ------------------------------------------------------------------ checks
+
+[ "$(id -u)" = 0 ] || fail "The installer needs to run as root."
+[ "$ERASE" = 1 ] || fail "Nothing was erased: the installer needs --erase to erase the drive."
+[ -b "$DISK" ] || fail "There's no drive called $DISK."
+[ "$(lsblk -dno TYPE "$DISK" 2>/dev/null)" = disk ] || fail "$DISK isn't a whole drive."
+[ "$(lsblk -dno RO "$DISK" | tr -d ' ')" = 0 ] || fail "$DISK can only be read, not written."
+SIZE=$(lsblk -dbno SIZE "$DISK" | tr -d ' ')
+[ "${SIZE:-0}" -ge "$MIN_BYTES" ] || fail "$DISK is too small. XenithOS Desktop needs at least 16 GB."
+# Never the USB stick (or disc) XenithOS started from.
+LIVE_SRC=$(findmnt -no SOURCE /run/live/medium 2>/dev/null || true)
+if [ -n "$LIVE_SRC" ]; then
+    LIVE_DISK=/dev/$(lsblk -no PKNAME "$LIVE_SRC" 2>/dev/null | head -n 1)
+    [ "$LIVE_DISK" = /dev/ ] && LIVE_DISK=$LIVE_SRC
+    [ "$(readlink -f "$LIVE_DISK")" != "$(readlink -f "$DISK")" ] || fail "That's the USB stick XenithOS Desktop started from."
+fi
+[[ "$USER_NAME" =~ ^[a-z][a-z0-9_-]{0,31}$ ]] || fail "The user name can only have small letters, numbers, - and _, and starts with a letter."
+case "$USER_NAME" in root|daemon|bin|sys|sync|games|man|lp|mail|news|uucp|proxy|www-data|backup|list|irc|nobody|systemd-*|messagebus|polkitd|_*)
+    fail "The user name $USER_NAME is taken by the system. Try another." ;;
+esac
+[[ "$HOST" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]] || fail "The computer's name can only have letters, numbers and -."
+FULL_NAME=$(printf '%s' "$FULL_NAME" | tr -d ':,=\n\r\t' | cut -c1-60)
+[ -e "/usr/share/zoneinfo/$TZONE" ] && [[ "$TZONE" != *..* ]] || TZONE=Etc/UTC
+[[ "$KEYMAP" =~ ^[a-z][a-z0-9_]*(,[a-z0-9_]*)?$ ]] || KEYMAP=us
+IFS= read -r PASSWORD || true
+[ -n "$PASSWORD" ] || fail "There's no password."
+
+if [ -d /sys/firmware/efi ]; then BOOT=uefi; else BOOT=bios; fi
+SQUASH=""
+for f in /run/live/medium/live/filesystem.squashfs /run/live/*/live/filesystem.squashfs; do
+    if [ -f "$f" ]; then SQUASH=$f; break; fi
+done
+LOWER=/run/live/rootfs/filesystem.squashfs
+[ -n "$SQUASH" ] || [ -d "$LOWER/usr" ] || fail "Couldn't find XenithOS Desktop's files on the USB stick."
+
+part() { case "$DISK" in *[0-9]) echo "${DISK}p$1" ;; *) echo "${DISK}$1" ;; esac; }
+P_BIOS=$(part 1) P_EFI=$(part 2) P_ROOT=$(part 3)
+log "Installing on $DISK ($SIZE bytes), starting with $BOOT, from ${SQUASH:-$LOWER}"
+lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MODEL "$DISK" >> "$LOG" 2>&1
+
+# ------------------------------------------------------------------ the drive
+
+step 1 "Erasing the drive"
+FAILED_AT="Couldn't erase the drive"
+swapoff -a 2>/dev/null || true
+for p in $(lsblk -lnpo NAME "$DISK" | tac); do
+    for m in $(lsblk -lnpo MOUNTPOINTS "$p" 2>/dev/null); do umount -l "$m" 2>/dev/null || true; done
+done
+run wipefs -a $(lsblk -lnpo NAME "$DISK" | tac)
+run sgdisk --zap-all "$DISK"
+# GPT: a 1 MB partition GRUB needs on BIOS PCs, the EFI system partition UEFI PCs start from,
+# and the rest for XenithOS. The same layout works either way, so the drive can move between them.
+run sgdisk -n1:1M:+1M -t1:EF02 -c1:"BIOS boot" \
+           -n2:0:+512M -t2:EF00 -c2:"EFI system" \
+           -n3:0:0 -t3:8304 -c3:"XenithOS" "$DISK"
+run partprobe "$DISK"
+udevadm settle
+for i in $(seq 1 20); do [ -b "$P_ROOT" ] && break; sleep 0.5; done
+[ -b "$P_ROOT" ] || fail "The new partitions didn't show up on $DISK."
+step 3 "Erasing the drive"
+FAILED_AT="Couldn't format the drive"
+run mkfs.fat -F 32 -n EFI "$P_EFI"
+run mkfs.ext4 -F -q -L XenithOS "$P_ROOT"
+
+mkdir -p "$TARGET"
+FAILED_AT="Couldn't use the new partitions"
+run mount "$P_ROOT" "$TARGET"
+mkdir -p "$TARGET/boot/efi"
+run mount "$P_EFI" "$TARGET/boot/efi"
+
+# ------------------------------------------------------------------ copying
+
+step 5 "Copying XenithOS Desktop (the long part)"
+FAILED_AT="Couldn't copy XenithOS Desktop to the drive"
+if [ -n "$SQUASH" ]; then
+    log "\$ unsquashfs -f -percentage -d $TARGET $SQUASH"
+    # unsquashfs prints how far it is (0 to 100) a line at a time; its exit code comes last.
+    last=5 status=1
+    while IFS= read -r line; do
+        case "$line" in
+            EXIT\ *) status=${line#EXIT }; continue ;;
+        esac
+        pct=$(printf '%s' "$line" | grep -o '[0-9]\+' | tail -n 1)
+        [ -n "$pct" ] && [ "$pct" -le 100 ] || continue
+        pct=$((5 + pct * 80 / 100))
+        if [ "$pct" -gt "$last" ]; then last=$pct; echo "STEP $pct Copying XenithOS Desktop (the long part)"; fi
+    done < <(unsquashfs -f -percentage -d "$TARGET" "$SQUASH" 2>> "$LOG"; echo "EXIT $?")
+    log "unsquashfs finished with $status"
+    # 2 means some files' extra attributes couldn't be set, which doesn't stop the system working.
+    case "$status" in 0|2) ;; *) fail "$FAILED_AT (see $LOG)" ;; esac
+    [ -x "$TARGET/usr/bin/xenithos-session" ] || fail "$FAILED_AT (it stopped part way; see $LOG)"
+else
+    run rsync -aHAX "$LOWER/" "$TARGET/"
+fi
+
+# ------------------------------------------------------------------ the new system
+
+step 86 "Setting up your account"
+FAILED_AT="Couldn't set up the new system"
+for d in dev dev/pts proc sys run; do mkdir -p "$TARGET/$d"; done
+run mount --bind /dev "$TARGET/dev"
+run mount --bind /dev/pts "$TARGET/dev/pts"
+run mount -t proc proc "$TARGET/proc"
+run mount -t sysfs sysfs "$TARGET/sys"
+run mount -t tmpfs tmpfs "$TARGET/run"
+if [ "$BOOT" = uefi ] && [ -d /sys/firmware/efi/efivars ]; then
+    run mount -t efivarfs efivarfs "$TARGET/sys/firmware/efi/efivars"
+fi
+
+ROOT_UUID=$(blkid -s UUID -o value "$P_ROOT")
+EFI_UUID=$(blkid -s UUID -o value "$P_EFI")
+cat > "$TARGET/etc/fstab" <<EOF
+# Made by the XenithOS Desktop installer
+UUID=$ROOT_UUID  /          ext4  errors=remount-ro  0  1
+UUID=$EFI_UUID   /boot/efi  vfat  umask=0077         0  1
+/swapfile        none       swap  sw                 0  0
+EOF
+run fallocate -l 2G "$TARGET/swapfile"
+chmod 600 "$TARGET/swapfile"
+run mkswap -q "$TARGET/swapfile"
+
+echo "$HOST" > "$TARGET/etc/hostname"
+cat > "$TARGET/etc/hosts" <<EOF
+127.0.0.1	localhost
+127.0.1.1	$HOST
+::1		localhost ip6-localhost ip6-loopback
+ff02::1		ip6-allnodes
+ff02::2		ip6-allrouters
+EOF
+# Names on the internet are looked up through systemd-resolved: /etc/resolv.conf points at its file.
+if [ -x "$TARGET/usr/lib/systemd/systemd-resolved" ]; then
+    ln -sfn ../run/systemd/resolve/stub-resolv.conf "$TARGET/etc/resolv.conf"
+fi
+rm -f "$TARGET/etc/machine-id" "$TARGET/var/lib/dbus/machine-id"
+run in_target systemd-machine-id-setup
+ln -sf /etc/machine-id "$TARGET/var/lib/dbus/machine-id"
+ln -sf "/usr/share/zoneinfo/$TZONE" "$TARGET/etc/localtime"
+echo "$TZONE" > "$TARGET/etc/timezone"
+LAYOUT=${KEYMAP%%,*}
+VARIANT=""
+[ "$KEYMAP" != "$LAYOUT" ] && VARIANT=${KEYMAP#*,}
+cat > "$TARGET/etc/default/keyboard" <<EOF
+XKBMODEL="pc105"
+XKBLAYOUT="$LAYOUT"
+XKBVARIANT="$VARIANT"
+XKBOPTIONS=""
+BACKSPACE="guess"
+EOF
+
+# The account. It's in sudo (for updates and settings), and the root account stays locked.
+run in_target useradd -m -s /bin/bash -c "$FULL_NAME" "$USER_NAME"
+GROUPS_WANTED=""
+for g in sudo audio video render input netdev plugdev bluetooth users lpadmin; do
+    if in_target getent group "$g" >/dev/null 2>&1; then GROUPS_WANTED="$GROUPS_WANTED${GROUPS_WANTED:+,}$g"; fi
+done
+run in_target usermod -aG "$GROUPS_WANTED" "$USER_NAME"
+log "\$ chpasswd ($USER_NAME)"
+printf '%s:%s\n' "$USER_NAME" "$PASSWORD" | in_target chpasswd >> "$LOG" 2>&1 || fail "Couldn't set the password."
+unset PASSWORD
+run in_target passwd -l root
+# XenithOS runs as this account and starts by itself on the first console.
+run in_target /usr/lib/xenithos-desktop/setup-user "$USER_NAME"
+
+step 88 "Setting up your account"
+# The live system's own parts, and the installer, aren't needed on the drive.
+LIVE_PKGS=$(in_target dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' live-boot live-boot-initramfs-tools live-config \
+    live-config-systemd live-tools user-setup 2>/dev/null | awk '$1 == "ii" { print $2 }' | tr '\n' ' ')
+if [ -n "${LIVE_PKGS// /}" ]; then
+    # shellcheck disable=SC2086
+    run in_target dpkg --purge $LIVE_PKGS
+fi
+rm -rf "$TARGET/usr/lib/live" "$TARGET/etc/live" "$TARGET/var/lib/live"
+rm -f "$TARGET/etc/profile.d/xenithos-install-first.sh" "$TARGET/etc/sudoers.d/live"
+rm -f "$TARGET/usr/bin/xenithos-installer" "$TARGET/usr/sbin/xenithos-install"
+rm -f "$TARGET/usr/lib/xenithos-desktop/installer.py" "$TARGET/usr/lib/xenithos-desktop/installer-session"
+rm -f "$TARGET/usr/share/xenithos-desktop/xenithos-install.app" "$TARGET/usr/share/xenithos-desktop/xenithos-install.ximg"
+rm -f "$TARGET/usr/share/xenithos-desktop/launchers/xenithos-install.desktop"
+# Security updates install themselves (unattended-upgrades, once a day).
+cat > "$TARGET/etc/apt/apt.conf.d/20auto-upgrades" <<EOF
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+# The ISO was built without the "recommended" extras; an installed PC installs apps the
+# usual way. And the virus scanner fetches its list of viruses by itself (the live system doesn't:
+# it would fill its memory).
+rm -f "$TARGET/etc/apt/apt.conf.d/00recommends"
+in_target systemctl enable clamav-freshclam.service >> "$LOG" 2>&1 || true
+
+# ------------------------------------------------------------------ starting up
+
+step 90 "Making it start"
+FAILED_AT="Couldn't put the boot loader on the drive"
+DEBS=/usr/share/xenithos-install/debs
+# GRUB's packages copy their font into /boot/grub as they install, before grub-install makes it.
+mkdir -p "$TARGET/boot/grub"
+if [ "$BOOT" = uefi ]; then
+    # Secure Boot works through the signed shim and GRUB of the system underneath (Ubuntu), which
+    # only look in the EFI partition's folder of that name: EFI/ubuntu. The extra copy in
+    # EFI/BOOT starts it on PCs that forget their boot entries.
+    VENDOR=$(sed -n 's/^Vendor: *//p' "$TARGET/etc/dpkg/origins/default" 2>/dev/null | head -n 1 | tr 'A-Z' 'a-z')
+    [ -n "$VENDOR" ] || VENDOR=ubuntu
+    # The two systems name the question about the EFI/BOOT copy differently; each ignores the other's.
+    in_target debconf-set-selections <<EOF
+grub-efi-amd64 grub2/force_efi_extra_removable boolean true
+grub-efi-amd64 grub2/no_efi_extra_removable boolean false
+grub-efi-amd64 grub2/update_nvram boolean true
+EOF
+    run in_target sh -c "dpkg -i $DEBS/grub-efi-amd64_*.deb"
+    # Ubuntu's grub-install makes the EFI/BOOT copy by itself and doesn't know the option that
+    # asks Debian's for it.
+    REMOVABLE=""
+    if in_target grub-install --help 2>/dev/null | grep -q -- '--force-extra-removable'; then
+        REMOVABLE=--force-extra-removable
+    fi
+    log "\$ grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=$VENDOR $REMOVABLE --recheck"
+    # shellcheck disable=SC2086
+    if ! in_target grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id="$VENDOR" \
+            $REMOVABLE --recheck >> "$LOG" 2>&1; then
+        log "grub-install couldn't add a boot entry; trying without one (EFI/BOOT still starts it)"
+        # shellcheck disable=SC2086
+        run in_target grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id="$VENDOR" \
+            $REMOVABLE --no-nvram --recheck
+    fi
+    [ -e "$TARGET/boot/efi/EFI/BOOT/BOOTX64.EFI" ] || [ -e "$TARGET/boot/efi/EFI/boot/bootx64.efi" ] \
+        || log "There's no EFI/BOOT copy on the EFI partition; the PC needs its XenithOS boot entry to start"
+    # The PC's boot menu says "XenithOS" rather than the name of the system underneath.
+    if in_target efibootmgr >/dev/null 2>&1; then
+        for n in $(in_target efibootmgr | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\? \(XenithOS\|ubuntu\|Ubuntu\|debian\)\b.*/\1/p'); do
+            in_target efibootmgr -q -b "$n" -B >> "$LOG" 2>&1 || true
+        done
+        in_target efibootmgr -q -c -d "$DISK" -p 2 -L XenithOS -l "\\EFI\\$VENDOR\\shimx64.efi" >> "$LOG" 2>&1 \
+            || log "Couldn't add the XenithOS boot entry; EFI/BOOT starts it"
+        # From now on GRUB's updates leave the PC's boot entries alone.
+        echo "grub-efi-amd64 grub2/update_nvram boolean false" | in_target debconf-set-selections
+    fi
+else
+    DEV_ID=$DISK
+    for l in /dev/disk/by-id/*; do
+        case "$l" in *-part*|*/wwn-*) continue ;; esac
+        if [ "$(readlink -f "$l")" = "$(readlink -f "$DISK")" ]; then DEV_ID=$l; break; fi
+    done
+    in_target debconf-set-selections <<EOF
+grub-pc grub-pc/install_devices multiselect $DEV_ID
+grub-pc grub-pc/install_devices_empty boolean false
+EOF
+    # grub-pc takes the place of the UEFI one that came with the system. On Ubuntu it needs a
+    # second package, which waits next to it.
+    run in_target sh -c "dpkg -i \$(ls $DEBS/grub-pc_*.deb $DEBS/grub-gfxpayload-lists_*.deb 2>/dev/null)"
+    run in_target grub-install --target=i386-pc --recheck "$DISK"
+fi
+rm -rf "$TARGET/usr/share/xenithos-install"
+
+step 94 "Making it start"
+FAILED_AT="Couldn't make the start-up files"
+run in_target update-initramfs -u -k all
+run in_target update-grub
+
+step 98 "Finishing"
+cp "$LOG" "$TARGET/var/log/xenithos-install.log" 2>/dev/null
+chmod 600 "$TARGET/var/log/xenithos-install.log" 2>/dev/null
+cleanup
+log "Done"
+echo "DONE"

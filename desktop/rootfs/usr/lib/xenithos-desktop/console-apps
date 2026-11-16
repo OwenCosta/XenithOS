@@ -1,0 +1,104 @@
+#!/bin/bash
+# XenithOS Console's apps that you install yourself on XenithOS Desktop. The ones named in
+# /usr/share/xenithos-desktop/console-apps.list are on the PC already (built with XenithOS
+# Console), but only show on XenithOS Console's home screen once you've installed them in
+# Settings > Console apps.
+#
+#   console-apps list            a line for each: app|1 or 0 (installed)|its name|what it is
+#   console-apps install APP     puts it on XenithOS Console's home screen
+#   console-apps remove APP      takes it off again; what you made with it stays
+#   console-apps sync            makes the home screen match what you chose. The session runs it
+#                                before XenithOS Console starts, and Settings after it updates
+#                                XenithOS Console, whose own update puts every app back.
+#
+# An app on the home screen is three files in XenithOS Console's apps folder: APP.elf32 (a link
+# to the program), APP.ximg (its picture) and APP.txt (its name and version). What you chose is
+# in ~/.config/xenithos/console-apps, a name on each line.
+set -u
+LIST=/usr/share/xenithos-desktop/console-apps.list
+LIB=${XENITHOS_LIB:-/usr/lib/xenithos}
+SHARE=/usr/share/xenithos/apps
+DATA=${XENITHOS_DATA:-$HOME/.local/share/xenithos}
+APPS="$DATA/uda:/apps"
+KEPT="$DATA/optional-apps"      # the picture and name of an app that isn't installed, for when it is
+CHOSEN="${XDG_CONFIG_HOME:-$HOME/.config}/xenithos/console-apps"
+
+optional() { sed -n 's/^\([a-z0-9][a-z0-9_-]*\)\([[:space:]].*\)\{0,1\}$/\1/p' "$LIST" 2>/dev/null; }
+is_optional() { optional | grep -qx -- "$1"; }
+about() { sed -n "s/^$1[[:space:]]\{1,\}//p" "$LIST" 2>/dev/null | head -n 1; }
+chosen() { grep -qx -- "$1" "$CHOSEN" 2>/dev/null; }
+title() {
+    local name="" f
+    for f in "$APPS/$1.txt" "$KEPT/$1.txt" "$SHARE/$1.txt"; do
+        [ -f "$f" ] && name=$(sed -n 's/^name=//p' "$f" | head -n 1 | tr -d '\r')
+        [ -n "$name" ] && break
+    done
+    echo "${name:-$1}"
+}
+
+# Onto the home screen.
+put() {
+    local app=$1 ext
+    [ -x "$LIB/$app" ] || return 1
+    mkdir -p "$APPS"
+    for ext in ximg txt; do
+        [ -f "$APPS/$app.$ext" ] && continue
+        if [ -f "$KEPT/$app.$ext" ]; then cp "$KEPT/$app.$ext" "$APPS/$app.$ext"
+        elif [ -f "$SHARE/$app.$ext" ]; then cp "$SHARE/$app.$ext" "$APPS/$app.$ext"; fi
+    done
+    [ -e "$APPS/$app.elf32" ] || ln -s "$LIB/$app" "$APPS/$app.elf32"
+}
+
+# Off the home screen. Its picture and name are kept (XenithOS Console's updates bring newer
+# ones than the system came with).
+take() {
+    local app=$1 ext
+    for ext in ximg txt; do
+        if [ -f "$APPS/$app.$ext" ]; then
+            mkdir -p "$KEPT"
+            mv -f "$APPS/$app.$ext" "$KEPT/$app.$ext"
+        fi
+    done
+    if [ -L "$APPS/$app.elf32" ]; then rm -f "$APPS/$app.elf32"; fi
+}
+
+need_app() {
+    if ! is_optional "${1:-}"; then
+        echo "${1:-That} isn't one of the apps you install yourself." >&2
+        exit 2
+    fi
+}
+
+case "${1:-}" in
+    list)
+        for app in $(optional); do
+            [ -x "$LIB/$app" ] || continue
+            printf '%s|%s|%s|%s\n' "$app" "$(chosen "$app" && echo 1 || echo 0)" "$(title "$app")" "$(about "$app")"
+        done
+        ;;
+    install)
+        need_app "${2:-}"
+        [ -x "$LIB/$2" ] || { echo "$(title "$2") isn't on this PC yet. Settings > Updates brings it." >&2; exit 1; }
+        mkdir -p "$(dirname "$CHOSEN")"
+        chosen "$2" || echo "$2" >> "$CHOSEN"
+        put "$2" || { echo "$(title "$2") couldn't be put on the home screen." >&2; exit 1; }
+        ;;
+    remove)
+        need_app "${2:-}"
+        if [ -f "$CHOSEN" ]; then
+            grep -vx -- "$2" "$CHOSEN" > "$CHOSEN.new" || true
+            mv -f "$CHOSEN.new" "$CHOSEN"
+        fi
+        take "$2"
+        ;;
+    sync)
+        [ -d "$APPS" ] || exit 0        # XenithOS Console hasn't been set up for this account
+        for app in $(optional); do
+            if chosen "$app"; then put "$app" || true; else take "$app"; fi
+        done
+        ;;
+    *)
+        sed -n '2,/^set -u/p' "$0" | grep '^#' | cut -c3- >&2
+        exit 2
+        ;;
+esac

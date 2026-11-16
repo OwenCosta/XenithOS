@@ -1,0 +1,12 @@
+PRETTY_NAME="XenithOS Desktop @VERSION@"
+NAME="XenithOS Desktop"
+VERSION_ID="@VERSION@"
+VERSION="@VERSION@"
+VERSION_CODENAME=noble
+ID=xenithos
+ID_LIKE="ubuntu debian"
+UBUNTU_CODENAME=noble
+HOME_URL="https://owencosta.diy/xenithos/"
+SUPPORT_URL="https://github.com/OwenCosta/XenithOS"
+BUG_REPORT_URL="https://github.com/OwenCosta/XenithOS/issues"
+LOGO=xenithos

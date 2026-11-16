@@ -1,0 +1,3 @@
+# XenithOS Desktop: Settings can look for and install updates without asking for the password.
+# Only this one program, which takes no instructions from whoever runs it.
+%sudo ALL=(root) NOPASSWD: /usr/lib/xenithos-desktop/update-helper

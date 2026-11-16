@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=X-GNOME-Metatheme
+Name=XenithOS
+Comment=XenithOS's look: near-black, white text, one red
+Encoding=UTF-8
+
+[X-GNOME-Metatheme]
+GtkTheme=XenithOS
+MetacityTheme=XenithOS
+IconTheme=XenithOS
+CursorTheme=Adwaita
+ButtonLayout=menu:minimize,maximize,close

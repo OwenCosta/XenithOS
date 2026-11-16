@@ -1,0 +1,112 @@
+/* XenithOS: GTK's own dark theme (Adwaita) in XenithOS's colours. Near-black, cards #12151a
+   with quiet #262b33 edges, white text and white buttons, and one highlight colour
+   (@xenith_accent, from accent.css: XenithOS's red unless the person picked another) for what's
+   switched on: ticks, switches, progress, the chosen tab, the open window in the panel.
+   adwaita-xenithos.css is Adwaita recoloured (made by /usr/lib/xenithos-desktop/recolor-gtk
+   when the package is installed); what follows is XenithOS's own on top. */
+@import url("adwaita-xenithos.css");
+
+@define-color theme_selected_bg_color #3a404a;
+@define-color theme_unfocused_selected_bg_color #2c323c;
+@define-color accent_color @xenith_accent;
+@define-color accent_bg_color @xenith_accent;
+
+/* Flat: no gradients or bevels on title bars and buttons */
+headerbar, .titlebar:not(headerbar), headerbar:backdrop, .titlebar:backdrop:not(headerbar) {
+  background-image: none; background-color: #12151a; border-color: #262b33; box-shadow: none;
+}
+button, button:backdrop {
+  background-image: none; border-color: #262b33; box-shadow: none; text-shadow: none; -gtk-icon-shadow: none;
+}
+button { background-color: #1b1f26; }
+button:backdrop { background-color: #15181d; }
+button:hover { background-color: #232832; border-color: #3a404a; }
+button:active, button:checked, button:backdrop:checked { background-color: #2c323c; border-color: #3a404a; }
+button:disabled, button:backdrop:disabled { background-color: #12151a; border-color: #1d2128; color: #5d6570; }
+button.flat, button.flat:backdrop, button.flat:disabled { background-color: transparent; border-color: transparent; }
+button.flat:hover { background-color: #232832; }
+button.flat:checked, button.flat:active { background-color: #2c323c; }
+
+/* The button that goes ahead is white, the one that deletes is red */
+button.suggested-action, button.suggested-action:backdrop {
+  background-image: none; background-color: #f1f3f6; border-color: #f1f3f6; color: #07080a;
+}
+button.suggested-action:hover { background-color: #ffffff; border-color: #ffffff; }
+button.suggested-action:active { background-color: #c4c9d1; border-color: #c4c9d1; }
+button.suggested-action label, button.suggested-action image { color: #07080a; }
+button.suggested-action:disabled { background-color: #12151a; border-color: #1d2128; color: #5d6570; }
+button.destructive-action, button.destructive-action:backdrop {
+  background-image: none; background-color: #e50914; border-color: #e50914; color: #ffffff;
+}
+button.destructive-action:hover { background-color: #f5222d; border-color: #f5222d; }
+
+/* Typing: a light edge on the field you're in, a caret in the highlight colour */
+entry, spinbutton:not(.vertical) { caret-color: @xenith_accent; }
+entry:focus, spinbutton:focus:not(.vertical) { border-color: #8b93a0; box-shadow: inset 0 0 0 1px #8b93a0; }
+
+/* What's switched on takes the highlight colour, focused window or not */
+check:checked, radio:checked, check:indeterminate, radio:indeterminate,
+check:checked:backdrop, radio:checked:backdrop, check:indeterminate:backdrop, radio:indeterminate:backdrop {
+  background-image: none; background-color: @xenith_accent; border-color: @xenith_accent; color: @xenith_on_accent;
+  box-shadow: none;
+}
+check, radio { background-image: none; background-color: #0b0d10; border-color: #4b525c; box-shadow: none; }
+check:hover, radio:hover { border-color: #8b93a0; }
+switch:checked, switch:checked:backdrop {
+  background-image: none; background-color: @xenith_accent; border-color: @xenith_accent; text-shadow: none;
+}
+switch slider, switch slider:backdrop { background-image: none; background-color: #f1f3f6; border-color: #c4c9d1; box-shadow: none; }
+progressbar progress, scale highlight, levelbar block.filled, levelbar block.high, levelbar block:not(.empty),
+progressbar progress:backdrop, scale highlight:backdrop, levelbar block.high:backdrop, treeview.view.progressbar {
+  background-image: none; background-color: @xenith_accent; border-color: @xenith_accent;
+}
+scale slider, scale slider:backdrop { background-image: none; background-color: #f1f3f6; border-color: #c4c9d1; box-shadow: none; }
+spinner { color: @xenith_accent; }
+notebook > header.top > tabs > tab:checked { box-shadow: inset 0 -2px @xenith_accent; }
+notebook > header.bottom > tabs > tab:checked { box-shadow: inset 0 2px @xenith_accent; }
+notebook > header.left > tabs > tab:checked { box-shadow: inset -2px 0 @xenith_accent; }
+notebook > header.right > tabs > tab:checked { box-shadow: inset 2px 0 @xenith_accent; }
+menubar > menuitem:hover, .menubar > menuitem:hover { box-shadow: none; background-color: #262b33; color: #ffffff; }
+link, button.link, *:link { color: #9db4ff; }
+*:link:visited, button:visited > label:visited { color: #b9a6ff; }
+
+/* Scrollbars: thin and grey */
+scrollbar slider { background-color: #3a404a; }
+scrollbar slider:hover { background-color: #5d6570; }
+scrollbar slider:hover:active { background-color: #8b93a0; }
+
+/* XFCE's panel: flat, and the open window has a line under it in the highlight colour */
+.xfce4-panel.background { background-color: #12151a; color: #f1f3f6; border-color: #262b33; }
+.xfce4-panel.background button, .xfce4-panel.background button:backdrop {
+  border-radius: 6px; border-color: transparent; background-color: transparent;
+}
+.xfce4-panel.background button:hover { background-color: #232832; }
+.xfce4-panel.background button:checked, .xfce4-panel.background button:checked:backdrop, #tasklist-button:checked {
+  background-color: #1b1f26; box-shadow: inset 0 -2px @xenith_accent;
+}
+.xfce4-panel.background button label { color: #f1f3f6; font-weight: 600; }
+
+/* The Apps menu (Whisker menu): a card */
+#whiskermenu-window { background-color: #12151a; border: 1px solid #262b33; }
+#whiskermenu-window treeview.view, #whiskermenu-window iconview, #whiskermenu-window scrolledwindow { background-color: #12151a; }
+#whiskermenu-window treeview.view:selected, #whiskermenu-window iconview:selected { background-color: #262b33; }
+#whiskermenu-window button, #whiskermenu-window button:backdrop { background-color: transparent; border-color: transparent; }
+#whiskermenu-window button:hover { background-color: #232832; }
+#whiskermenu-window button:checked { background-color: #262b33; box-shadow: none; }
+
+/* Notifications */
+#XfceNotifyWindow { background-color: #12151a; border: 1px solid #262b33; border-radius: 10px; color: #f1f3f6; }
+
+/* Desktop icons: their names in full ("Return to XenithOS Console" too) straight on the
+   wallpaper, a soft white card when chosen */
+XfdesktopIconView { -XfdesktopIconView-ellipsize-icon-labels: 0; -XfdesktopIconView-cell-text-width-proportion: 2.6; }
+XfdesktopIconView.view { background-color: transparent; color: #f1f3f6; }
+XfdesktopIconView.view.label, XfdesktopIconView.view.label:backdrop {
+  background-color: transparent; color: #f1f3f6; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+XfdesktopIconView.view.label:selected, XfdesktopIconView.view.label:selected:backdrop {
+  background-color: alpha(#f1f3f6, 0.16); color: #ffffff; text-shadow: none;
+}
+XfdesktopIconView.view:active, XfdesktopIconView.rubberband {
+  background-color: alpha(#f1f3f6, 0.10); border: 1px solid alpha(#f1f3f6, 0.35);
+}

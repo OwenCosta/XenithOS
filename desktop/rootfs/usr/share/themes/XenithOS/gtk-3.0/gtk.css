@@ -1,0 +1,5 @@
+/* XenithOS's theme with its own red as the highlight colour. The other colours people can pick in
+   Settings > Look are themes of their own (XenithOS-Blue and so on) that use the same gtk-main.css
+   with a different accent.css. */
+@import url("accent.css");
+@import url("gtk-main.css");

@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- XenithOS Desktop's panel: one bar along the bottom. XenithOS's logo (Return to XenithOS
+     Console), the Apps menu, the open windows, then the tray, sound, battery, notifications and
+     the clock. Settings > Look moves and resizes it. -->
+<channel name="xfce4-panel" version="1.0">
+  <property name="configver" type="int" value="2"/>
+  <property name="panels" type="array">
+    <value type="int" value="1"/>
+    <property name="dark-mode" type="bool" value="true"/>
+    <property name="panel-1" type="empty">
+      <property name="position" type="string" value="p=10;x=0;y=0"/>
+      <property name="length" type="double" value="100"/>
+      <property name="position-locked" type="bool" value="true"/>
+      <property name="size" type="uint" value="44"/>
+      <property name="icon-size" type="uint" value="22"/>
+      <property name="background-style" type="uint" value="1"/>
+      <property name="background-rgba" type="array">
+        <value type="double" value="0.070588"/>
+        <value type="double" value="0.082353"/>
+        <value type="double" value="0.101961"/>
+        <value type="double" value="1"/>
+      </property>
+      <property name="plugin-ids" type="array">
+        <value type="int" value="1"/>
+        <value type="int" value="2"/>
+        <value type="int" value="3"/>
+        <value type="int" value="4"/>
+        <value type="int" value="5"/>
+        <value type="int" value="6"/>
+        <value type="int" value="7"/>
+        <value type="int" value="8"/>
+        <value type="int" value="9"/>
+        <value type="int" value="10"/>
+      </property>
+    </property>
+  </property>
+  <property name="plugins" type="empty">
+    <property name="plugin-1" type="string" value="launcher">
+      <property name="items" type="array">
+        <value type="string" value="xenithos-console.desktop"/>
+      </property>
+      <property name="show-label" type="bool" value="false"/>
+    </property>
+    <property name="plugin-2" type="string" value="whiskermenu">
+      <property name="button-title" type="string" value="Apps"/>
+      <property name="show-button-title" type="bool" value="true"/>
+      <property name="show-button-icon" type="bool" value="false"/>
+      <property name="favorites" type="array">
+        <value type="string" value="xenithos-console.desktop"/>
+        <value type="string" value="brave-browser.desktop"/>
+        <value type="string" value="thunar.desktop"/>
+        <value type="string" value="xfce4-terminal.desktop"/>
+        <value type="string" value="xenithos-settings.desktop"/>
+        <value type="string" value="mullvad-vpn.desktop"/>
+        <value type="string" value="org.xfce.mousepad.desktop"/>
+      </property>
+      <!-- the groups in XenithOS Desktop's own order (menus/xfce-applications.menu), and the
+           apps as a list in which a group inside a group (Security Tools' Networks, Passwords
+           and so on) is a line you open: view-mode 2. (0 is a grid of icons, which shows such
+           a group's apps all in one heap.) -->
+      <property name="sort-categories" type="bool" value="false"/>
+      <property name="view-mode" type="int" value="2"/>
+      <property name="launcher-show-name" type="bool" value="true"/>
+      <property name="launcher-show-description" type="bool" value="false"/>
+      <property name="launcher-show-tooltip" type="bool" value="true"/>
+      <property name="position-search-alternate" type="bool" value="true"/>
+      <property name="position-commands-alternate" type="bool" value="false"/>
+      <property name="position-categories-alternate" type="bool" value="true"/>
+      <property name="position-profile-alternate" type="bool" value="false"/>
+      <property name="menu-width" type="int" value="560"/>
+      <property name="menu-height" type="int" value="560"/>
+      <property name="profile-shape" type="int" value="0"/>
+      <property name="recent-items-max" type="int" value="8"/>
+      <property name="favorites-in-recent" type="bool" value="true"/>
+      <property name="show-command-settings" type="bool" value="true"/>
+      <property name="command-settings" type="string" value="xenithos-settings"/>
+      <property name="show-command-lockscreen" type="bool" value="false"/>
+      <property name="show-command-switchuser" type="bool" value="false"/>
+      <property name="show-command-logoutuser" type="bool" value="false"/>
+      <property name="show-command-restart" type="bool" value="true"/>
+      <property name="show-command-shutdown" type="bool" value="true"/>
+      <property name="show-command-suspend" type="bool" value="true"/>
+      <property name="show-command-hibernate" type="bool" value="false"/>
+      <property name="show-command-logout" type="bool" value="false"/>
+      <property name="show-command-menueditor" type="bool" value="false"/>
+      <property name="show-command-profile" type="bool" value="false"/>
+    </property>
+    <property name="plugin-3" type="string" value="separator">
+      <property name="style" type="uint" value="0"/>
+      <property name="expand" type="bool" value="false"/>
+    </property>
+    <property name="plugin-4" type="string" value="tasklist">
+      <property name="flat-buttons" type="bool" value="true"/>
+      <property name="show-handle" type="bool" value="false"/>
+      <property name="show-labels" type="bool" value="true"/>
+      <property name="grouping" type="bool" value="false"/>
+      <property name="middle-click" type="uint" value="1"/>
+    </property>
+    <property name="plugin-5" type="string" value="separator">
+      <property name="style" type="uint" value="0"/>
+      <property name="expand" type="bool" value="true"/>
+    </property>
+    <property name="plugin-6" type="string" value="systray">
+      <property name="square-icons" type="bool" value="true"/>
+      <property name="icon-size" type="int" value="20"/>
+    </property>
+    <property name="plugin-7" type="string" value="pulseaudio">
+      <property name="enable-keyboard-shortcuts" type="bool" value="true"/>
+      <property name="show-notifications" type="bool" value="true"/>
+    </property>
+    <property name="plugin-8" type="string" value="power-manager-plugin"/>
+    <property name="plugin-9" type="string" value="notification-plugin"/>
+    <property name="plugin-10" type="string" value="clock">
+      <property name="mode" type="uint" value="2"/>
+      <property name="digital-layout" type="uint" value="3"/>
+      <property name="digital-time-format" type="string" value="%H:%M"/>
+      <property name="digital-time-font" type="string" value="Inter Semi-Bold 10"/>
+      <property name="tooltip-format" type="string" value="%A %d %B %Y"/>
+    </property>
+  </property>
+</channel>

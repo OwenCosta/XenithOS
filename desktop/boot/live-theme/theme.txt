@@ -1,0 +1,51 @@
+# XenithOS Desktop's boot menu: near-black, the logo, and the chosen line as a card with a white
+# outline. splash.png and select_*.png are drawn by desktop/art/make-art.py.
+desktop-image: "../splash.png"
+desktop-image-scale-method: "crop"
+desktop-color: "#07080a"
+title-text: ""
+message-font: "Inter Regular 20"
+message-color: "#f1f3f6"
+terminal-font: "Unifont Regular 16"
+
++ boot_menu {
+	left = 50%-300
+	top = 55%
+	width = 600
+	height = 34%
+	item_font = "Inter Regular 24"
+	selected_item_font = "Inter Bold 24"
+	item_color = "#8b93a0"
+	selected_item_color = "#f1f3f6"
+	item_height = 40
+	item_padding = 10
+	item_spacing = 30
+	icon_width = 0
+	icon_height = 0
+	item_icon_space = 0
+	selected_item_pixmap_style = "../select_*.png"
+	scrollbar = false
+}
+
++ label {
+	id = "__timeout__"
+	left = 0
+	top = 100%-76
+	width = 100%
+	height = 24
+	align = "center"
+	color = "#5d6570"
+	font = "Inter Regular 16"
+	text = "Starting XenithOS Desktop in %d seconds"
+}
+
++ label {
+	left = 0
+	top = 100%-46
+	width = 100%
+	height = 24
+	align = "center"
+	color = "#5d6570"
+	font = "Inter Regular 16"
+	text = "Up and down to choose, Enter to start"
+}

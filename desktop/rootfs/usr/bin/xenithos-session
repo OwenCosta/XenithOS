@@ -1,0 +1,48 @@
+#!/bin/bash
+# XenithOS Desktop's session. The first console logs the XenithOS account in by itself and
+# ~/.profile runs this (the same hook linux/install.sh sets up).
+#
+# The PC starts in the desktop. XenithOS Console is one click away ("Return to XenithOS
+# Console"), and its power menu's "Switch to desktop mode" comes back. Both run inside one X
+# server (/usr/lib/xenithos-desktop/xsession), so switching never drops to this text console.
+#
+#   ~/.config/xenithos/start-mode   what the PC starts in: "desktop" (default) or "console"
+#   ~/.config/xenithos/mode         what runs next: "desktop" or "console"
+#   ~/.config/xenithos/session.log  what the X server and the session printed
+
+CONF="$HOME/.config/xenithos"
+XENITHOS=/usr/lib/xenithos/xenithos
+mkdir -p "$CONF"
+
+quiet_console() { printf '\033[?25l\033[2J\033[H'; }     # no cursor, nothing on the screen
+stopping() { [ "$(systemctl is-system-running 2>/dev/null)" = stopping ]; }
+
+quiet_console
+START=$(cat "$CONF/start-mode" 2>/dev/null)
+[ "$START" = console ] || START=desktop
+echo "$START" > "$CONF/mode"
+
+fails=0
+while true; do
+    began=$(date +%s)
+    startx /usr/lib/xenithos-desktop/xsession -- -keeptty -nolisten tcp > "$CONF/session.log" 2>&1
+    quiet_console
+    # Turning off or restarting: nothing more to start.
+    if stopping; then sleep 60; exit 0; fi
+
+    if [ $(( $(date +%s) - began )) -lt 10 ]; then fails=$((fails + 1)); else fails=0; fi
+    if [ "$fails" -ge 3 ]; then
+        # The X server can't start on this PC as it is. XenithOS Console can still draw straight
+        # to the screen; failing that, a shell that says where to look.
+        fails=0
+        if [ -x "$XENITHOS" ]; then
+            XENITHOS_KIOSK=0 SDL_VIDEODRIVER=kmsdrm "$XENITHOS" 2> "$CONF/xenithos.log" && continue
+        fi
+        printf '\033[?25h'
+        echo "XenithOS Desktop couldn't start its screen. What it said is in $CONF/session.log"
+        echo "and ~/.local/share/xorg/Xorg.0.log. Type 'exit' to try again."
+        bash --noprofile
+        quiet_console
+    fi
+    sleep 1
+done

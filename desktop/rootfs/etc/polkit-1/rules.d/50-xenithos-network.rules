@@ -1,0 +1,10 @@
+// XenithOS Desktop: the person at the PC can join and forget networks from Settings (in the
+// desktop and in XenithOS Console) without being asked for the password each time, and the
+// networks are saved for the whole PC, so they connect again before anyone has logged in.
+polkit.addRule(function(action, subject) {
+    if (action.id.indexOf("org.freedesktop.NetworkManager.") == 0 &&
+        subject.local && subject.active &&
+        (subject.isInGroup("netdev") || subject.isInGroup("sudo"))) {
+        return polkit.Result.YES;
+    }
+});

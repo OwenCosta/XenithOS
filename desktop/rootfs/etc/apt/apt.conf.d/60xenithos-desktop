@@ -1,0 +1,9 @@
+// XenithOS Desktop: updates never stop to ask which version of a settings file to keep (yours stays).
+Dpkg::Options { "--force-confdef"; "--force-confold"; };
+
+// Security fixes install themselves once a day. Said by name here, because Ubuntu's own list
+// goes by what the system calls itself, and this one calls itself XenithOS Desktop.
+Unattended-Upgrade::Allowed-Origins {
+    "Ubuntu:${distro_codename}";
+    "Ubuntu:${distro_codename}-security";
+};

@@ -1,0 +1,11 @@
+#!/bin/sh
+# XenithOS Desktop: the boot menu, on the rare times it shows (Esc as the PC starts, or after a
+# start that didn't finish), in XenithOS's dark look instead of GRUB's blue box. Its number puts
+# it after 05_debian_theme, whose colours these replace.
+set -e
+cat << 'EOF2'
+set color_normal=light-gray/black
+set color_highlight=white/black
+set menu_color_normal=light-gray/black
+set menu_color_highlight=black/light-gray
+EOF2

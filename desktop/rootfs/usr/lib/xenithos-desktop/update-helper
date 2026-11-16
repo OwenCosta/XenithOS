@@ -1,0 +1,215 @@
+#!/bin/bash
+# XenithOS Desktop's updater, the part that runs as root. Settings > Updates runs it through
+# sudo (which /etc/sudoers.d/xenithos-desktop allows without a password, for this program only),
+# and a timer runs "check" a few times a day.
+#
+#   update-helper check    looks for updates and says what it found
+#   update-helper apply    installs them: XenithOS Desktop's own packages, then the system's and
+#                          the apps' (Brave, Mullvad VPN and the rest come through apt)
+#
+# XenithOS Desktop's own updates are a bundle of packages, signed with XenithOS Desktop's key:
+# a channel (an address in /etc/xenithos-desktop/update.conf; there can be a spare) has
+# manifest.txt, which names the newest version and its bundle. Both are checked against the key in
+# /usr/share/keyrings/xenithos-desktop.gpg before anything is installed, and the bundle's own
+# install.sh does the installing with apt. An update that's cut off (power, say) is finished at
+# the next start by xenithos-update-recover.service.
+#
+# It reports on standard output, a line each:
+#   STEP <percent> <what's happening>     INFO <key>=<value>     DONE     ERROR <what went wrong>
+# Everything it runs is logged in /var/log/xenithos-update.log.
+set -uo pipefail
+
+STATE=/var/lib/xenithos-desktop
+CACHE=/var/cache/xenithos-desktop
+LOG=/var/log/xenithos-update.log
+CONF=/etc/xenithos-desktop/update.conf
+KEYRING=/usr/share/keyrings/xenithos-desktop.gpg
+STATUS=$STATE/update-status
+MARK=$STATE/update-running
+export DEBIAN_FRONTEND=noninteractive
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+APT_OPTS=(-y -o DPkg::Lock::Timeout=300 -o Dpkg::Use-Pty=0 -o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-confdef)
+
+case "${1:-}" in check|apply|recover) ACTION=$1 ;; *) echo "ERROR usage: update-helper check|apply"; exit 2 ;; esac
+[ "$(id -u)" = 0 ] || { echo "ERROR The updater needs to run as root."; exit 1; }
+mkdir -p "$STATE" "$CACHE"
+
+log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$LOG"; }
+step() { echo "STEP $1 $2"; log "== $2"; }
+info() { echo "INFO $1"; }
+fail() { echo "ERROR $*"; log "ERROR $*"; rm -f "$MARK"; exit 1; }
+run() { log "\$ $*"; "$@" >> "$LOG" 2>&1; }
+
+mapfile -t CHANNELS < <(sed -n 's/^channel=//p' "$CONF" 2>/dev/null | tr -d ' \r' | grep . || true)
+installed_version() { dpkg-query -W -f='${Version}' xenithos-desktop 2>/dev/null || true; }
+# Checks a signature against XenithOS Desktop's key, with whichever tool is there (gpgv comes
+# with xenithos-desktop; a system that has sqv in its place works too).
+verify() {
+    if command -v gpgv >/dev/null; then run gpgv --keyring "$KEYRING" "$1" "$2"
+    elif command -v sqv >/dev/null; then run sqv --keyring "$KEYRING" "$1" "$2"
+    else log "no gpgv or sqv to check signatures with"; return 1; fi
+}
+
+# Gets the update list (manifest.txt) from the first channel that answers with a properly signed
+# one, and sets AVAILABLE, BUNDLE_URL, BUNDLE_SHA and NOTES from it. Returns 1 when no channel
+# answered, 2 when what came back didn't pass its signature check.
+AVAILABLE="" BUNDLE_URL="" BUNDLE_SHA="" NOTES=""
+read_manifest() {
+    local m=$CACHE/manifest.txt c result=1 version bundle sha
+    for c in "${CHANNELS[@]}"; do
+        rm -f "$m" "$m.sig"
+        run curl -fsSL --connect-timeout 15 --max-time 40 -o "$m" "$c/manifest.txt" || continue
+        run curl -fsSL --connect-timeout 15 --max-time 40 -o "$m.sig" "$c/manifest.txt.sig" || continue
+        if ! verify "$m.sig" "$m"; then
+            log "the update list from $c has a wrong signature"
+            result=2
+            continue
+        fi
+        version=$(sed -n 's/^version=//p' "$m" | head -n 1)
+        bundle=$(sed -n 's/^bundle=//p' "$m" | head -n 1)
+        sha=$(sed -n 's/^sha256=//p' "$m" | head -n 1)
+        if ! [[ "$version" =~ ^[0-9][0-9A-Za-z.+~-]*$ ]] || ! [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || [ -z "$bundle" ]; then
+            log "the update list from $c is incomplete"
+            continue
+        fi
+        case "$bundle" in http://*|https://*) ;; *) bundle="$c/$bundle" ;; esac
+        AVAILABLE=$version BUNDLE_URL=$bundle BUNDLE_SHA=$sha
+        NOTES=$(sed -n 's/^notes=//p' "$m" | head -n 1)
+        log "update list from $c: XenithOS Desktop $AVAILABLE"
+        return 0
+    done
+    return "$result"
+}
+newer() { [ -n "$AVAILABLE" ] && dpkg --compare-versions "$AVAILABLE" gt "${1:-0}"; }
+pending_packages() { apt-get -s -o Debug::NoLocking=true full-upgrade 2>/dev/null | grep -c '^Inst ' || true; }
+
+write_status() {
+    cat > "$STATUS.tmp" <<EOF
+checked=$(date +%s)
+desktop_installed=$(installed_version)
+desktop_available=$AVAILABLE
+notes=$NOTES
+packages=$1
+restart=$( [ -e /run/reboot-required ] || [ -e /run/xenithos-desktop-restart ] && echo 1 || echo 0 )
+error=${2:-}
+EOF
+    chmod 644 "$STATUS.tmp"
+    mv -f "$STATUS.tmp" "$STATUS"
+}
+
+# ------------------------------------------------------------------ check
+
+if [ "$ACTION" = check ]; then
+    step 10 "Looking for updates"
+    problem=""
+    run apt-get update -q -o DPkg::Lock::Timeout=120 || problem="Couldn't reach the update servers. Is this PC online?"
+    step 60 "Looking for updates"
+    read_manifest
+    case $? in
+        0) ;;
+        2) problem="XenithOS Desktop's update list didn't pass its signature check, so it was left alone." ; AVAILABLE="" ;;
+        *) [ -n "$problem" ] || problem="Couldn't reach XenithOS Desktop's updates. The system's and the apps' still work." ; AVAILABLE="" ;;
+    esac
+    have=$(installed_version)
+    newer "$have" || AVAILABLE=$have
+    count=$(pending_packages)
+    write_status "$count" "$problem"
+    info "desktop_installed=$have"
+    info "desktop_available=$AVAILABLE"
+    info "notes=$NOTES"
+    info "packages=$count"
+    [ -n "$problem" ] && info "error=$problem"
+    echo DONE
+    exit 0
+fi
+
+# ------------------------------------------------------------------ recover (at start-up)
+
+if [ "$ACTION" = recover ]; then
+    [ -e "$MARK" ] || exit 0
+    log "== finishing an update that was cut off"
+    plymouth display-message --text="Finishing an update" 2>/dev/null || true
+    # Sets up everything that was already unpacked. What still has to be downloaded waits for
+    # the next "Update now", which picks up where this left off.
+    run dpkg --configure -a
+    rm -f "$MARK"
+    plymouth display-message --text="" 2>/dev/null || true
+    exit 0
+fi
+
+# ------------------------------------------------------------------ apply
+
+# It runs away from any terminal, and the PC stays on while it runs. (apt puts a terminal's
+# settings back when it has finished. Done by a program that isn't the terminal's front one,
+# which this is when Settings was opened from a terminal or from XenithOS Console, that stops
+# the program for good: an update that never ends.)
+if [ -z "${XENITHOS_UPDATE_DETACHED:-}" ]; then
+    export XENITHOS_UPDATE_DETACHED=1
+    again=("$0" apply)
+    if systemd-inhibit --what=idle --who="XenithOS Update" --why="Checking" true >/dev/null 2>&1; then
+        again=(systemd-inhibit --what=shutdown:sleep:idle --who="XenithOS Update" --why="Installing updates" --mode=block "${again[@]}")
+    fi
+    if command -v setsid >/dev/null; then again=(setsid --wait "${again[@]}"); fi
+    exec "${again[@]}" < /dev/null
+fi
+# Settings closed while it runs? Then nobody reads what this says, and it carries on quietly.
+trap 'exec > /dev/null 2>&1' PIPE
+# Only one runs at a time.
+exec 9> /run/xenithos-update.lock
+flock -n 9 || { echo "ERROR An update is already running."; exit 1; }
+
+touch "$MARK"
+step 2 "Getting ready"
+run dpkg --configure -a
+run apt-get "${APT_OPTS[@]}" -f install
+step 6 "Looking for updates"
+run apt-get update -q -o DPkg::Lock::Timeout=300 || fail "Couldn't reach the update servers. Is this PC online?"
+
+have=$(installed_version)
+desktop_updated=0
+if read_manifest && newer "$have"; then
+    step 12 "Downloading XenithOS Desktop $AVAILABLE"
+    dir=$CACHE/bundle
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    run curl -fL --retry 3 --max-time 1800 -o "$dir/bundle.tar" "$BUNDLE_URL" || fail "Couldn't download XenithOS Desktop $AVAILABLE."
+    run curl -fsSL --max-time 60 -o "$dir/bundle.tar.sig" "$BUNDLE_URL.sig" || fail "Couldn't download XenithOS Desktop $AVAILABLE."
+    [ "$(sha256sum "$dir/bundle.tar" | cut -d' ' -f1)" = "$BUNDLE_SHA" ] || fail "The download of XenithOS Desktop $AVAILABLE came out wrong. Try again."
+    verify "$dir/bundle.tar.sig" "$dir/bundle.tar" || fail "XenithOS Desktop $AVAILABLE didn't pass its signature check, so it wasn't installed."
+    run tar -xf "$dir/bundle.tar" -C "$dir" --no-same-owner || fail "The download of XenithOS Desktop $AVAILABLE didn't unpack."
+    [ -f "$dir/install.sh" ] || fail "XenithOS Desktop $AVAILABLE has no installer in it."
+    step 20 "Installing XenithOS Desktop $AVAILABLE"
+    run bash "$dir/install.sh" || fail "XenithOS Desktop $AVAILABLE didn't install. The PC still works as before; what happened is in $LOG."
+    desktop_updated=1
+    touch /run/xenithos-desktop-restart
+    rm -rf "$dir"
+fi
+
+step 55 "Updating apps and the system"
+# apt reports how far it is on file descriptor 3: "pmstatus:package:percent:what".
+log "\$ apt-get full-upgrade"
+last=55
+while IFS= read -r line; do
+    case "$line" in
+        pmstatus:*|dlstatus:*)
+            pct=${line#*:*:}
+            pct=${pct%%:*}
+            pct=${pct%%.*}
+            [[ "$pct" =~ ^[0-9]+$ ]] || continue
+            p=$((55 + pct * 37 / 100))
+            if [ "$p" -gt "$last" ]; then last=$p; echo "STEP $p Updating apps and the system"; fi
+            ;;
+        EXIT\ *) upgrade_status=${line#EXIT } ;;
+    esac
+done < <(apt-get "${APT_OPTS[@]}" -o APT::Status-Fd=3 full-upgrade 3>&1 >> "$LOG" 2>&1; echo "EXIT $?")
+[ "${upgrade_status:-1}" = 0 ] || fail "Some updates didn't install. What happened is in $LOG."
+
+step 94 "Tidying up"
+run apt-get "${APT_OPTS[@]}" autoremove
+run apt-get clean
+AVAILABLE=$(installed_version)
+rm -f "$MARK"
+write_status 0 ""
+if [ "$desktop_updated" = 1 ] || [ -e /run/reboot-required ]; then info "restart=1"; else info "restart=0"; fi
+info "desktop_installed=$AVAILABLE"
+echo DONE

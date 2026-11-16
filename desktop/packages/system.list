@@ -1,0 +1,107 @@
+# XenithOS Desktop, the system under the desktop: only on the ISO's list (an installed PC keeps
+# what it has). The desktop, its apps and the security tools are in the other lists here, which
+# become packages of their own so installed PCs get them with updates.
+# The build leaves out Ubuntu's "recommended" extras, so each part that's needed is listed.
+# The live system's own parts are added by live-build.
+
+## The kernel: Ubuntu 24.04's newest (its "hardware enablement" one), for new PCs' parts
+linux-image-generic-hwe-24.04
+
+## The system
+systemd-sysv
+systemd-resolved
+systemd-timesyncd
+dbus
+dbus-user-session
+sudo
+polkitd
+pkexec
+locales
+console-setup
+keyboard-configuration
+tzdata
+ucf
+unattended-upgrades
+apparmor
+bash-completion
+less
+nano
+ca-certificates
+curl
+wget
+rsync
+file
+pciutils
+usbutils
+psmisc
+xz-utils
+zstd
+unzip
+zip
+iproute2
+iputils-ping
+man-db
+htop
+
+## Hardware: firmware for graphics, Wi-Fi, Bluetooth and sound. Graphics use the open drivers
+## (Intel, AMD, and nouveau on NVIDIA cards); NVIDIA's own driver isn't included.
+linux-firmware
+firmware-sof-signed
+amd64-microcode
+intel-microcode
+network-manager
+wpasupplicant
+wireless-regdb
+iw
+bluez
+upower
+udisks2
+exfatprogs
+ntfs-3g
+alsa-ucm-conf
+alsa-utils
+pipewire
+pipewire-pulse
+pipewire-alsa
+wireplumber
+libspa-0.2-bluetooth
+
+## Starting up: the boot loaders the installer puts on the drive, and the start-up screen
+## (Ubuntu's signed GRUB needs grub-efi-amd64, the one for UEFI PCs, or grub-pc, the one for
+## BIOS PCs. They can't be installed together: the first is here and the installer swaps the
+## second in on a BIOS PC. Nothing here may depend on grub-pc, or UEFI PCs get the wrong one.
+## See hooks/0300-installer.hook.chroot.)
+grub-common
+grub2-common
+grub-pc-bin
+grub-efi-amd64-bin
+grub-efi-amd64
+grub-efi-amd64-signed
+shim-signed
+efibootmgr
+plymouth
+
+## Graphics
+xserver-xorg
+xinit
+xauth
+x11-xserver-utils
+x11-xkb-utils
+libgl1-mesa-dri
+libglx-mesa0
+libegl-mesa0
+mesa-vulkan-drivers
+
+## XenithOS Console. The Store builds its updates on the machine, so the compiler and the
+## libraries' headers stay. The rest is what linux/install.sh adds for apps from Flathub.
+build-essential
+libsdl2-dev
+zlib1g-dev
+libx11-dev
+libxtst6
+freedoom
+flatpak
+cage
+xwayland
+xdg-desktop-portal
+xdg-desktop-portal-gtk

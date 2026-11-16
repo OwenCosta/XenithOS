@@ -1,0 +1,3 @@
+/* The highlight colour: what's switched on, the chosen tab, the open window in the panel. */
+@define-color xenith_accent #e50914;
+@define-color xenith_on_accent #ffffff;

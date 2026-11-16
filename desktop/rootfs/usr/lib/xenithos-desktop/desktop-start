@@ -1,0 +1,62 @@
+#!/bin/bash
+# Runs as the desktop starts (XFCE's autostart).
+# - The first time, it puts XenithOS's launchers on the desktop: Return to XenithOS Console,
+#   Brave, Files, Terminal and Settings (and on the USB stick, the installer).
+# - Every time, it tells XFCE those launchers are safe to start: XFCE otherwise asks before
+#   starting any launcher on the desktop it hasn't been told about.
+# - It applies the person's choices from Settings that XFCE doesn't keep itself, sets the sound
+#   to a level that can be heard the first time, and says when updates are ready.
+LIB=/usr/lib/xenithos-desktop
+LAUNCHERS=/usr/share/xenithos-desktop/launchers
+CONF="$HOME/.config/xenithos"
+DESK=$(xdg-user-dir DESKTOP 2>/dev/null)
+[ -n "$DESK" ] && [ "$DESK" != "$HOME" ] || DESK="$HOME/Desktop"
+STAMP="$CONF/desktop-launchers"
+
+mkdir -p "$DESK" "$CONF"
+if [ ! -f "$STAMP" ]; then
+    for f in "$LAUNCHERS"/*.desktop; do
+        [ -f "$f" ] || continue
+        # A launcher for an app that isn't installed would only be a dead icon.
+        prog=$(sed -n 's/^Exec=\([^ ]*\).*/\1/p' "$f" | head -n 1)
+        command -v "$prog" >/dev/null 2>&1 || [ -x "$prog" ] || continue
+        cp "$f" "$DESK/"
+    done
+    touch "$STAMP"
+fi
+for f in "$DESK"/*.desktop; do
+    [ -f "$f" ] || continue
+    own="$LAUNCHERS/$(basename "$f")"
+    if [ -f "$own" ] && cmp -s "$f" "$own"; then
+        chmod +x "$f"
+        gio set -t string "$f" metadata::xfce-exe-checksum "$(sha256sum "$f" | cut -d' ' -f1)" 2>/dev/null || true
+    fi
+done
+
+# Super+Escape goes back to XenithOS Console from anywhere on the desktop. Added once, on top of
+# XFCE's own shortcuts, so it can be changed like any other.
+if [ ! -f "$CONF/desktop-shortcut" ]; then
+    if xfconf-query -c xfce4-keyboard-shortcuts -p '/commands/custom/<Super>Escape' -n -t string \
+            -s /usr/bin/xenithos-console 2>/dev/null; then
+        touch "$CONF/desktop-shortcut"
+    fi
+fi
+
+# The sound, the first time: 85% and not muted. WirePlumber's own start is 40%, which is very
+# quiet on most PCs. After this the person's own volume is kept.
+if [ ! -f "$CONF/volume-set" ]; then
+    (
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+            if wpctl get-volume @DEFAULT_AUDIO_SINK@ >/dev/null 2>&1; then
+                wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 2>/dev/null
+                wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.85 2>/dev/null && touch "$CONF/volume-set"
+                break
+            fi
+            sleep 2
+        done
+    ) &
+fi
+
+# A word when updates are ready (once the desktop has settled).
+( sleep 45; python3 "$LIB/settings.py" --notify-updates >/dev/null 2>&1 ) &
+wait

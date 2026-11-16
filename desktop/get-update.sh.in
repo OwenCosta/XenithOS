@@ -1,0 +1,72 @@
+#!/bin/bash
+# Updates XenithOS Desktop from a terminal: what Settings > Updates does with one button, for
+# when the desktop isn't at hand (over SSH, say, or when Settings itself won't open).
+#
+#   curl -fsSL @CHANNEL@/get-update.sh | sudo bash
+#
+# It downloads the newest XenithOS Desktop update, checks it against XenithOS Desktop's key
+# (below), and installs it with apt. Your files, apps and settings stay.
+set -euo pipefail
+
+# Where updates come from: tried in order, the first that answers with a properly signed list.
+CHANNELS="${XENITHOS_UPDATE_CHANNEL:-@CHANNELS@}"
+say() { printf '\n== %s\n' "$*"; }
+die() { printf 'XenithOS Desktop update: %s\n' "$*" >&2; exit 1; }
+
+[ "$(id -u)" = 0 ] || die "run it with sudo"
+[ -f /usr/share/xenithos-desktop/build.txt ] || die "this is for PCs with XenithOS Desktop installed"
+command -v apt-get >/dev/null && command -v curl >/dev/null || die "apt or curl is missing"
+
+# Checks a signature with whichever tool this system has (gpgv on most, sqv on some).
+verify() {
+    if command -v gpgv >/dev/null; then gpgv --keyring "$1" "$2" "$3" >/dev/null 2>&1
+    elif command -v sqv >/dev/null; then sqv --keyring "$1" "$2" "$3" >/dev/null 2>&1
+    else return 1; fi
+}
+if ! command -v gpgv >/dev/null && ! command -v sqv >/dev/null; then
+    say "Getting the tool that checks signatures"
+    apt-get update -q && apt-get install -y gpgv || die "couldn't install gpgv"
+fi
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+cd "$WORK"
+
+# XenithOS Desktop's key: updates are signed with it.
+base64 -d > key.gpg <<'EOF'
+@KEY@
+EOF
+
+say "Looking for the newest XenithOS Desktop"
+CHANNEL=""
+for c in $CHANNELS; do
+    rm -f manifest.txt manifest.txt.sig
+    curl -fsSL --connect-timeout 15 --max-time 60 -o manifest.txt "$c/manifest.txt" || continue
+    curl -fsSL --connect-timeout 15 --max-time 60 -o manifest.txt.sig "$c/manifest.txt.sig" || continue
+    verify ./key.gpg manifest.txt.sig manifest.txt || { echo "(the update list from $c didn't pass its signature check)" >&2; continue; }
+    CHANNEL=$c
+    break
+done
+[ -n "$CHANNEL" ] || die "couldn't get a properly signed update list. Is this PC online?"
+VERSION=$(sed -n 's/^version=//p' manifest.txt | head -n 1)
+BUNDLE=$(sed -n 's/^bundle=//p' manifest.txt | head -n 1)
+SHA=$(sed -n 's/^sha256=//p' manifest.txt | head -n 1)
+case "$BUNDLE" in http://*|https://*) ;; *) BUNDLE="$CHANNEL/$BUNDLE" ;; esac
+[ -n "$VERSION" ] && [ -n "$SHA" ] || die "the update list is empty"
+
+say "Downloading XenithOS Desktop $VERSION"
+curl -fL --retry 3 --progress-bar -o bundle.tar "$BUNDLE" || die "couldn't download it"
+curl -fsSL --max-time 60 -o bundle.tar.sig "$BUNDLE.sig" || die "couldn't download its signature"
+[ "$(sha256sum bundle.tar | cut -d' ' -f1)" = "$SHA" ] || die "the download came out wrong; try again"
+verify ./key.gpg bundle.tar.sig bundle.tar || die "the update didn't pass its signature check"
+mkdir bundle
+tar -xf bundle.tar -C bundle --no-same-owner
+
+say "Installing (this downloads the new apps too, so it takes a few minutes)"
+dpkg --configure -a
+bash bundle/install.sh
+apt-get -y -o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-confdef full-upgrade
+
+echo
+echo "XenithOS Desktop $VERSION is installed. Restart to start using it:"
+echo "    sudo reboot"

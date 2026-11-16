@@ -1,0 +1,12 @@
+# Where installed PCs look for XenithOS Desktop updates: folders with manifest.txt, its
+# signature, the update bundles and get-update.sh. Built into every package (make-debs.sh).
+# The updater tries them in order and uses the first that answers with a properly signed list.
+#
+# These are XenithOS Desktop 2's (built on Ubuntu 24.04). XenithOS Desktop 1 (built on Debian 13)
+# reads "desktop-stable" instead, and the two never mix: a PC can't be moved from one to the
+# other by an update, only by installing fresh.
+#
+# The first is where updates are published: a GitHub release whose files are replaced at each
+# new version. The second isn't served today; it's a spare, should the website ever carry them.
+https://github.com/OwenCosta/XenithOS/releases/download/desktop-2-stable
+https://owencosta.diy/xenithos/download/desktop-2

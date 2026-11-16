@@ -1,0 +1,139 @@
+<!DOCTYPE Menu PUBLIC "-//freedesktop//DTD Menu 1.0//EN"
+  "http://www.freedesktop.org/standards/menu-spec/1.0/menu.dtd">
+
+<!-- XenithOS Desktop's Apps menu: its own groups, in its own order.
+
+     An app lands in a group by the categories its maker gave it, so the apps you add later sort
+     themselves. Security Tools is the exception: its smaller groups, and which tool is in
+     which, come from the list of tools XenithOS Desktop comes with. That part is written by
+     /usr/lib/xenithos-desktop/desktop-entries and pulled in below. The groups' names and icons
+     are /usr/share/desktop-directories/xenithos-*.directory. -->
+<Menu>
+    <Name>Xfce</Name>
+
+    <DefaultAppDirs/>
+    <DefaultDirectoryDirs/>
+
+    <Layout>
+        <Menuname>Internet</Menuname>
+        <Menuname>Media</Menuname>
+        <Menuname>Office</Menuname>
+        <Menuname>Games</Menuname>
+        <Menuname>Tools</Menuname>
+        <Menuname>Development</Menuname>
+        <Menuname>Learning</Menuname>
+        <Menuname>Security Tools</Menuname>
+        <Menuname>Settings</Menuname>
+        <Menuname>Other</Menuname>
+        <Merge type="all"/>
+    </Layout>
+
+    <Menu>
+        <Name>Internet</Name>
+        <Directory>xenithos-internet.directory</Directory>
+        <Include>
+            <Category>Network</Category>
+        </Include>
+    </Menu>
+
+    <!-- pictures, music and video; a document viewer that also shows pictures stays in Office -->
+    <Menu>
+        <Name>Media</Name>
+        <Directory>xenithos-media.directory</Directory>
+        <Include>
+            <And>
+                <Or>
+                    <Category>AudioVideo</Category>
+                    <Category>Audio</Category>
+                    <Category>Video</Category>
+                    <Category>Graphics</Category>
+                </Or>
+                <Not><Category>Office</Category></Not>
+            </And>
+        </Include>
+    </Menu>
+
+    <Menu>
+        <Name>Office</Name>
+        <Directory>xenithos-office.directory</Directory>
+        <Include>
+            <Category>Office</Category>
+        </Include>
+    </Menu>
+
+    <Menu>
+        <Name>Games</Name>
+        <Directory>xenithos-games.directory</Directory>
+        <Include>
+            <Category>Game</Category>
+        </Include>
+    </Menu>
+
+    <!-- files, the terminal, the small everyday tools and the ones that look after the PC -->
+    <Menu>
+        <Name>Tools</Name>
+        <Directory>xenithos-tools.directory</Directory>
+        <Include>
+            <And>
+                <Or>
+                    <Category>Utility</Category>
+                    <Category>Accessibility</Category>
+                    <Category>Core</Category>
+                    <Category>Legacy</Category>
+                    <Category>System</Category>
+                    <Category>Emulator</Category>
+                </Or>
+                <Not><Category>Settings</Category></Not>
+            </And>
+        </Include>
+    </Menu>
+
+    <Menu>
+        <Name>Development</Name>
+        <Directory>xenithos-development.directory</Directory>
+        <Include>
+            <Category>Development</Category>
+        </Include>
+    </Menu>
+
+    <Menu>
+        <Name>Learning</Name>
+        <Directory>xenithos-learning.directory</Directory>
+        <Include>
+            <Or>
+                <Category>Education</Category>
+                <Category>Science</Category>
+            </Or>
+        </Include>
+    </Menu>
+
+    <Menu>
+        <Name>Security Tools</Name>
+        <Directory>xenithos-security.directory</Directory>
+        <MergeFile type="path">/usr/share/xenithos-desktop/overrides/menus/xenithos-security.menu</MergeFile>
+    </Menu>
+
+    <Menu>
+        <Name>Settings</Name>
+        <Directory>xenithos-settings.directory</Directory>
+        <Include>
+            <Category>Settings</Category>
+        </Include>
+        <Layout>
+            <Filename>xenithos-settings.desktop</Filename>
+            <Separator/>
+            <Merge type="all"/>
+        </Layout>
+    </Menu>
+
+    <Menu>
+        <Name>Other</Name>
+        <Directory>xenithos-other.directory</Directory>
+        <OnlyUnallocated/>
+        <Include>
+            <All/>
+        </Include>
+    </Menu>
+
+    <DefaultMergeDirs/>
+</Menu>

@@ -1,0 +1,10 @@
+[Unit]
+Description=Look for XenithOS Desktop updates a few times a day
+
+[Timer]
+OnBootSec=4min
+OnUnitActiveSec=6h
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

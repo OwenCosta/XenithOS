@@ -1,0 +1,5 @@
+[org.gnome.desktop.interface]
+color-scheme='prefer-dark'
+gtk-theme='XenithOS'
+icon-theme='XenithOS'
+font-name='Inter 10'

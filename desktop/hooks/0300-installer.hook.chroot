@@ -1,0 +1,30 @@
+#!/bin/sh
+# The installer puts GRUB on the drive the way the PC started: UEFI (nearly every PC since 2012)
+# or BIOS. The two GRUB packages for those can't be installed together. The one for UEFI,
+# grub-efi-amd64, is in the system already (Ubuntu's signed GRUB needs one of the two). The one
+# for BIOS, grub-pc, waits here with the package it needs, and on a BIOS PC the installer swaps it
+# in on the new system (offline, from these files). grub-efi-amd64 waits here too, so the
+# installer sets it up afresh on the new system.
+set -e
+mkdir -p /usr/share/xenithos-install/debs
+cd /usr/share/xenithos-install/debs
+apt-get download grub-pc grub-gfxpayload-lists grub-efi-amd64
+ls grub-pc_*.deb grub-gfxpayload-lists_*.deb grub-efi-amd64_*.deb
+
+# The installer counts on that arrangement, so the build stops here if it's another.
+state() { dpkg-query -W -f='${db:Status-Abbrev}' "$1" 2>/dev/null | cut -c1-2; }
+if [ "$(state grub-efi-amd64)" != ii ]; then
+    echo "grub-efi-amd64 isn't installed: the installer expects it in the system" >&2
+    exit 1
+fi
+if [ "$(state grub-pc)" = ii ]; then
+    echo "grub-pc is installed (something in the package lists depends on it): on UEFI PCs the installer couldn't put grub-efi-amd64 in its place" >&2
+    exit 1
+fi
+# Ubuntu's grub-install makes the extra copy in EFI/BOOT by itself; Debian's has to be asked.
+# The installer looks for the option, so say here which way this build went.
+if grub-install --help 2>/dev/null | grep -q -- '--force-extra-removable'; then
+    echo "grub-install: has --force-extra-removable"
+else
+    echo "grub-install: makes the EFI/BOOT copy by itself"
+fi

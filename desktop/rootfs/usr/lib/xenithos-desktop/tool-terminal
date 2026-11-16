@@ -1,0 +1,34 @@
+#!/bin/bash
+# What the Apps menu opens for a tool that's used by typing (the entries
+# /usr/lib/xenithos-desktop/desktop-entries makes for Security Tools): a terminal that says what
+# the tool is, in its package's own words, lists the commands it brings, and leaves you at a
+# prompt to use them. It runs nothing of the tool's by itself.
+#
+#   tool-terminal PACKAGE
+package=${1:?usage: tool-terminal PACKAGE}
+if [ "${2:-}" != --here ]; then
+    exec xfce4-terminal --title "$package" -x "$0" "$package" --here
+fi
+
+summary=$(dpkg-query -W -f='${binary:Summary}' "$package" 2>/dev/null)
+mapfile -t commands < <(dpkg -L "$package" 2>/dev/null | sed -n 's#^/\(usr/\)\{0,1\}s\{0,1\}bin/\([^/]*\)$#\2#p' | sort -u)
+bold=$(tput bold 2>/dev/null) plain=$(tput sgr0 2>/dev/null)
+width=$(tput cols 2>/dev/null || echo 80)
+
+printf '%s%s%s\n' "$bold" "$package" "$plain"
+if [ -n "$summary" ]; then printf '%s\n' "$summary"; fi
+echo
+if [ "${#commands[@]}" -gt 0 ]; then
+    echo "Its commands:"
+    printf '%s   ' "${commands[@]}" | fold -s -w "$((width > 12 ? width - 4 : 76))" | sed 's/^/  /'
+    echo
+    echo
+    echo "Add --help to a command to see how it's used, or read its manual with: man ${commands[0]}"
+elif [ -n "$summary" ]; then
+    echo "It has no commands of its own: other programs use it."
+else
+    echo "It isn't on this PC. Settings > Updates brings back the tools XenithOS Desktop comes with."
+fi
+echo
+cd "$HOME" 2>/dev/null || true
+exec "${SHELL:-/bin/bash}"

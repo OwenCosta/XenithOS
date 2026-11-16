@@ -1,0 +1,8 @@
+#!/bin/sh
+# The X session the boot menu's "Install XenithOS Desktop" starts: the installer on its own, full
+# screen. If it closes without installing, the live system carries on into XenithOS.
+xsetroot -solid '#07080a' 2>/dev/null
+xfwm4 --compositor=off --sm-client-disable &
+wm=$!
+/usr/bin/xenithos-installer --fullscreen
+kill "$wm" 2>/dev/null

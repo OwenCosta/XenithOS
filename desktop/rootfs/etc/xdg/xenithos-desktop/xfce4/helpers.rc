@@ -1,0 +1,4 @@
+# XenithOS Desktop's preferred apps (Advanced Settings > Default Applications changes them).
+WebBrowser=brave
+TerminalEmulator=xfce4-terminal
+FileManager=thunar

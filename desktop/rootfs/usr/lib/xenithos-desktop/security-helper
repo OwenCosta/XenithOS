@@ -1,0 +1,54 @@
+#!/bin/bash
+# The security switches in Settings > Security. "status" needs no special rights; the rest run
+# as root through pkexec, which asks for the password (org.xenithos.desktop.policy).
+#
+#   security-helper status                 firewall=on|off|missing  wifi-address=random|device
+#   security-helper firewall on|off        the firewall (ufw): refuse what comes in unasked
+#   security-helper wifi-address on|off    a made-up hardware address on each Wi-Fi network
+set -u
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+MAC_CONF=/etc/NetworkManager/conf.d/90-xenithos-wifi-address.conf
+
+status() {
+    if ! command -v ufw >/dev/null; then echo "firewall=missing"
+    elif grep -q '^ENABLED=yes' /etc/ufw/ufw.conf 2>/dev/null; then echo "firewall=on"
+    else echo "firewall=off"; fi
+    if [ -f "$MAC_CONF" ]; then echo "wifi-address=random"; else echo "wifi-address=device"; fi
+}
+
+case "${1:-} ${2:-}" in
+    "status ")
+        status ;;
+    "firewall on")
+        [ "$(id -u)" = 0 ] || { echo "This needs to run as root."; exit 1; }
+        command -v ufw >/dev/null || { echo "The firewall (ufw) isn't installed."; exit 1; }
+        ufw default deny incoming >/dev/null && ufw default allow outgoing >/dev/null && ufw --force enable >/dev/null
+        ;;
+    "firewall off")
+        [ "$(id -u)" = 0 ] || { echo "This needs to run as root."; exit 1; }
+        ufw disable >/dev/null
+        ;;
+    "wifi-address on")
+        [ "$(id -u)" = 0 ] || { echo "This needs to run as root."; exit 1; }
+        mkdir -p "$(dirname "$MAC_CONF")"
+        cat > "$MAC_CONF" <<'EOF'
+# XenithOS Desktop (Settings > Security): a made-up hardware address while looking for Wi-Fi
+# networks, and one per network when joining (the same one each time for that network, so the
+# network still recognises this PC).
+[device]
+wifi.scan-rand-mac-address=yes
+
+[connection]
+wifi.cloned-mac-address=stable
+EOF
+        systemctl reload NetworkManager 2>/dev/null || true
+        ;;
+    "wifi-address off")
+        [ "$(id -u)" = 0 ] || { echo "This needs to run as root."; exit 1; }
+        rm -f "$MAC_CONF"
+        systemctl reload NetworkManager 2>/dev/null || true
+        ;;
+    *)
+        echo "usage: security-helper status | firewall on|off | wifi-address on|off"
+        exit 2 ;;
+esac
