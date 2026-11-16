@@ -24,6 +24,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -501,9 +502,11 @@ static int is_tool(int appid, const char *name)
 
 static void add_library(char libs[][600], int *n, const char *path)
 {
-    char real[600];
+    /* PATH_MAX, not less: Ubuntu builds with _FORTIFY_SOURCE, and its glibc stops a program that
+     * gives realpath a smaller buffer, however short the path is. */
+    char real[PATH_MAX];
     int i;
-    if (*n >= 16 || !realpath(path, real)) return;
+    if (*n >= 16 || !realpath(path, real) || strlen(real) >= 600) return;
     for (i = 0; i < *n; i++) if (!strcmp(libs[i], real)) return;
     snprintf(libs[(*n)++], 600, "%s", real);
 }

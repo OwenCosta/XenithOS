@@ -16,6 +16,7 @@
  * EULA themselves; HostMC never agrees to it for them. Everything lives in hostmc/ in XenithOS's
  * data folder. PCs only: an Xbox can't run the server.
  */
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1345,8 +1346,10 @@ int main(int argc, char **argv)
     strcat(root, "/" HM_DIR);
     mkdirs(HM_DIR);
     {
-        char real[700];
-        if (realpath(root, real)) snprintf(root, sizeof root, "%s", real);   /* as /proc shows it */
+        /* PATH_MAX, not less: Ubuntu builds with _FORTIFY_SOURCE, and its glibc stops a program
+         * that gives realpath a smaller buffer, however short the path is. */
+        char real[PATH_MAX];
+        if (realpath(root, real) && strlen(real) < sizeof root) snprintf(root, sizeof root, "%s", real);   /* as /proc shows it */
     }
     hs_load();
     hi_load();
