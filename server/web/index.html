@@ -239,7 +239,7 @@
         <tr><td>PCs and Raspberry Pis</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">0.5.2 runs apps inside XenithOS's window: no black screen between them</td></tr>
         <tr><td>Minecraft and the guide</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">PCs only; they open over XenithOS on its own X server and the guide comes up over them, tested in a virtual display</td></tr>
         <tr><td>HostMC</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">PCs only; it ran real Minecraft 26.3 and Paper servers in testing, but nobody has joined one from a real copy of Minecraft yet</td></tr>
-        <tr><td>XenithOS Desktop (the whole OS for PCs)</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">installs, starts and updates itself in VirtualBox with UEFI, Secure Boot and BIOS; the download is coming</td></tr>
+        <tr><td>XenithOS Desktop (the whole OS for PCs)</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">installed on a real PC, and installs, starts and updates itself in VirtualBox with UEFI, Secure Boot and BIOS</td></tr>
         <tr><td>XenithOS Cloud and this site</td><td class="yes" data-k="Builds">yes</td><td class="live" data-k="On the Xbox">live</td><td class="note">you're on it</td></tr>
       </tbody>
     </table>
@@ -312,11 +312,12 @@
 <section id="desktop">
   <div class="wrap">
     <h2>3. XenithOS Desktop</h2>
-    <p class="lead">XenithOS as a PC's whole operating system, in one ISO with everything in it. The PC starts in a desktop with XenithOS's own look, and XenithOS Console is one click away. Brave, Mullvad VPN and a full set of security tools come with it, and it updates itself from Settings. For 64-bit PCs with 4 GB of memory and a 16 GB drive or more.</p>
+    <p class="lead">XenithOS as a PC's whole operating system, in one ISO with everything in it, built on Ubuntu 24.04 LTS. The PC starts in a desktop with XenithOS's own look, and XenithOS Console is one click away. Brave, Mullvad VPN and a full set of security tools come with it, and it updates itself from Settings. For 64-bit PCs with 4 GB of memory and a 16 GB drive or more.</p>
     <h3>Download</h3>
     <div class="actions">
-      <span class="btn soon" aria-disabled="true">Coming soon</span>
+      <a class="btn primary" href="https://dl.owencosta.diy/xenithos-desktop-2.0.1-amd64.iso">Download XenithOS Desktop 2.0.1 (2.4 GB)</a>
     </div>
+    <div class="sha">xenithos-desktop-2.0.1-amd64.iso sha256 e90ecd05a315e214da19557a779ede1bc8a0a306e192088dd4412eb4f6a30332</div>
     <div class="shot" style="margin-top:22px"><img src="static/shot-desktop.png" alt="XenithOS Desktop: the XenithOS logo as the wallpaper, Return to XenithOS Console and the other icons on the left, and the panel along the bottom" width="1280" height="800" loading="lazy"></div>
     <h3>Set it up</h3>
     <ol class="steps">
@@ -324,7 +325,7 @@
       <li>Start the PC from the stick (its boot menu key is usually F12, F11 or Esc) and choose <b>Install XenithOS Desktop</b>. <b>Start XenithOS Desktop</b> tries it first without changing anything.</li>
       <li>Make your account, then pick the drive. When it's done, choose Restart and wait: the PC restarts by itself into XenithOS Desktop.</li>
       <li><b>Return to XenithOS Console</b> on the desktop (or Super+Esc) opens XenithOS full screen. Its power menu, <b>Switch to desktop mode</b>, comes back.</li>
-      <li>The <b>Apps</b> menu has the security tools in their own group, sorted by what they're for. <b>Settings &gt; Console apps</b> adds HostMC, DOOM and VOLT to XenithOS Console.</li>
+      <li>The <b>Apps</b> menu has the security tools in their own group, sorted by what they're for. The console apps you install are there too, under Games and Media, and open full screen. <b>Settings &gt; Console apps</b> adds HostMC, DOOM and VOLT to XenithOS Console, and its <b>Your own apps</b> list puts the PC's other apps on the console's home screen.</li>
       <li>Updates are in <b>Settings &gt; Updates</b>: one button for XenithOS Desktop, XenithOS Console, the apps and the system. No writing the stick again.</li>
     </ol>
     <div class="warning">The installer erases the whole drive it installs on, with any other OS, files and games on it. Copy anything you want to keep first. It works with Secure Boot on.</div>
@@ -336,6 +337,8 @@
   <div class="wrap">
     <h2>Build log</h2>
     <ul class="log">
+      <li><b>Desktop 2.0.1</b><time datetime="2026-11-16">Nov 16, 2026</time>
+        <p>XenithOS Desktop can be downloaded here: XenithOS as a PC's whole system in one ISO, built on Ubuntu 24.04 LTS, with XenithOS Console one click away. The console apps you install show up in the desktop's Apps menu and open full screen, Settings puts the PC's own apps on the console's home screen, and Settings &gt; Updates keeps all of it up to date.</p></li>
       <li><b>0.6.8</b><time datetime="2026-11-16">Nov 16, 2026</time>
         <p>HostMC can take your server onto the internet through a VPS of your own, as well as through playit.gg. It makes a key of its own and shows the line to add on the VPS, never asking for its password. It keeps a tunnel open while the server runs, with HostMC closed too, and brings it back if it drops. Each time the tunnel comes up, HostMC checks from outside that friends can get in, and if they can't, it says in plain words what the VPS still needs. Players show up as coming from the VPS, so bans by name work but bans by address don't.</p></li>
       <li><b>0.6.7</b><time datetime="2026-11-16">Nov 16, 2026</time>
