@@ -99,7 +99,15 @@
   .item { display: flex; gap: 12px; align-items: center; min-width: 0; }
   .item img { width: 96px; height: 54px; border-radius: 8px; flex: none; background: var(--panel-2); }
   .kind { font: 12px system-ui, sans-serif; color: var(--dim); }
-  #pc h3 { margin: 26px 0 4px; font-size: 16px; }
+  #run h3, #pc h3, #desktop h3 { margin: 26px 0 8px; font-size: 16px; }
+  .ways { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 18px; }
+  .way { display: flex; flex-direction: column; gap: 6px; padding: 18px; border: 1px solid var(--line); border-radius: 12px;
+         background: var(--panel); color: var(--text); text-decoration: none; }
+  .way:hover, .way:focus-visible { border-color: var(--text); }
+  .way .n { font: 700 13px var(--mono); color: var(--accent); }
+  .way b { font-size: 16px; }
+  .way span:last-child { color: var(--sub); font-size: 14px; }
+  .btn.soon { background: var(--panel-2); color: var(--sub); cursor: default; }
   .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; margin: 14px 0 6px; }
   .tile { min-width: 0; }
   .tile img { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: var(--panel-2); }
@@ -132,6 +140,7 @@
     header.top nav.open { display: flex; }
     header.top nav a { padding: 11px 0; font-size: 16px; }
     .cols { grid-template-columns: 1fr; }
+    .ways { grid-template-columns: 1fr; }
   }
   @media (max-width: 640px) {
     /* The status table as cards: each row stacks, with its column names beside the values. */
@@ -156,7 +165,7 @@
       <a href="#players">Players</a>
       <a href="#scores">Leaderboard</a>
       <a href="#status">Status</a>
-      <a href="#run">Get it</a>
+      <a href="#get">Get it</a>
       <a href="https://owencosta.diy/account/">Account</a>
       <a href="https://github.com/OwenCosta/XenithOS">GitHub</a>
     </nav>
@@ -176,7 +185,8 @@
   <div class="facts"><span id="ver">v0.5.0</span><span>Xbox 360, PC, Raspberry Pi</span><span>GPL-3.0</span><span>free to use</span></div>
   <div class="actions">
     <a class="btn primary" id="dl" href="download/xenithos-xbox360.zip" download="xenithos-xbox360.zip">Download for Xbox 360</a>
-    <a class="btn" href="#pc">Install on a PC or Pi</a>
+    <a class="btn" href="#pc">Add it to a Linux PC or Pi</a>
+    <a class="btn" href="#desktop">XenithOS Desktop</a>
     <a class="btn" href="https://github.com/OwenCosta/XenithOS">Source code</a>
   </div>
   <div class="sha" id="sha"></div>
@@ -229,6 +239,7 @@
         <tr><td>PCs and Raspberry Pis</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">0.5.2 runs apps inside XenithOS's window: no black screen between them</td></tr>
         <tr><td>Minecraft and the guide</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">PCs only; they open over XenithOS on its own X server and the guide comes up over them, tested in a virtual display</td></tr>
         <tr><td>HostMC</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">PCs only; it ran real Minecraft 26.3 and Paper servers in testing, but nobody has joined one from a real copy of Minecraft yet</td></tr>
+        <tr><td>XenithOS Desktop (the whole OS for PCs)</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">installs, starts and updates itself in VirtualBox with UEFI, Secure Boot and BIOS; the download is coming</td></tr>
         <tr><td>XenithOS Cloud and this site</td><td class="yes" data-k="Builds">yes</td><td class="live" data-k="On the Xbox">live</td><td class="note">you're on it</td></tr>
       </tbody>
     </table>
@@ -236,14 +247,31 @@
   </div>
 </section>
 
+<section id="get">
+  <div class="wrap">
+    <h2>Get XenithOS</h2>
+    <p class="lead">There are three ways in. Pick the one that fits what you have.</p>
+    <div class="ways">
+      <a class="way" href="#run"><span class="n">1</span><b>On an Xbox 360</b><span>XenithOS in place of the dashboard, started from a USB stick. It only writes to the stick.</span></a>
+      <a class="way" href="#pc"><span class="n">2</span><b>On a PC or Pi that already runs Linux</b><span>XenithOS Console added to the Linux you have, with one command. Your system and files stay.</span></a>
+      <a class="way" href="#desktop"><span class="n">3</span><b>XenithOS Desktop</b><span>The whole operating system for a PC, in one ISO: the desktop, XenithOS Console, the apps and the tools.</span></a>
+    </div>
+  </div>
+</section>
+
 <section id="run">
   <div class="wrap">
-    <h2>On an Xbox 360</h2>
-    <p class="lead">You need a 360 on dashboard 17559, a FAT32 USB stick, the console's hard drive (for avatar data), and an Ethernet cable for the online parts.</p>
+    <h2>1. On an Xbox 360</h2>
+    <p class="lead">XenithOS runs in place of the Microsoft dashboard, from a USB stick. You need a 360 on dashboard 17559, a FAT32 USB stick, the console's hard drive (for avatar data), and an Ethernet cable for the online parts.</p>
+    <h3>Download</h3>
+    <div class="actions">
+      <a class="btn primary" href="download/xenithos-xbox360.zip" download="xenithos-xbox360.zip">Download XenithOS for Xbox 360</a>
+    </div>
+    <h3>Set it up</h3>
     <ol class="steps">
       <li>Put <a href="https://github.com/shutterbug2000/ABadAvatar">ABadAvatar</a> and
         <a href="https://github.com/FreeMyXe/FreeMyXe">FreeMyXe</a> on the stick, with FreeMyXe's xex renamed to <code>default.xex</code>.</li>
-      <li><a href="download/xenithos-xbox360.zip">Download XenithOS for Xbox 360</a> and copy everything in it to the root of the stick. It already knows the XenithOS Cloud address.</li>
+      <li>Copy everything in the download to the root of the stick. It already knows the XenithOS Cloud address.</li>
       <li>Unplug the network, boot the 360, and leave the ABadAvatar profile highlighted on the sign-in screen. It can take up to 20 minutes and a few tries.</li>
       <li>When FreeMyXe appears, choose <b>Launch XeLL instead</b>. XeLL loads <code>xenon.elf</code> and XenithOS starts.</li>
       <li>Plug in Ethernet, then make a profile from the Profile tile. Updates come from the Store after that.</li>
@@ -254,12 +282,15 @@
 
 <section id="pc">
   <div class="wrap">
-    <h2>On a PC or Raspberry Pi</h2>
-    <p class="lead">Install Debian 12 or newer, Ubuntu 22.04 or newer, or Raspberry Pi OS (Lite is fine), then run this as your user. It builds XenithOS and sets the machine to start straight into it.</p>
+    <h2>2. On a PC or Raspberry Pi that already runs Linux</h2>
+    <p class="lead">XenithOS Console added to the Linux you already have: Debian 12 or newer, Ubuntu 22.04 or newer, or Raspberry Pi OS (Lite is fine). Your system and files stay as they are.</p>
+    <h3>Download and install</h3>
+    <p class="muted">One command does both. Run it as your user: it downloads XenithOS, builds it and sets the machine to start straight into it.</p>
     <div class="cmdbox">
       <pre class="cmd"><code id="installcmd">curl -fsSL https://owencosta.diy/xenithos/install.sh | sudo bash</code></pre>
       <button class="copy" id="copy" type="button">Copy</button>
     </div>
+    <h3>Set it up</h3>
     <ol class="steps">
       <li>Restart. You're in <b>console mode</b>: XenithOS full screen, with a controller or the keyboard (arrows, Enter, Escape).</li>
       <li><b>Desktop mode</b> is in XenithOS's power menu: the full Linux desktop, for a browser and everything else.</li>
@@ -268,11 +299,36 @@
       <li><b>Minecraft</b> is in the Store's Apps section too (LB and RB switch sections). It installs from Flathub through XenithOS, starts from its home screen and gets the whole screen. X on the Apps screen removes an app from Flathub again.</li>
       <li><b>The guide</b>: press the Xbox button, or hold Esc, in a game. Return home leaves the game running (choose it again to go back), Switch game starts another, and the controller can work as a mouse for launchers or as a keyboard and mouse for Minecraft.</li>
       <li><b>HostMC</b> hosts a Minecraft: Java Edition server from your XenithOS machine. Friends on your network join with its address, and turning on playit.gg in its Internet page lets them join over the internet without opening ports.</li>
+    
     </ol>
     <h3>In the Store on PCs</h3>
     <p class="muted">Apps come from <a href="https://flathub.org/">Flathub</a> and run under their own licenses. Minecraft: Java Edition runs through <a href="https://prismlauncher.org/">Prism Launcher</a> and needs a Minecraft account; XenithOS starts the instance you played last, and the controller plays it like Minecraft on a console. Machines installed before 0.5.4 need the install command once more for apps.</p>
     <div class="tiles" id="pcapps"></div>
     <p class="muted">Add <code>--no-desktop</code> to skip desktop mode, or run it again with <code>--uninstall</code> to undo it. More in <a href="https://github.com/OwenCosta/XenithOS/blob/main/linux/README.md">linux/README.md</a>.</p>
+    <p class="muted">Want XenithOS as the PC's whole system instead? That's <a href="#desktop">XenithOS Desktop</a>, below.</p>
+  </div>
+</section>
+
+<section id="desktop">
+  <div class="wrap">
+    <h2>3. XenithOS Desktop</h2>
+    <p class="lead">XenithOS as a PC's whole operating system, in one ISO with everything in it. The PC starts in a desktop with XenithOS's own look, and XenithOS Console is one click away. Brave, Mullvad VPN and a full set of security tools come with it, and it updates itself from Settings. For 64-bit PCs with 4 GB of memory and a 16 GB drive or more.</p>
+    <h3>Download</h3>
+    <div class="actions">
+      <span class="btn soon" aria-disabled="true">Coming soon</span>
+    </div>
+    <div class="shot" style="margin-top:22px"><img src="static/shot-desktop.png" alt="XenithOS Desktop: the XenithOS logo as the wallpaper, Return to XenithOS Console and the other icons on the left, and the panel along the bottom" width="1280" height="800" loading="lazy"></div>
+    <h3>Set it up</h3>
+    <ol class="steps">
+      <li>Put the ISO on a USB stick of 4 GB or more with <a href="https://etcher.balena.io/">balenaEtcher</a> (or Rufus, in DD image mode).</li>
+      <li>Start the PC from the stick (its boot menu key is usually F12, F11 or Esc) and choose <b>Install XenithOS Desktop</b>. <b>Start XenithOS Desktop</b> tries it first without changing anything.</li>
+      <li>Make your account, then pick the drive. When it's done, choose Restart and wait: the PC restarts by itself into XenithOS Desktop.</li>
+      <li><b>Return to XenithOS Console</b> on the desktop (or Super+Esc) opens XenithOS full screen. Its power menu, <b>Switch to desktop mode</b>, comes back.</li>
+      <li>The <b>Apps</b> menu has the security tools in their own group, sorted by what they're for. <b>Settings &gt; Console apps</b> adds HostMC, DOOM and VOLT to XenithOS Console.</li>
+      <li>Updates are in <b>Settings &gt; Updates</b>: one button for XenithOS Desktop, XenithOS Console, the apps and the system. No writing the stick again.</li>
+    </ol>
+    <div class="warning">The installer erases the whole drive it installs on, with any other OS, files and games on it. Copy anything you want to keep first. It works with Secure Boot on.</div>
+    <p class="muted">Want to keep the Linux you have? Use <a href="#pc">the install command</a> above instead.</p>
   </div>
 </section>
 
