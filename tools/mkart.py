@@ -12,6 +12,7 @@ Needs Pillow and the Inter font (Debian/Kali: apt install python3-pil fonts-inte
 XIMG is the console's thumbnail format; see shared/img.h.
 """
 import json
+import math
 import os
 import struct
 import sys
@@ -99,63 +100,74 @@ RED = (229, 9, 20)
 
 
 # ----------------------------------------------------------------------------------- the logo
-# The XenithOS insignia, measured from the user's picture (desktop/art/logo-source.png) and
-# squared up: a grey chevron and two red arms make an X with a red slash through it, inside a
-# broken double ring with four ticks. Every edge of the X runs at 45 degrees.
+# The XenithOS logo: a moment of the console's start-up that the user picked, 992 ms in, as the
+# four streaks close into a ring and the X comes together. In the middle a grey chevron and two
+# red arms make an X, standing a little apart. Around it is a broken red and grey double ring,
+# and outside that the streaks' ring: white, with a red quarter. (The X and the double ring come
+# from the insignia picture desktop/art/logo-source.png, measured and squared up: every edge of
+# the X runs at 45 degrees.)
 #
 # These numbers are the only copy. `python3 tools/mkart.py logo` writes shared/logo_shape.h (the
-# console draws it with ui_logo and ui_mark), the website's SVGs and the logo pictures.
+# console draws the logo with ui_logo and ui_mark, and its start-up ends on it), the website's
+# SVGs and the logo pictures. XenithOS Desktop's art can take its SVG from svg_logo() below.
 #
-# Units are R, the outer ring's radius, with the centre at (0, 0) and y pointing down.
-LOGO_GREY = (39, 36, 37)           # the picture's own dark grey, #272425
+# Units are R, the double ring's outer radius, with the centre at (0, 0) and y pointing down.
+# Angles are degrees counter-clockwise from 3 o'clock.
+LOGO_GREY = (39, 36, 37)           # the dark grey, #272425
 LOGO_GREY_SMALL = (170, 176, 186)  # in its place where the X stands alone at small sizes, #aab0ba
-LOGO_X = [                         # (red, corners): the chevron, the upper arm, the lower arm, the slash
-    (False, [(-0.868, -0.564), (-0.404, -0.564), (0.160, 0.0), (-0.404, 0.564), (-0.868, 0.564), (-0.304, 0.0)]),
-    (True, [(0.366, -0.564), (0.885, -0.564), (0.639, -0.318), (0.453, -0.318), (0.201, -0.066), (0.035, -0.233)]),
-    (True, [(0.318, 0.064), (0.818, 0.564), (0.376, 0.564), (0.097, 0.285)]),
-    # the slash: its point first (it's drawn growing out of it), then up its long side
-    (True, [(-0.410, 0.595), (0.490, -0.256), (0.570, -0.261), (0.259, 0.038), (-0.064, 0.333), (-0.292, 0.517)]),
+LOGO_X = [                         # (red, where it sits, corners): the chevron, the upper arm, the lower arm
+    (False, (-0.0628, 0.0),
+     [(-0.868, -0.564), (-0.404, -0.564), (0.160, 0.0), (-0.404, 0.564), (-0.868, 0.564), (-0.304, 0.0)]),
+    (True, (0.0444, -0.0444),
+     [(0.366, -0.564), (0.885, -0.564), (0.639, -0.318), (0.453, -0.318), (0.201, -0.066), (0.035, -0.233)]),
+    (True, (0.0444, 0.0444),
+     [(0.318, 0.064), (0.818, 0.564), (0.376, 0.564), (0.097, 0.285)]),
 ]
-# The rings, in pieces: (red, radius, width, from, to), the angles in degrees counter-clockwise
-# from 3 o'clock. The X's four corners poke out through the gaps on the diagonals.
+# The double ring, in pieces with square ends: (red, radius, width, from, to). The X's four
+# corners poke out through the gaps on the diagonals.
 LOGO_ARCS = [
-    (True, 1.0, 0.058, 39, 86), (True, 1.0, 0.058, 94, 141), (True, 1.0, 0.058, 219, 266), (True, 1.0, 0.058, 274, 321),
-    (False, 0.904, 0.058, 42.5, 85), (False, 0.904, 0.058, 95, 137.5),
-    (False, 0.904, 0.058, 222.5, 265), (False, 0.904, 0.058, 275, 317.5),
-    (True, 0.96, 0.044, 3.5, 28.5), (False, 0.96, 0.044, 331.5, 356.5),
-    (False, 0.96, 0.044, 151.5, 176.5), (False, 0.96, 0.044, 183.5, 208.5),
+    (True, 1.0, 0.058, 43.22, 86.0), (True, 1.0, 0.058, 94.0, 136.78),
+    (True, 1.0, 0.058, 223.22, 266.0), (True, 1.0, 0.058, 274.0, 316.78),
+    (False, 0.904, 0.058, 46.31, 85.0), (False, 0.904, 0.058, 95.0, 133.69),
+    (False, 0.904, 0.058, 226.31, 265.0), (False, 0.904, 0.058, 275.0, 313.69),
+    (True, 0.96, 0.044, 3.5, 26.26), (False, 0.96, 0.044, 333.74, 356.5),
+    (False, 0.96, 0.044, 153.74, 176.5), (False, 0.96, 0.044, 183.5, 206.26),
 ]
-LOGO_TICK = (0.74, 1.125, 0.009)   # the four red ticks: from, to (as R) and half their width
-
-
-def logo_ticks():
-    """The ticks as corners (pointed at both ends), at 3, 12, 9 and 6 o'clock, inner point first."""
-    r0, r1, hw = LOGO_TICK
-    out = []
-    for ux, uy in ((1, 0), (0, -1), (-1, 0), (0, 1)):
-        vx, vy = -uy, ux
-        along = [(r0, 0), (r0 + 0.07, hw), (r1 - 0.035, hw), (r1, 0), (r1 - 0.035, -hw), (r0 + 0.07, -hw)]
-        out.append([(round(a * ux + c * vx, 4), round(a * uy + c * vy, 4)) for a, c in along])
-    return out
+# The outer ring: the start-up's four streaks, with round ends, drawn in this order so that each
+# one's end lies over the one before it: (red, from, to). It's open just below 3 o'clock.
+LOGO_RING_R, LOGO_RING_W = 1.30, 0.064
+LOGO_RING = [(False, 248.99, 337.45), (False, 160.53, 248.99), (True, 72.47, 160.54), (False, -15.24, 72.50)]
+LOGO_HALF = LOGO_RING_R + LOGO_RING_W / 2     # the logo's half-size: to the outer ring's edge
 
 
 def logo_x_box():
-    pts = [p for _, poly in LOGO_X for p in poly]
+    """The box around the X alone, its pieces where they sit."""
+    pts = [(x + ox, y + oy) for _, (ox, oy), poly in LOGO_X for x, y in poly]
     return min(x for x, _ in pts), min(y for _, y in pts), max(x for x, _ in pts), max(y for _, y in pts)
 
 
+def ring_point(r, deg):
+    return r * math.cos(math.radians(deg)), -r * math.sin(math.radians(deg))
+
+
 def insignia(d, cx, cy, R, grey=LOGO_GREY, red=RED, rings=True):
-    """Draws the insignia (or, without rings, the X alone) on a PIL ImageDraw, R pixels to the ring."""
+    """Draws the logo (or, without rings, the X alone) on a PIL ImageDraw, R pixels to the double ring."""
     if rings:
-        for is_red, r, w, a0, a1 in LOGO_ARCS:
-            ro = (r + w / 2) * R
+        w = LOGO_RING_W * R
+        ro = LOGO_RING_R * R + w / 2
+        for is_red, a0, a1 in LOGO_RING:
+            colour = red if is_red else TEXT
             # PIL's angles go clockwise, ours counter-clockwise
-            d.arc([cx - ro, cy - ro, cx + ro, cy + ro], (-a1) % 360, (-a0) % 360, fill=red if is_red else grey,
-                  width=max(1, round(w * R)))
-        for poly in logo_ticks():
-            d.polygon([(cx + x * R, cy + y * R) for x, y in poly], fill=red)
-    for is_red, poly in LOGO_X:
-        d.polygon([(cx + x * R, cy + y * R) for x, y in poly], fill=red if is_red else grey)
+            d.arc([cx - ro, cy - ro, cx + ro, cy + ro], (-a1) % 360, (-a0) % 360, fill=colour, width=max(1, round(w)))
+            for a in (a0, a1):                       # the round ends
+                x, y = ring_point(LOGO_RING_R * R, a)
+                d.ellipse([cx + x - w / 2, cy + y - w / 2, cx + x + w / 2, cy + y + w / 2], fill=colour)
+        for is_red, r, aw, a0, a1 in LOGO_ARCS:
+            ar = (r + aw / 2) * R
+            d.arc([cx - ar, cy - ar, cx + ar, cy + ar], (-a1) % 360, (-a0) % 360, fill=red if is_red else grey,
+                  width=max(1, round(aw * R)))
+    for is_red, (ox, oy), poly in LOGO_X:
+        d.polygon([(cx + (x + ox) * R, cy + (y + oy) * R) for x, y in poly], fill=red if is_red else grey)
 
 
 def mark(d, cx, cy, size, color=LOGO_GREY_SMALL, dot=RED):
@@ -169,93 +181,96 @@ def hexc(rgb):
     return "#%02x%02x%02x" % rgb
 
 
-def svg_paths(scale, grey, rings=True):
-    """The insignia as SVG paths, in units of R times scale."""
-    out = []
-    def poly_path(poly):
-        return "M" + " L".join(f"{x * scale:.1f} {y * scale:.1f}" for x, y in poly) + " Z"
+def svg_logo(scale, grey=LOGO_GREY, rings=True):
+    """The logo (or, without rings, the X alone) as SVG elements around (0, 0), R = scale units."""
+    out, fills = [], {}
     if rings:
-        import math
-        for is_red, r, w, a0, a1 in LOGO_ARCS:
-            ro, ri = (r + w / 2) * scale, (r - w / 2) * scale
-            p = lambda rad, deg: (rad * math.cos(math.radians(deg)), -rad * math.sin(math.radians(deg)))
-            (ax, ay), (bx, by), (cx_, cy_), (dx, dy) = p(ro, a0), p(ro, a1), p(ri, a1), p(ri, a0)
-            out.append((RED if is_red else grey,
-                        f"M{ax:.1f} {ay:.1f} A{ro:.1f} {ro:.1f} 0 0 0 {bx:.1f} {by:.1f} L{cx_:.1f} {cy_:.1f} "
-                        f"A{ri:.1f} {ri:.1f} 0 0 1 {dx:.1f} {dy:.1f} Z"))
-        out += [(RED, poly_path(poly)) for poly in logo_ticks()]
-    out += [(RED if is_red else grey, poly_path(poly)) for is_red, poly in LOGO_X]
-    # one <path> per colour
-    by = {}
-    for colour, d in out:
-        by.setdefault(colour, []).append(d)
-    return "".join(f'<path fill="{hexc(c)}" d="{" ".join(ds)}"/>' for c, ds in by.items())
+        r = LOGO_RING_R * scale
+        for is_red, a0, a1 in LOGO_RING:
+            (ax, ay), (bx, by) = ring_point(r, a0), ring_point(r, a1)
+            out.append(f'<path fill="none" stroke="{hexc(RED if is_red else TEXT)}" stroke-width="{LOGO_RING_W * scale:.1f}" '
+                       f'stroke-linecap="round" d="M{ax:.1f} {ay:.1f} A{r:.1f} {r:.1f} 0 0 0 {bx:.1f} {by:.1f}"/>')
+        for is_red, rr, aw, a0, a1 in LOGO_ARCS:
+            ro, ri = (rr + aw / 2) * scale, (rr - aw / 2) * scale
+            (ax, ay), (bx, by), (cx, cy), (dx, dy) = ring_point(ro, a0), ring_point(ro, a1), ring_point(ri, a1), ring_point(ri, a0)
+            fills.setdefault(RED if is_red else grey, []).append(
+                f"M{ax:.1f} {ay:.1f} A{ro:.1f} {ro:.1f} 0 0 0 {bx:.1f} {by:.1f} L{cx:.1f} {cy:.1f} "
+                f"A{ri:.1f} {ri:.1f} 0 0 1 {dx:.1f} {dy:.1f} Z")
+    for is_red, (ox, oy), poly in LOGO_X:
+        fills.setdefault(RED if is_red else grey, []).append(
+            "M" + " L".join(f"{(x + ox) * scale:.1f} {(y + oy) * scale:.1f}" for x, y in poly) + " Z")
+    out += [f'<path fill="{hexc(c)}" d="{" ".join(ds)}"/>' for c, ds in fills.items()]
+    return "".join(out)
 
 
 def logo_svgs():
-    """server/web/static: insignia.svg (the whole insignia), mark.svg (the X alone, for small
-    sizes) and logo.svg (the site's icon: the X on a dark rounded square)."""
+    """server/web/static: insignia.svg (the logo), mark.svg (the X alone, for small sizes) and
+    logo.svg (the site's icon: the X on a dark rounded square)."""
     web = os.path.join(ROOT, "server", "web", "static")
-    s, e = 1000, 1135                                  # R in SVG units; the half-size of the box
+    s = 1000                                        # R in SVG units
+    e = round(LOGO_HALF * s) + 12                   # half the box
     with open(os.path.join(web, "insignia.svg"), "w", newline="\n") as f:
-        f.write(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{-e} {-e} {2 * e} {2 * e}">'
-                f'{svg_paths(s, LOGO_GREY)}</svg>\n')
+        f.write(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{-e} {-e} {2 * e} {2 * e}">{svg_logo(s)}</svg>\n')
     x0, y0, x1, y1 = logo_x_box()
     pad = 0.02
     with open(os.path.join(web, "mark.svg"), "w", newline="\n") as f:
         f.write(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{(x0 - pad) * s:.0f} {(y0 - pad) * s:.0f} '
-                f'{(x1 - x0 + 2 * pad) * s:.0f} {(y1 - y0 + 2 * pad) * s:.0f}">{svg_paths(s, LOGO_GREY_SMALL, rings=False)}</svg>\n')
-    # the icon: 64 units square, the X 46 wide in the middle
-    k = 46 / ((x1 - x0) * s)
+                f'{(x1 - x0 + 2 * pad) * s:.0f} {(y1 - y0 + 2 * pad) * s:.0f}">{svg_logo(s, LOGO_GREY_SMALL, rings=False)}</svg>\n')
+    k = 46 / ((x1 - x0) * s)                        # the icon: 64 units square, the X 46 wide in the middle
     with open(os.path.join(web, "logo.svg"), "w", newline="\n") as f:
         f.write('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
                 '<rect width="64" height="64" rx="14" fill="#07080a"/>'
                 f'<g transform="translate({32 - (x0 + x1) / 2 * s * k:.2f} {32 - (y0 + y1) / 2 * s * k:.2f}) scale({k:.5f})">'
-                f'{svg_paths(s, LOGO_GREY_SMALL, rings=False)}</g></svg>\n')
+                f'{svg_logo(s, LOGO_GREY_SMALL, rings=False)}</g></svg>\n')
 
 
 def logo_header():
     """shared/logo_shape.h: the same numbers for the console (ui_logo and ui_mark in shared/ui.c)."""
-    import math
-    def poly_c(is_red, poly):
-        xy = ", ".join(f"{x:.4f}f, {y:.4f}f" for x, y in poly)
-        return f"    {{{int(is_red)}, {len(poly)}, {{{xy}}}}},"
+    def screen(a0, a1):
+        """Counter-clockwise degrees to the screen's clockwise radians, a0 < a1, a0 in [0, 2 pi)."""
+        s0, s1 = math.radians(-a1), math.radians(-a0)
+        while s0 < 0:
+            s0, s1 = s0 + 2 * math.pi, s1 + 2 * math.pi
+        return s0, s1
+    def arc_c(is_red, r, w, a0, a1):
+        s0, s1 = screen(a0, a1)
+        return f"    {{{int(is_red)}, {r:.3f}f, {w:.3f}f, {s0:.5f}f, {s1:.5f}f}},"
     x0, y0, x1, y1 = logo_x_box()
     lines = [
-        "/* The XenithOS insignia's shapes. Written by tools/mkart.py from its LOGO_* numbers: change",
-        " * those and run `python3 tools/mkart.py logo`, not this file.",
+        "/* The XenithOS logo's shapes. Written by tools/mkart.py from its LOGO_* numbers: change those",
+        " * and run `python3 tools/mkart.py logo`, not this file.",
         " *",
-        " * Units are R, the outer ring's radius, with the centre at (0, 0) and y pointing down. Arc",
-        " * angles are radians clockwise from 3 o'clock, the way the screen goes. */",
+        " * Units are R, the double ring's outer radius, with the centre at (0, 0) and y pointing down.",
+        " * Arc angles are radians clockwise from 3 o'clock, the way the screen goes. */",
         "#ifndef LOGO_SHAPE_H",
         "#define LOGO_SHAPE_H",
         "",
-        "struct logo_poly { unsigned char red, n; float xy[12]; };",
+        "struct logo_poly { unsigned char red, n; float ox, oy; float xy[12]; };   /* ox, oy: where it sits */",
         "struct logo_arc { unsigned char red; float r, w, a0, a1; };",
         "",
-        "/* The X: the grey chevron, the upper red arm, the lower red arm, then the slash (its point first). */",
-        "static const struct logo_poly logo_x[4] = {",
-        *[poly_c(r, p) for r, p in LOGO_X],
+        "/* The X: the grey chevron, the upper red arm and the lower red arm. */",
+        f"static const struct logo_poly logo_x[{len(LOGO_X)}] = {{",
+        *[f"    {{{int(r)}, {len(p)}, {ox:.4f}f, {oy:.4f}f, {{{', '.join(f'{x:.4f}f, {y:.4f}f' for x, y in p)}}}}},"
+          for r, (ox, oy), p in LOGO_X],
         "};",
         "",
-        "/* The ticks at 3, 12, 9 and 6 o'clock, inner point first. */",
-        "static const struct logo_poly logo_ticks[4] = {",
-        *[poly_c(True, p) for p in logo_ticks()],
-        "};",
-        "",
-        "/* The rings, in pieces. */",
+        "/* The double ring, in pieces with square ends. */",
         f"static const struct logo_arc logo_arcs[{len(LOGO_ARCS)}] = {{",
-        *[f"    {{{int(r)}, {rad:.3f}f, {w:.3f}f, {-math.radians(a1):.5f}f, {-math.radians(a0):.5f}f}},"
-          for r, rad, w, a0, a1 in LOGO_ARCS],
+        *[arc_c(*a) for a in LOGO_ARCS],
         "};",
         "",
-        f"#define LOGO_TICK_OUT {LOGO_TICK[1]:.3f}f              /* how far the ticks reach: the insignia's half-size */",
-        f"#define LOGO_X_LEFT   ({x0:.3f}f)                 /* the box around the X alone */",
-        f"#define LOGO_X_TOP    ({y0:.3f}f)",
-        f"#define LOGO_X_RIGHT  {x1:.3f}f",
-        f"#define LOGO_X_BOTTOM {y1:.3f}f",
-        f"#define LOGO_GREY       RGB({LOGO_GREY[0]}, {LOGO_GREY[1]}, {LOGO_GREY[2]})       /* the logo's own dark grey */",
-        f"#define LOGO_GREY_SMALL RGB({LOGO_GREY_SMALL[0]}, {LOGO_GREY_SMALL[1]}, {LOGO_GREY_SMALL[2]})    /* the X alone, at small sizes */",
+        "/* The outer ring: the start-up's four streaks, with round ends, in the order they're drawn. */",
+        f"static const struct logo_arc logo_ring[{len(LOGO_RING)}] = {{",
+        *[arc_c(r, LOGO_RING_R, LOGO_RING_W, a0, a1) for r, a0, a1 in LOGO_RING],
+        "};",
+        "",
+        f"#define LOGO_HALF     {LOGO_HALF:.3f}f      /* the logo's half-size, to the outer ring's edge */",
+        f"#define LOGO_X_LEFT   ({x0:.4f}f)  /* the box around the X alone */",
+        f"#define LOGO_X_TOP    ({y0:.4f}f)",
+        f"#define LOGO_X_RIGHT  {x1:.4f}f",
+        f"#define LOGO_X_BOTTOM {y1:.4f}f",
+        f"#define LOGO_GREY       RGB({LOGO_GREY[0]}, {LOGO_GREY[1]}, {LOGO_GREY[2]})      /* the logo's dark grey */",
+        f"#define LOGO_GREY_SMALL RGB({LOGO_GREY_SMALL[0]}, {LOGO_GREY_SMALL[1]}, {LOGO_GREY_SMALL[2]})   /* the X alone, at small sizes */",
         "",
         "#endif",
         "",
@@ -271,18 +286,18 @@ def logo_files():
     logo_svgs()
     big = 2048
     img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
-    insignia(ImageDraw.Draw(img), big / 2, big / 2, big * 0.44)
+    insignia(ImageDraw.Draw(img), big / 2, big / 2, big * 0.47 / LOGO_HALF)
     img.resize((512, 512), Image.LANCZOS).save(os.path.join(ROOT, "art", "logo.png"))
     dark = Image.new("RGB", (big, big), (7, 8, 10))
-    insignia(ImageDraw.Draw(dark), big / 2, big / 2, big * 0.36)
+    insignia(ImageDraw.Draw(dark), big / 2, big / 2, big * 0.40 / LOGO_HALF)
     dark.resize((512, 512), Image.LANCZOS).save(os.path.join(ROOT, "art", "logo-on-dark.png"))
     k = 4                                           # drawn 4x and scaled down, for smooth edges
     wide = Image.new("RGB", (1600 * k, 480 * k), (7, 8, 10))
     d = ImageDraw.Draw(wide)
-    insignia(d, 280 * k, 240 * k, 172 * k)
+    insignia(d, 280 * k, 240 * k, 200 * k / LOGO_HALF)
     name = font("Bold", 150 * k)
     top, bottom = d.textbbox((0, 0), "XenithOS", font=name)[1::2]
-    d.text((520 * k, 240 * k - (top + bottom) / 2), "XenithOS", font=name, fill=TEXT)   # level with the logo
+    d.text((530 * k, 240 * k - (top + bottom) / 2), "XenithOS", font=name, fill=TEXT)   # level with the logo
     wide.resize((1600, 480), Image.LANCZOS).save(os.path.join(ROOT, "art", "logo-wide.png"))
 
 
@@ -320,7 +335,7 @@ def xenith():
     k = 4                                           # drawn 4x and scaled down, for smooth edges
     img = Image.new("RGB", (W * k, H * k), BG_DARK)
     d = ImageDraw.Draw(img)
-    insignia(d, 68 * k, 88 * k, 46 * k)
+    insignia(d, 68 * k, 90 * k, 52 * k / LOGO_HALF)
     d.text((132 * k, 46 * k), "XenithOS", font=font("Bold", 40 * k), fill=TEXT)
     d.text((134 * k, 122 * k), "System update", font=font("Medium", 20 * k), fill=SUB)
     return img.resize((W, H), Image.LANCZOS)

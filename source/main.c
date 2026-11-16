@@ -34,37 +34,26 @@ static float span(float t, float from, float len)
 }
 
 static float ease_out(float f) { return 1 - (1 - f) * (1 - f) * (1 - f); }
-static float ease_in(float f) { return f * f; }
 
 /* One frame of the start-up, t milliseconds in. Four streaks of light spiral in from the edges
- * and settle on the ring as the XenithOS insignia's rings sweep round from its ticks and the X's
- * pieces come together in the middle. The red slash cuts across with the chime and a ring rolls
- * out, then the insignia moves aside for the name. Everything is flat (solid shapes, no glows),
- * in the theme's colours. */
+ * and close into the XenithOS logo's outer ring, while its double ring sweeps round and the X's
+ * pieces come together in the middle. A ring rolls out with the chime, then the logo moves aside
+ * for the name. Everything is flat (solid shapes, no glows), in the theme's colours. */
 static void boot_frame(float t)
 {
-    float size = SCR_H * 0.36f, R = size / 2.25f, cy = SCR_H / 2.0f - 16;
-    int name_w = gfx_str_w(FONT_BIG, "XenithOS"), gap = (int)(size * 0.14f), i;
+    float size = SCR_H * 0.40f, cy = SCR_H / 2.0f - 16;
+    int name_w = gfx_str_w(FONT_BIG, "XenithOS"), gap = (int)(size * 0.12f);
     float group = size + gap + name_w, final_cx = (SCR_W - group) / 2 + size / 2;
     float slide = ease_out(span(t, 1500, 650)), cx = SCR_W / 2.0f + (final_cx - SCR_W / 2.0f) * slide;
-    float build = ease_out(span(t, 760, 420)), slash = ease_out(span(t, 1080, 260));
 
-    /* 1. the streaks: each spins in on its own spiral, thinning as it closes on the ring */
-    for (i = 0; i < 4 && t < 1150; i++) {
-        float p = span(t, 60.0f + i * 70.0f, 980.0f - i * 70.0f), e = ease_in(p);
-        float r = R * (3.6f - 2.6f * e), a0 = i * 1.5708f + 0.4f + p * 6.6f, len = 0.5f + 1.1f * p;
-        int alpha = (int)(255 * (p < 0.15f ? p / 0.15f : t > 1000 ? (1150 - t) / 150.0f : 1));
-        if (p <= 0) continue;
-        gfx_arc(cx, cy, r, R * (0.11f - 0.052f * e), a0, a0 + len, i == 2 ? C_ACCENT : C_TEXT, alpha);
-    }
-    /* 2. the insignia comes together, and 3. the slash cuts across with the chime */
-    if (build > 0) ui_logo(cx, cy, size, build, slash, 255);
-    /* and a ring rolls out from it */
+    /* 1. the logo: the streaks spin in, the double ring sweeps round, the X comes together */
+    ui_logo(cx, cy, size, ease_out(span(t, 760, 420)), span(t, 60, 980), 255);
+    /* 2. a ring rolls out with the chime, as the outer ring closes */
     if (t >= 1080 && t < 1900) {
         float q = span(t, 1080, 820);
-        gfx_ring(cx, cy, R * (1.05f + 1.4f * ease_out(q)), 2 + R * 0.05f * (1 - q), C_TEXT, (int)(150 * (1 - q)));
+        gfx_ring(cx, cy, size * (0.53f + 0.5f * ease_out(q)), 2 + size * 0.018f * (1 - q), C_TEXT, (int)(150 * (1 - q)));
     }
-    /* 4. the name comes in beside it, then the version */
+    /* 3. the name comes in beside it, then the version */
     if (slide > 0) {
         int x = (int)(cx + size / 2 + gap + 24 * (1 - slide)), ty = (int)cy - font_table[FONT_BIG].ascent + gfx_cap_h(FONT_BIG) / 2;
         gfx_str_a(FONT_BIG, x, ty, C_TEXT, (int)(255 * slide), "XenithOS");
@@ -111,7 +100,7 @@ static void boot(void)
         ui_poll();
         if (t > 400 && (PRESSED(a) || PRESSED(start))) break;
         if (t > 3200) break;
-        if (!chimed && t >= 1080) {                  /* the chime lands with the red point */
+        if (!chimed && t >= 1080) {                  /* the chime, as the outer ring closes */
             if (st.boot_sound) sfx(SFX_BOOT);
             chimed = 1;
         }

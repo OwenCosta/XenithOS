@@ -217,16 +217,27 @@ static float off_tick(float a)
     return fabsf(a - Q * floorf(a / Q + 0.5f));
 }
 
-void ui_logo(float cx, float cy, float size, float build, float slash, int alpha)
+void ui_logo(float cx, float cy, float size, float build, float spin, int alpha)
 {
-    /* where the X's solid pieces come in from: the chevron from the left, the arms the way they point */
-    static const float from[3][2] = {{-1, 0}, {0.7071f, -0.7071f}, {0.7071f, 0.7071f}};
-    float R = size / (2 * LOGO_TICK_OUT);
+    float R = size / (2 * LOGO_HALF);
     int i;
     if (build > 1) build = 1;
-    if (slash > 1) slash = 1;
+    if (spin > 1) spin = 1;
+    /* the outer ring: four streaks spin in from far out, each a little after the one before,
+     * thinning as they close, and lock into place */
+    for (i = 0; spin > 0 && i < 4; i++) {
+        const struct logo_arc *k = &logo_ring[i];
+        float p = (spin * 980.0f - i * 70.0f) / (980.0f - i * 70.0f), e, len, end;
+        if (p <= 0) continue;
+        if (p > 1) p = 1;
+        e = p * p;
+        len = (k->a1 - k->a0) * (0.31f + 0.69f * p);
+        end = k->a1 - (1 - p) * 6.6f;
+        gfx_arc(cx, cy, R * (k->r + 2.3f * (1 - e)), R * (k->w + 0.046f * (1 - e)), end - len, end,
+                k->red ? C_ACCENT : C_TEXT, (int)(alpha * (p < 0.15f ? p / 0.15f : 1)));
+    }
     if (build > 0) {
-        /* the rings: each piece sweeps round from its end by a tick */
+        /* the double ring: each piece sweeps round from its end nearest 3, 6, 9 or 12 o'clock */
         for (i = 0; i < (int)(sizeof logo_arcs / sizeof logo_arcs[0]); i++) {
             const struct logo_arc *k = &logo_arcs[i];
             float len = (k->a1 - k->a0) * build;
@@ -234,22 +245,12 @@ void ui_logo(float cx, float cy, float size, float build, float slash, int alpha
             if (off_tick(k->a0) <= off_tick(k->a1)) gfx_sector(cx, cy, k->r * R, k->w * R, k->a0, k->a0 + len, c, alpha);
             else gfx_sector(cx, cy, k->r * R, k->w * R, k->a1 - len, k->a1, c, alpha);
         }
+        /* the X: its pieces come in from outside, the way each one points, and stop a little apart */
         for (i = 0; i < 3; i++) {
-            float o = (1 - build) * 0.7f * R;
-            gfx_poly(logo_x[i].xy, logo_x[i].n, cx + from[i][0] * o, cy + from[i][1] * o, R,
-                     logo_x[i].red ? C_ACCENT : LOGO_GREY, (int)(alpha * build));
-        }
-    }
-    if (slash > 0) {
-        /* the slash grows out of its point (its first corner) */
-        const struct logo_poly *p = &logo_x[3];
-        float s = R * slash;
-        gfx_poly(p->xy, p->n, cx + p->xy[0] * (R - s), cy + p->xy[1] * (R - s), s, C_ACCENT, alpha);
-        /* and the ticks come in from outside */
-        for (i = 0; i < 4; i++) {
-            const struct logo_poly *t = &logo_ticks[i];
-            float len = sqrtf(t->xy[0] * t->xy[0] + t->xy[1] * t->xy[1]), o = (1 - slash) * 0.3f * R / len;
-            gfx_poly(t->xy, t->n, cx + t->xy[0] * o, cy + t->xy[1] * o, R, C_ACCENT, (int)(alpha * slash));
+            const struct logo_poly *p = &logo_x[i];
+            float d = sqrtf(p->ox * p->ox + p->oy * p->oy), o = (1 - build) * 0.7f / d;
+            gfx_poly(p->xy, p->n, cx + p->ox * (1 + o) * R, cy + p->oy * (1 + o) * R, R,
+                     p->red ? C_ACCENT : LOGO_GREY, (int)(alpha * build));
         }
     }
 }
@@ -259,8 +260,9 @@ void ui_mark(float cx, float cy, float size, int alpha)
     float R = size / (LOGO_X_BOTTOM - LOGO_X_TOP);
     float ox = cx - (LOGO_X_LEFT + LOGO_X_RIGHT) / 2 * R, oy = cy - (LOGO_X_TOP + LOGO_X_BOTTOM) / 2 * R;
     int i;
-    for (i = 0; i < 4; i++)
-        gfx_poly(logo_x[i].xy, logo_x[i].n, ox, oy, R, logo_x[i].red ? C_ACCENT : LOGO_GREY_SMALL, alpha);
+    for (i = 0; i < 3; i++)
+        gfx_poly(logo_x[i].xy, logo_x[i].n, ox + logo_x[i].ox * R, oy + logo_x[i].oy * R, R,
+                 logo_x[i].red ? C_ACCENT : LOGO_GREY_SMALL, alpha);
 }
 
 /* The wordmark: the X, then the name in bold. Returns its width; measure_only draws nothing. */

@@ -40,6 +40,12 @@ done
 say() { printf '\n== %s\n' "$*"; }
 die() { printf 'XenithOS install: %s\n' "$*" >&2; exit 1; }
 
+# XenithOS Desktop comes with XenithOS Console and keeps both up to date itself. Installing over
+# it, or uninstalling, would undo how it's set up.
+if [ -f /usr/share/xenithos-desktop/build.txt ]; then
+    die "this PC runs XenithOS Desktop, which already has XenithOS Console. Update both from Settings > Updates. Nothing was changed."
+fi
+
 [ "$(id -u)" = 0 ] || die "run it with sudo"
 [ -n "$USER_NAME" ] && [ "$USER_NAME" != root ] || die "add --user NAME (the account XenithOS should run as, not root)"
 id "$USER_NAME" >/dev/null 2>&1 || die "there's no user called $USER_NAME"

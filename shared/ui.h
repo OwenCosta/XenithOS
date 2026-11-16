@@ -38,12 +38,12 @@ void ui_toast_icon(int icon);                   /* icon for the next toast (ICON
 void ui_panel(int x, int y, int w, int h);      /* a card */
 void ui_select_box(float x, float y, float w, float h, float r);   /* a selected row or card */
 int  ui_brand(int x, int y, int font, int measure_only);   /* the mark and "XenithOS" */
-/* The XenithOS insignia: a grey chevron and two red arms make an X with a red slash through it,
- * inside a broken double ring with four ticks (its shapes are in logo_shape.h, from
- * tools/mkart.py). size is its whole height, tick to tick. build (0..1) brings the X's pieces in
- * from outside and sweeps the rings round from the ticks; slash (0..1) grows the slash out of its
- * point and brings the ticks in. */
-void ui_logo(float cx, float cy, float size, float build, float slash, int alpha);
+/* The XenithOS logo: a grey chevron and two red arms make an X, standing a little apart, inside a
+ * broken red and grey double ring and a white outer ring with a red quarter (its shapes are in
+ * logo_shape.h, from tools/mkart.py). size is its whole height, outer ring to outer ring.
+ * spin (0..1) brings the outer ring in as four streaks spinning down onto it; build (0..1) sweeps
+ * the double ring round and brings the X's pieces in from outside. Both at 1 is the logo. */
+void ui_logo(float cx, float cy, float size, float build, float spin, int alpha);
 /* The X on its own, size high, for small sizes where the rings would blur: its grey is lifted
  * so it shows on dark panels. */
 void ui_mark(float cx, float cy, float size, int alpha);

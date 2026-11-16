@@ -6,7 +6,7 @@
 <title>XenithOS for Xbox 360</title>
 <meta name="description" content="XenithOS is a homebrew shell for the Xbox 360 S, built on libxenon. It has profiles with avatars, an app store, a small cloud server, and a DOOM port.">
 <link rel="canonical" href="https://owencosta.diy/xenithos/">
-<link rel="icon" href="static/logo.svg?v=2" type="image/svg+xml">
+<link rel="icon" href="static/logo.svg?v=3" type="image/svg+xml">
 <style>
   :root {
     /* XenithOS's look: near-black, quiet edges, white text, one red */
@@ -280,6 +280,8 @@
   <div class="wrap">
     <h2>Build log</h2>
     <ul class="log">
+      <li><b>0.6.4</b><time datetime="2026-11-15">Nov 15, 2026</time>
+        <p>The logo is now a moment of the start-up: the X with its pieces standing a little apart, the broken red and grey ring around it, and outside that the white ring with a red quarter that the start-up's streaks close into. The start-up ends on it, without the slash and the ticks, and the small X next to the name, the Store's XenithOS update and this site match.</p></li>
       <li><b>0.6.3</b><time datetime="2026-11-15">Nov 15, 2026</time>
         <p>A new logo: a grey chevron and two red arms make an X with a red slash through it, inside a broken red and grey ring with four ticks. The start-up builds it. Four streaks spiral in and settle on the ring, the ring sweeps round from the ticks, the X comes together, and the slash cuts across with the chime. Next to the name, at small sizes, the X stands on its own. The Store's XenithOS update and this site have it too.</p></li>
       <li><b>0.6.2</b><time datetime="2026-11-15">Nov 15, 2026</time>
@@ -347,14 +349,14 @@ function logo(svg, big) {
     if (text) el.textContent = text;
     svg.appendChild(el);
   };
-  const w = big ? 368 : 136, h = big ? 120 : 30, cy = h / 2;
+  const w = big ? 384 : 136, h = big ? 136 : 30, cy = h / 2;
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
   const ht = svg.getAttribute("height");
   if (ht) svg.setAttribute("width", Math.round(w / h * ht));
-  if (big) add("image", { href: "static/insignia.svg", x: 0, y: 0, width: 120, height: 120 });
+  if (big) add("image", { href: "static/insignia.svg", x: 0, y: 0, width: 136, height: 136 });
   else add("image", { href: "static/mark.svg", x: 0, y: 5, width: 30, height: 20 });
   const font = "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
-  add("text", { x: big ? 138 : 38, y: big ? cy + 16.5 : cy + 7.5, fill: "#f1f3f6", "font-family": font, "font-weight": 700,
+  add("text", { x: big ? 154 : 38, y: big ? cy + 16.5 : cy + 7.5, fill: "#f1f3f6", "font-family": font, "font-weight": 700,
                 "font-size": big ? 46 : 20, "letter-spacing": "-0.02em" }, "XenithOS");
 }
 logo($("logo"), true);
