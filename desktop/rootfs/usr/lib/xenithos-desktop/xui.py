@@ -226,7 +226,8 @@ def ask(title, text, yes="OK", no="Not now", danger=False, parent=None):
         answer["yes"] = value
         dialog.destroy()
 
-    buttons.pack_start(button(no, None, lambda b: choose(False)), False, False, 0)
+    if no:                              # no second button: something to be told, not asked
+        buttons.pack_start(button(no, None, lambda b: choose(False)), False, False, 0)
     go = button(yes, "danger" if danger else "primary", lambda b: choose(True))
     buttons.pack_start(go, False, False, 0)
     box.pack_start(buttons, False, False, 12)

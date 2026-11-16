@@ -1,0 +1,47 @@
+#!/bin/sh
+# Apps that bring Chromium's sandbox with them (Mullvad VPN's window is one) can only start it
+# on Ubuntu 24.04 when AppArmor has a profile that lets them: a program isn't allowed a user
+# namespace of its own otherwise, and such an app stops the moment it opens ("The SUID sandbox
+# helper binary was found, but is not configured correctly").
+#
+# Mullvad VPN's package brings its profile, but only puts it in place when AppArmor's own files
+# are on the system already as it's installed. While the ISO is built they arrive after it, so
+# XenithOS Desktop 2.0.0 went out without the profile and Mullvad VPN didn't open on installed
+# PCs. (It did on the live system, which doesn't hold apps to that rule.) This puts the profile
+# in place, and in use on a running PC.
+#
+#   app-sandboxes            does that; fine to run again and again
+#   app-sandboxes --check    also says, and exits 1, when an app with Chromium's sandbox has
+#                            neither a profile nor the sandbox's own helper set up (for the
+#                            ISO's build, hooks/0200-desktop)
+set -u
+PROFILES=/etc/apparmor.d
+
+# profile <the app's own copy> <its name in /etc/apparmor.d>
+profile() {
+    # (Mullvad VPN's profile is written for AppArmor 4, Ubuntu 24.04's.)
+    [ -f "$1" ] && [ -e "$PROFILES/abi/4.0" ] || return 0
+    if ! cmp -s "$1" "$PROFILES/$2"; then
+        install -m 644 "$1" "$PROFILES/$2" || return 1
+    fi
+    # On a running PC with AppArmor on, it's in use straight away. While the ISO is built there's
+    # nothing to load it into: the PC loads every profile as it starts.
+    if [ -d /run/systemd/system ] && [ -d /sys/kernel/security/apparmor ] && command -v apparmor_parser >/dev/null 2>&1; then
+        apparmor_parser -r "$PROFILES/$2" >/dev/null 2>&1 || true
+    fi
+    return 0
+}
+
+profile "/opt/Mullvad VPN/resources/apparmor_mullvad" mullvad || exit 1
+
+[ "${1:-}" = --check ] || exit 0
+bad=0
+for helper in /opt/*/chrome-sandbox /opt/*/*/chrome-sandbox /usr/lib/*/chrome-sandbox /usr/share/*/chrome-sandbox; do
+    [ -f "$helper" ] || continue
+    dir=${helper%/chrome-sandbox}
+    if [ -u "$helper" ]; then continue; fi                          # the sandbox's own helper does it
+    if grep -rqsF -- "$dir/" "$PROFILES"; then continue; fi         # a profile names the app
+    echo "app-sandboxes: $dir brings Chromium's sandbox, but no AppArmor profile names it and its helper isn't set up: it won't open on an installed PC" >&2
+    bad=1
+done
+exit $bad

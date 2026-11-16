@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Draws XenithOS Desktop's art around the XenithOS logo (logo.svg, and logo-x.svg for sizes too
 small for its rings; both drawn by draw-logo.py from the insignia's numbers): the icons, the
-wallpapers, the start-up screen, the boot menu's background and highlight, the window borders,
-and the tiles XenithOS Console shows for the installer and PC Settings. Flat and dark:
+icons XenithOS Console's own apps have in the Apps menu, the wallpapers, the start-up screen, the
+boot menu's background and highlight, the window borders, and the tiles XenithOS Console shows
+for the installer and PC Settings. Flat and dark:
 near-black, cards #12151a with #262b33 edges, white, and the logo's red.
 
     python3 desktop/art/make-art.py OUT_DIR [TOOLS_DIR]
@@ -82,6 +83,78 @@ def icons():
         small.save(path(*theme, f"{size}x{size}", "apps", "xenithos.png"))
         small.save(path(*theme, f"{size}x{size}", "apps", "xenithos-mark.png"))
     render(LOGO, 512).save(path("rootfs", "usr", "share", "pixmaps", "xenithos.png"))
+
+
+# ---------------------------------------------------------------- icons for XenithOS Console's apps
+
+# XenithOS Console's own apps have entries in the desktop's Apps menu too (console-apps makes
+# them), and these are their icons there: xenithos-app-<the app>. Each is the thing on the app's
+# home screen picture (tools/mkart.py), without the words, on a tile of that picture's colour. An
+# app that has none here gets the XenithOS logo.
+APP_TILE = '<rect x="3" y="3" width="58" height="58" rx="14" fill="%s" stroke="%s" stroke-width="1.5"/>'
+
+
+def app_icon_svgs():
+    dark, edge = hexc(mkart.BG_DARK), hexc(EDGE)
+    white, grey, red = hexc(WHITE), hexc(GREY), hexc(mkart.RED)
+    found = {}
+
+    # VOLT: the light trail, its head and two sparks.
+    trail = [(0, 1), (1, 1), (2, 1), (2, 2), (2, 3), (3, 3), (4, 3), (4, 4), (5, 4)]
+    cells = ['<rect x="%.1f" y="%d" width="7" height="7" rx="1.8" fill="%s"/>'
+             % (8.5 + 8 * c, 8 + 8 * r, white if i == len(trail) - 1 else red) for i, (c, r) in enumerate(trail)]
+    cells += ['<rect x="%.1f" y="%d" width="7" height="7" rx="1.8" fill="#ffd65a"/>' % (8.5 + 8 * c, 8 + 8 * r)
+              for c, r in ((5, 1), (1, 4))]
+    found["volt"] = APP_TILE % (dark, edge) + "".join(cells)
+
+    # DOOM: its first letter, in its picture's bone white on dark red.
+    found["doom"] = (APP_TILE % ("#1a0d0b", "#3a1e19")
+                     + '<path fill="#e9dccf" fill-rule="evenodd" d="M21 15h11.5a17 17 0 0 1 0 34H21z'
+                       'M30 24v16h2.5a8 8 0 0 0 0-16z"/>')
+
+    # Tube: the play triangle.
+    found["tube"] = (APP_TILE % (dark, edge)
+                     + '<path d="M25 19.5v25l22-12.5z" fill="%s" stroke="%s" stroke-width="5" stroke-linejoin="round"/>'
+                     % (red, red))
+
+    # Photos: a flat picture, a sun and two hills.
+    found["photos"] = (APP_TILE % (dark, edge)
+                       + '<clipPath id="frame"><rect x="12" y="17" width="40" height="30" rx="6"/></clipPath>'
+                       + '<rect x="12" y="17" width="40" height="30" rx="6" fill="%s"/>' % edge
+                       + '<g clip-path="url(#frame)"><circle cx="41.5" cy="26" r="4.5" fill="%s"/>' % red
+                       + '<path d="M12 47l13-18 13 18z" fill="%s"/><path d="M30 47l12-11 12 11z" fill="%s"/></g>' % (white, grey))
+
+    # HostMC: a block (the server), with a red light on it.
+    found["hostmc"] = (APP_TILE % (dark, edge)
+                       + '<g stroke="%s" stroke-width="1.2" stroke-linejoin="round">' % dark
+                       + '<path d="M32 14l17 9-17 9-17-9z" fill="%s"/>' % white
+                       + '<path d="M15 23l17 9v19l-17-9z" fill="%s"/>' % grey
+                       + '<path d="M49 23l-17 9v19l17-9z" fill="#565d69"/></g>'
+                       + '<circle cx="42" cy="38.5" r="2.6" fill="%s"/>' % red)
+
+    head = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">'
+    return {app: head + body + "</svg>\n" for app, body in found.items()}
+
+
+def app_icons():
+    theme = ("rootfs", "usr", "share", "icons", "XenithOS")
+    drawn = app_icon_svgs()
+
+    def at(text, size):
+        png = subprocess.run(["rsvg-convert", "-w", str(size), "-h", str(size)], input=text.encode(),
+                             capture_output=True, check=True).stdout
+        return Image.open(io.BytesIO(png)).convert("RGBA")
+
+    # (The preview has them all side by side, each at three sizes, to look at.)
+    sheet = Image.new("RGB", (len(drawn) * 190 + 16, 172), NEAR_BLACK)
+    for n, (app, text) in enumerate(sorted(drawn.items())):
+        write(path(*theme, "scalable", "apps", f"xenithos-app-{app}.svg"), text)
+        for size in (16, 22, 24, 32):
+            at(text, size).save(path(*theme, f"{size}x{size}", "apps", f"xenithos-app-{app}.png"))
+        for size, x, y in ((128, 16, 22), (32, 154, 22), (16, 154, 64)):
+            shot = at(text, size)
+            sheet.paste(shot, (n * 190 + x, y), shot)
+    sheet.save(path("preview", "app-icons.png"))
 
 
 # ---------------------------------------------------------------- wallpapers
@@ -328,6 +401,7 @@ def tiles():
 
 def main():
     icons()
+    app_icons()
     wallpapers()
     plymouth()
     boot_menu()

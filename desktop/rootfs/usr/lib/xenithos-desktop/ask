@@ -2,6 +2,8 @@
 """A yes-or-no question in XenithOS's look, for scripts.
 
     ask TITLE TEXT [YES [NO]] [--danger]      exit code 0 for yes, 1 for no
+
+With NO given as "" there's only the one button: something to be told, not asked.
 """
 import os
 import sys

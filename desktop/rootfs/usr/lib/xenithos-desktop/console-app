@@ -1,0 +1,27 @@
+#!/bin/bash
+# Opens one of XenithOS Console's apps on the desktop, by itself: what its entry in the Apps menu
+# runs (console-apps makes those entries). The app is the same program XenithOS Console starts
+# and keeps the same data, so a game's scores or HostMC's servers are the same in both.
+#
+#   console-app APP             full screen, as on XenithOS Console
+#   console-app APP --window    in a window
+#
+# Leaving the app (B, or Esc on a keyboard) closes it. That needs XenithOS Console 0.6.6 or
+# newer: before, an app started by itself came straight back.
+app=${1:-}
+case "$app" in
+    ''|xenithos|*/*|.*) echo "usage: console-app APP [--window]   (one of XenithOS Console's apps)" >&2; exit 2 ;;
+esac
+prog=/usr/lib/xenithos/$app
+if [ ! -x "$prog" ]; then
+    echo "$app isn't on this PC any more." >&2
+    /usr/lib/xenithos-desktop/ask "It isn't on this PC any more" \
+        "This app of XenithOS Console's has been removed from the PC. Settings > Updates may bring it back." "OK" "" \
+        >/dev/null 2>&1
+    exit 1
+fi
+if [ "${2:-}" != --window ]; then export XENITHOS_FULLSCREEN=1; fi
+# Its sound goes to PipeWire through SDL's own driver for it, as XenithOS Console's does
+# (xsession says why: SDL's other drivers can wait for ever on a stalled sound card as they close).
+export SDL_AUDIODRIVER=pipewire,pulseaudio,alsa
+exec "$prog"

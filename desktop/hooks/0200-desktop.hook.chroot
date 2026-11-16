@@ -19,6 +19,14 @@ done
 [ -x /usr/bin/xenithos-session ] && [ -f /usr/share/themes/XenithOS/gtk-3.0/adwaita-xenithos.css ] \
     || { echo "the xenithos-desktop package didn't set itself up" >&2; exit 1; }
 
+# Mullvad VPN's window, and any other app that brings Chromium's sandbox, only opens on an
+# installed PC with an AppArmor profile in place. Mullvad VPN's own set-up skips its profile
+# while an ISO is built, which is how 2.0.0's Mullvad VPN didn't open: put in place here, and
+# the build stops if it, or another such app's, is missing.
+/usr/lib/xenithos-desktop/app-sandboxes --check
+cmp -s "/opt/Mullvad VPN/resources/apparmor_mullvad" /etc/apparmor.d/mullvad \
+    || { echo "Mullvad VPN's AppArmor profile isn't in place: its window wouldn't open on an installed PC" >&2; exit 1; }
+
 # The Apps menu, once more now that every package is in place, and checked: Security Tools has
 # its groups, and the tools in them their entries.
 python3 /usr/lib/xenithos-desktop/desktop-entries
@@ -32,6 +40,19 @@ tools=$(grep -l 'X-XenithOS-Security' /usr/share/xenithos-desktop/overrides/appl
 for app in $(sed -n 's/^\([a-z0-9][a-z0-9_-]*\).*/\1/p' /usr/share/xenithos-desktop/console-apps.list); do
     [ -x "/usr/lib/xenithos/$app" ] || { echo "console-apps.list names $app, which XenithOS Console's source doesn't build" >&2; exit 1; }
     ! grep -qx "$app" /usr/share/xenithos/apps.list || { echo "$app is in apps.list though it's one people install themselves" >&2; exit 1; }
+done
+
+# XenithOS Console's apps are in the desktop's Apps menu too (console-apps makes the entries).
+# The list that sorts them there names apps that exist, and each of those has its icon. (An app
+# XenithOS Console gains later still gets an entry: under Games, with the logo, until it's named.)
+for app in $(sed -n 's/^\([a-z0-9][a-z0-9_-]*\)[[:space:]].*/\1/p' /usr/share/xenithos-desktop/console-menu.list); do
+    [ -x "/usr/lib/xenithos/$app" ] || { echo "console-menu.list names $app, which XenithOS Console's source doesn't build" >&2; exit 1; }
+    [ -f "/usr/share/icons/XenithOS/scalable/apps/xenithos-app-$app.svg" ] \
+        || { echo "$app has no icon for the Apps menu (desktop/art/make-art.py draws them)" >&2; exit 1; }
+done
+for app in $(cat /usr/share/xenithos/apps.list) $(sed -n 's/^\([a-z0-9][a-z0-9_-]*\).*/\1/p' /usr/share/xenithos-desktop/console-apps.list); do
+    grep -q "^$app[[:space:]]" /usr/share/xenithos-desktop/console-menu.list \
+        || echo "note: $app isn't in console-menu.list; the Apps menu puts it under Games with the logo for an icon"
 done
 
 # What systemd-resolved kept of the build's own name servers as it installed: not for the ISO.

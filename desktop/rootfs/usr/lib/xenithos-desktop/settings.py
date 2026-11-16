@@ -21,6 +21,7 @@ import wave
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import consoleupdate  # noqa: E402
+import ownapps  # noqa: E402
 import xui  # noqa: E402
 from xui import Gdk, GdkPixbuf, GLib, Gtk, button, card, label, later, run, setting_row  # noqa: E402
 
@@ -615,13 +616,112 @@ class ConsoleAppsPage(Page):
 
     def build(self):
         self.add(label("XenithOS Console's apps that don't come installed. The ones you install show on its home "
-                       "screen. Removing one keeps what you made with it.", "subtitle"))
+                       "screen, and in the Apps menu here on the desktop. Removing one keeps what you made "
+                       "with it.", "subtitle"))
         self.rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         self.add(self.rows)
         self.note = label("", "error")
         self.add(self.note)
 
+        # Apps of the Apps menu, on XenithOS Console's home screen too (ownapps.py).
+        self.add(label("Your own apps", "heading"))
+        self.add(label("Apps on this PC can go on XenithOS Console's home screen as well, and open full screen "
+                       "there. In a game the controller plays the game. In any other app it moves the pointer. "
+                       "The Xbox button opens the guide, where Controller changes that or makes it a keyboard "
+                       "and mouse.", "subtitle"))
+        self.find = Gtk.SearchEntry(placeholder_text="Find an app")
+        self.find.connect("search-changed", lambda entry: self.own.invalidate_filter())
+        self.add(self.find)
+        self.own = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self.own.get_style_context().add_class("rows")
+        self.own.set_filter_func(lambda row: self.find.get_text().strip().lower() in row.words)
+        self.add(self.own)
+        self.own_note = label("", "error")
+        self.add(self.own_note)
+
+    def refresh_own(self):
+        """The Apps menu's apps, the ones on the home screen first. The list keeps this order
+        while it's looked at: adding one changes its line where it is."""
+        on = ownapps.added()
+        for child in self.own.get_children():
+            self.own.remove(child)
+        apps = ownapps.offered()
+        listed = {info.get_id() for info in apps}
+        # On the home screen, but not an app the list offers: one that has been removed from the
+        # PC since (that entry only says so when it's opened), or one added some other way.
+        extra = []
+        for ident in sorted(set(on) - listed):
+            info = ownapps.entry(ident)
+            if info is None:
+                called = ownapps.read_app(os.path.join(ownapps.apps_dir(), on[ident] + ".app")).get("name") or ident
+                extra.append(self.own_row(ident, called, "", None, True, gone=True))
+            else:
+                apps.append(info)
+        apps.sort(key=lambda info: (info.get_id() not in on, (info.get_display_name() or "").lower()))
+        for row in extra:
+            self.own.add(row)
+        for info in apps:
+            # The Apps menu's name for it; "Find an app" also knows what its home screen entry is called.
+            self.own.add(self.own_row(info.get_id(), info.get_display_name() or info.get_id(),
+                                      (info.get_generic_name() or "") + " " + ownapps.shown_name(info),
+                                      info.get_icon(), info.get_id() in on))
+        if not apps and not extra:
+            row = Gtk.ListBoxRow(activatable=False)
+            row.words = ""
+            row.add(label("No apps were found in the Apps menu.", "small"))
+            self.own.add(row)
+        self.own.show_all()
+
+    def own_row(self, ident, name, also, icon, there, gone=False):
+        """One app's line: its icon and name, whether it's on the home screen, and the button."""
+        row = Gtk.ListBoxRow(activatable=False)
+        row.ident, row.there, row.gone = ident, there, gone
+        row.words = (name + " " + also).lower()
+        line = Gtk.Box(spacing=14)
+        picture = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.DND) if icon else Gtk.Image.new_from_icon_name(
+            "application-x-executable", Gtk.IconSize.DND)
+        picture.set_pixel_size(32)
+        line.pack_start(picture, False, False, 0)
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, valign=Gtk.Align.CENTER)
+        text.pack_start(label(name, "row-title"), False, False, 0)
+        row.about = label("", "small")
+        row.about.set_no_show_all(True)
+        text.pack_start(row.about, False, False, 0)
+        line.pack_start(text, True, True, 0)
+        row.change = button("", None, lambda b: self.change_own(row))
+        row.change.set_valign(Gtk.Align.CENTER)
+        line.pack_end(row.change, False, False, 0)
+        row.add(line)
+        self.show_own(row)
+        return row
+
+    def show_own(self, row):
+        about = ("It isn't on this PC any more." if row.gone else "On XenithOS Console's home screen.") if row.there else ""
+        row.about.set_text(about)
+        row.about.set_visible(bool(about))
+        row.change.set_label("Remove" if row.there else "Add")
+
+    def change_own(self, row):
+        self.own_note.set_text("")
+        try:
+            if row.there:
+                ownapps.remove(row.ident)
+            else:
+                ownapps.add(row.ident)
+        except ownapps.Problem as e:
+            self.own_note.set_text(str(e))
+            return
+        row.there = not row.there
+        if row.gone:                    # nothing left that could be added again
+            self.own.remove(row)
+        else:
+            self.show_own(row)
+
     def refresh(self):
+        self.refresh_own()
+        self.refresh_console()
+
+    def refresh_console(self):
         def work():
             code, out = run([CONSOLE_APPS, "list"])
             return [line.split("|", 3) for line in out.splitlines() if line.count("|") >= 3] if code == 0 else []
@@ -648,7 +748,7 @@ class ConsoleAppsPage(Page):
             code, out = result
             if code != 0:
                 self.note.set_text(out.splitlines()[-1] if out else "That didn't work.")
-            self.refresh()
+            self.refresh_console()
 
         later(lambda: run([CONSOLE_APPS, "remove" if there else "install", app]), done)
 

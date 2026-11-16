@@ -7,15 +7,21 @@ SHARE=/usr/share/xenithos-desktop
 STATE=/var/lib/xenithos-desktop
 
 entries() { python3 "$LIB/desktop-entries" >/dev/null 2>&1 || true; }
+# Mullvad VPN's window needs its AppArmor profile to open, and its own package can miss putting
+# it in place (see the file).
+sandboxes() { "$LIB/app-sandboxes" || echo "xenithos-desktop: couldn't put Mullvad VPN's AppArmor profile in place" >&2; }
 
 # Another package added or changed an app's menu entry, or GTK itself: bring ours up to date.
+# (An app that has just been installed is one that added its entry.)
 if [ "$1" = triggered ]; then
     entries
     "$LIB/recolor-gtk" >/dev/null 2>&1 || true
+    sandboxes
     exit 0
 fi
 [ "$1" = configure ] || exit 0
 mkdir -p "$STATE"
+sandboxes
 
 # The GTK theme: GTK's own dark theme, recoloured with XenithOS's colours.
 "$LIB/recolor-gtk" >/dev/null 2>&1 || echo "xenithos-desktop: couldn't recolour the GTK theme" >&2

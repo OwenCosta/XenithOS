@@ -4,6 +4,8 @@
 #   Brave, Files, Terminal and Settings (and on the USB stick, the installer).
 # - Every time, it tells XFCE those launchers are safe to start: XFCE otherwise asks before
 #   starting any launcher on the desktop it hasn't been told about.
+# - Every time, it brings the Apps menu's entries for XenithOS Console's apps in step with
+#   XenithOS Console's home screen.
 # - It applies the person's choices from Settings that XFCE doesn't keep itself, sets the sound
 #   to a level that can be heard the first time, and says when updates are ready.
 LIB=/usr/lib/xenithos-desktop
@@ -14,6 +16,12 @@ DESK=$(xdg-user-dir DESKTOP 2>/dev/null)
 STAMP="$CONF/desktop-launchers"
 
 mkdir -p "$DESK" "$CONF"
+
+# XenithOS Console's apps that are on its home screen are in the Apps menu too. Brought in step
+# here, every time: XenithOS Console's Store may have installed or removed some since the
+# desktop last ran.
+"$LIB/console-apps" menu >/dev/null 2>&1
+
 if [ ! -f "$STAMP" ]; then
     for f in "$LAUNCHERS"/*.desktop; do
         [ -f "$f" ] || continue

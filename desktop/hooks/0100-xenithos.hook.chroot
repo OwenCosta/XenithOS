@@ -31,8 +31,37 @@ for p in $PROGRAMS; do
         *" $p "*) ;;
         *) echo "$p" >> /usr/share/xenithos/apps.list ;;
     esac
-    if [ -f "$SRC/art/thumbs/$p.ximg" ]; then install -m 644 "$SRC/art/thumbs/$p.ximg" /usr/share/xenithos/apps/; fi
-    if [ -f "$SRC/apps/$p/app.txt" ]; then install -m 644 "$SRC/apps/$p/app.txt" "/usr/share/xenithos/apps/$p.txt"; fi
+    # Its name and picture: for a new account's home screen, and next to the program, where
+    # XenithOS Console's Store looks first when it installs an app (linux/install.sh puts them
+    # there too, and XenithOS Console's own updates keep those current).
+    if [ -f "$SRC/art/thumbs/$p.ximg" ]; then
+        install -m 644 "$SRC/art/thumbs/$p.ximg" /usr/share/xenithos/apps/
+        install -m 644 "$SRC/art/thumbs/$p.ximg" /usr/lib/xenithos/
+    fi
+    if [ -f "$SRC/apps/$p/app.txt" ]; then
+        install -m 644 "$SRC/apps/$p/app.txt" "/usr/share/xenithos/apps/$p.txt"
+        install -m 644 "$SRC/apps/$p/app.txt" "/usr/lib/xenithos/$p.txt"
+    fi
 done
+
+# Each program is started once, with no screen and no sound, and has to be still running five
+# seconds later, when timeout ends it (that's the 137). One that stops by itself as it starts
+# would do the same on every PC. Ubuntu's compiler adds checks (_FORTIFY_SOURCE) that end a
+# program on mistakes other compilers let through, which is how HostMC came to open on nobody's
+# PC in 2.0.0: it built without a word and aborted in its first second.
+for p in $PROGRAMS; do
+    try=$(mktemp -d)
+    mkdir -p "$try/data/uda:/apps" "$try/data/uda:/xenith"
+    code=0
+    HOME="$try" XENITHOS_DATA="$try/data" XDG_RUNTIME_DIR="$try" SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy \
+        timeout -s KILL 5 "/usr/lib/xenithos/$p" > "$try/said" 2>&1 || code=$?
+    if [ "$code" != 137 ]; then
+        echo "$p stopped by itself as it started (exit $code). It said:" >&2
+        tail -n 5 "$try/said" >&2
+        exit 1
+    fi
+    rm -rf "$try"
+done
+echo "start-up test: $PROGRAMS all started"
 
 rm -rf "$SRC"

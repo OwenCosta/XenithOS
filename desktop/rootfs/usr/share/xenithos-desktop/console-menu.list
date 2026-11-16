@@ -1,0 +1,12 @@
+# XenithOS Console's apps in the desktop's Apps menu. Every app of XenithOS Console's that's on
+# its home screen also has an entry in the Apps menu, and opens on the desktop by itself
+# (/usr/lib/xenithos-desktop/console-apps makes the entries, console-app starts the app). This
+# says which group an app goes in (a Categories line, as in any .desktop file) and what the menu
+# says about it. An app that isn't named here goes under Games with no words of its own.
+#
+#   app      categories                      what the Apps menu says about it
+volt     Game;ArcadeGame;                A light-trail game with a leaderboard on XenithOS Cloud
+doom     Game;ActionGame;                The classic shooter
+tube     AudioVideo;Video;Player;        Videos from YouTube
+photos   Graphics;Viewer;Photography;    Your pictures, full screen
+hostmc   Game;                           Your own Minecraft server, run from this PC

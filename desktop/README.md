@@ -75,6 +75,25 @@ apps installs them (and removes them again; what you made with them stays). They
 built with XenithOS Console, so installing one takes a moment and needs no download.
 `rootfs/usr/share/xenithos-desktop/console-apps.list` says which apps wait to be installed.
 
+**XenithOS Console's apps are desktop apps too.** Each one that's on XenithOS Console's home screen (Photos
+and Tube from the start, the others once installed here or in XenithOS Console's Store) has an entry in
+the Apps menu, under Games or Media, with an icon of its own. It opens on the desktop by itself, full
+screen as on XenithOS Console, or in a window from the entry's right-click menu, and leaving it (B, or Esc)
+closes it. It's the same program with the same data, so scores and HostMC's servers are the same in both.
+The entries follow the home screen: the desktop brings them in step each time it starts, and Settings >
+Console apps as it installs or removes one. `rootfs/usr/share/xenithos-desktop/console-menu.list` says
+which group each app goes in. Closing when left needs XenithOS Console 0.6.6 or newer.
+
+**Your own apps** go on XenithOS Console's home screen too: Settings > Console apps lists the apps on the
+PC (with a box to find one), each with an Add button, and Remove once it's there. Any app with an entry in
+the Apps menu can be added, whether it came with XenithOS Desktop or you installed it yourself. The
+desktop's own control panels are left out of the list, and so are apps XenithOS Console's Store already
+put on the home screen. On XenithOS Console the app has a picture made from its icon and name, opens full
+screen, and closes back to the home screen. A game gets the controller as it is; in any other app the
+controller starts as the pointer. The guide (the Xbox button) changes that, or makes the controller a
+keyboard and mouse for games played with those. `rootfs/usr/lib/xenithos-desktop/ownapps.py` does it, and
+the top of that file says what it writes.
+
 The look is XenithOS's: a near-black wallpaper with the logo, one panel along the bottom, flat dark window
 borders with a red close button, GTK's dark theme recoloured, Papirus's flat icons with grey folders, and the
 Inter font (with Noto's fonts behind it for the world's other writing, Chinese, Japanese and Korean
@@ -134,19 +153,39 @@ can't mix. `out/snapshots/` holds the last Debian-based source tree (1.1.2) as i
 
 ## Tested
 
-In VirtualBox 7.2, on the 2.0.0 ISO and the builds that led to it, with BIOS, UEFI and UEFI with Secure
-Boot: the boot menu and its stick check, the live system (Brave included), installing, the PC restarting by
-itself into the installed system, switching to XenithOS Console and back, Settings, the Apps menu's groups,
-and the boot menu after a start that didn't finish. A checklist of about forty things passes on the
-installed system with Secure Boot and with BIOS: its name and language, the wallpaper, sound, the network,
-Brave, Mullvad VPN, AppArmor, GRUB and the PC's boot entry, the log, apt, the updater, the console apps and
-the Apps menu among them. A stick laid out the way `write-usb.ps1` lays it out starts with Secure Boot and
-with BIOS (as a disk image in a VM), and `write-usb.ps1` has made a real stick that way from Windows 11,
-with every file read back from the stick and matching the ISO's list.
+In VirtualBox 7.2, on the 2.0.1 ISO (and 2.0.0's and the builds that led to it, with plain UEFI too):
+the live system with UEFI and Secure Boot (Brave and Mullvad VPN's window open there), then installing with
+Secure Boot and with BIOS and the PC restarting into the installed system. A checklist passes on both
+installs, 50 checks with Secure Boot and 49 with BIOS (one is about the UEFI boot entry): its name and
+language, the wallpaper, sound, the network, Brave starting, Mullvad VPN's window opening, AppArmor, GRUB
+and the PC's boot entry, the log, apt, the updater, the console apps, each of XenithOS Console's programs
+starting, your own apps, and XenithOS Console's apps in the Apps menu among them. On 2.0.0's ISO and the
+builds before it, also: the boot menu and its stick check, switching to XenithOS Console and back,
+Settings, and the boot menu after a start that didn't finish. A stick laid out the way `write-usb.ps1`
+lays it out starts with Secure Boot and with BIOS (as a disk image in a VM), and `write-usb.ps1` has made a
+real stick that way from Windows 11, with every file read back from the stick and matching the ISO's list.
 
-Updating from Settings > Updates was tested end to end on XenithOS Desktop 1 (the same updater). XenithOS
-Desktop 2's own update address has nothing on it yet, so there the updater was only seen to look, find
-nothing and carry on with the system's updates. Not tested: a real PC, Wi-Fi, and sound you can hear.
+On the 2.0.1 install with XenithOS Console 0.6.6: HostMC installed from XenithOS Console's Store showed
+as installed in Settings > Console apps and in the Apps menu, opened, and once removed in Settings showed
+as not installed in the Store; DOOM installed from the Store fetched both Freedoom games and played; VOLT
+opened full screen from the Apps menu and closed when left.
+
+Updating from Settings > Updates was tested end to end from 2.0.0 to 2.0.1, with the update served to an
+installed VM from the build PC: the signed list and bundle were checked and installed, XenithOS Console
+updated itself in the same run (0.6.4 to 0.6.6), the PC restarted into 2.0.1, and the checklist passed on
+it. The checklist now opens Mullvad VPN's window; 2.0.0's only looked at Mullvad VPN's service, which is how
+a window that couldn't open got through.
+
+Your own apps were tried from both sides: Add, Remove and the search box in Settings on the desktop and in
+PC Settings on XenithOS Console, then from XenithOS Console's home screen a windowed app, a terminal app
+and a game opened and closed, and an app that had since been removed from the PC said so. XenithOS Console
+0.6.6's Store removing and installing VOLT was seen to agree with Settings > Console apps. XenithOS
+Console's own apps were seen in the Apps menu's Games and Media groups, VOLT and HostMC opened from the
+desktop full screen and closed when left, and the entries followed the home screen as apps were installed
+and removed.
+
+2.0.0 was installed on a real PC by its first user. Not tested here: Wi-Fi, a controller (the VM has a
+keyboard only), and sound you can hear.
 
 ## Not yet
 
@@ -174,6 +213,9 @@ sudo bash desktop/build.sh
 
 The ISO (about 2.5 GB), its SHA-256, the list of packages in it and the build's log land in `desktop/out/`. A
 build takes 15 to 40 minutes, depending on the machine and the network, and needs about 20 GB of disk.
+XenithOS Console is compiled from the checkout the build runs in, listed with git: from a git worktree,
+build in a clone of it instead (`build-in-docker.sh` says so), since Docker can't follow a worktree's
+link to the main checkout.
 
 Options (both scripts): `--server HOST:PORT` gives XenithOS Console a XenithOS Cloud address to start with
 (default: `server=` in the repository's `config.local.txt`, which is never committed), `--channel URL` says
@@ -193,7 +235,7 @@ What goes in, all in this folder:
 | `debian/` | the packages' set-up scripts (they run on every update) |
 | `archive/` | the `xenithos-archive` package: where Brave's and Mullvad VPN's packages come from, and their keys |
 | `live/` | only on the ISO: the installer and what starts it |
-| `hooks/` | run inside the new system while the ISO is built: XenithOS Console compiled from this checkout (`0100`), checks and Ubuntu's extras taken out (`0200`), the GRUB packages the installer needs (`0300`), the language (`1030`) and the icon themes' indexes (`9050`). The last two are numbered to come after live-build's own hooks that would undo them |
+| `hooks/` | run inside the new system while the ISO is built: XenithOS Console compiled from this checkout and each of its programs started once, so one that crashes as it starts stops the build (`0100`), checks, Mullvad VPN's AppArmor profile and Ubuntu's extras taken out (`0200`), the GRUB packages the installer needs (`0300`), the language (`1030`) and the icon themes' indexes (`9050`). The last two are numbered to come after live-build's own hooks that would undo them |
 | `boot/` | the USB stick's boot menu (GRUB, for UEFI and BIOS) |
 | `art/` | the logo (`logo.svg` and `logo-x.svg`, written by `draw-logo.py` from the logo's numbers in `tools/mkart.py`, which XenithOS Console and the website share) and `make-art.py`, which draws the icons, wallpapers, start-up screen, boot menu and window borders from it |
 | `write-usb.ps1` | puts the ISO on a USB stick from Windows |
@@ -204,8 +246,17 @@ and `rootfs/usr/lib/xenithos-desktop/xsession`; Settings is `rootfs/usr/lib/xeni
 updater is `rootfs/usr/lib/xenithos-desktop/update-helper`. In the same folder, `desktop-entries` keeps the
 Apps menu (names, and the Security Tools groups; the groups' layout is
 `rootfs/etc/xdg/xenithos-desktop/menus/xfce-applications.menu`), `tool-terminal` is what a typed tool's
-menu entry opens, and `console-apps` puts XenithOS Console's optional apps on its home screen and takes
-them off.
+menu entry opens, `console-apps` puts XenithOS Console's optional apps on its home screen and takes
+them off, and keeps the Apps menu's entries for XenithOS Console's apps (which `console-app` starts),
+`ownapps.py` puts any other app of the PC's on the home screen, and `app-sandboxes` sees that Mullvad
+VPN's window can open (below).
+
+Mullvad VPN's window, like any app that brings Chromium's sandbox, only opens on Ubuntu 24.04 when AppArmor
+has a profile for it. Mullvad VPN's package brings one, but only puts it in place if AppArmor's own files
+are already there as it's installed, and while the ISO is built they arrive after it. 2.0.0 went out that
+way: Mullvad VPN's service ran, and its window stopped the moment it opened. `app-sandboxes` puts the
+profile in place, from the `xenithos-desktop` package's set-up (so an update repairs installed PCs) and
+from the ISO build, which stops if that app or another like it is left without one.
 
 ## Trying it in a VM
 

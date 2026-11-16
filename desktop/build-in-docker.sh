@@ -20,6 +20,13 @@ ARGS=()
 for a in "$@"; do
     if [ "$a" = --ram ]; then RAM=1; else ARGS+=("$a"); fi
 done
+# The build lists XenithOS Console's source with git. In a git worktree, .git is a pointer to the
+# main checkout's folder, which the container doesn't have: the build would stop a minute in.
+if [ -f "$REPO/.git" ]; then
+    echo "This checkout is a git worktree, and the build can't read it from inside Docker." >&2
+    echo "Build from a clone instead: git clone \"$REPO\" another-folder, then run this there." >&2
+    exit 1
+fi
 mkdir -p "$OUT"
 command -v docker >/dev/null || { echo "Docker isn't installed (or isn't running)" >&2; exit 1; }
 
