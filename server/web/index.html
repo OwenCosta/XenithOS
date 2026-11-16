@@ -507,7 +507,7 @@ async function refresh() {
       const box = document.createElement("div");
       box.className = "item";
       const img = document.createElement("img");
-      img.src = `v1/store/icon/${encodeURIComponent(id)}.png`;
+      img.src = `v1/store/icon/${encodeURIComponent(id)}.png?v=2`;   /* raise when thumbnails change */
       img.alt = "";
       img.loading = "lazy";
       const text = document.createElement("div");
@@ -533,7 +533,7 @@ async function refresh() {
         const box = document.createElement("div");
         box.className = "tile";
         const img = document.createElement("img");
-        img.src = `v1/store/icon/${encodeURIComponent(id)}.png`;
+        img.src = `v1/store/icon/${encodeURIComponent(id)}.png?v=2`;   /* raise when thumbnails change */
         img.alt = "";
         img.loading = "lazy";
         const n = document.createElement("div"); n.textContent = name;
