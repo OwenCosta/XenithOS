@@ -616,6 +616,60 @@ int plat_steam_open(const char *url)
 
 void plat_sync_apps(void) { }
 
+/* XenithOS's own apps on a PC, acted out. XSIM_LIB is a folder standing in for /usr/lib/xenithos
+ * (sim/run.sh makes one for XSIM_KIND=pc): each app's program, name and picture. */
+static const char *sim_lib(void)
+{
+    const char *l = getenv("XSIM_LIB");
+    return sim_is_pc() && l && *l ? l : NULL;
+}
+
+int plat_local_app(const char *id)
+{
+    char p[512];
+    if (!sim_lib() || !id || !*id || strchr(id, '/')) return 0;
+    snprintf(p, sizeof p, "%s/%s", sim_lib(), id);
+    return access(p, F_OK) == 0;
+}
+
+int plat_local_app_file(const char *id, const char *ext, char *out, int n)
+{
+    if (!plat_local_app(id)) return 0;
+    snprintf(out, n, "%s/%s.%s", sim_lib(), id, ext);
+    if (access(out, R_OK) == 0) return 1;
+    snprintf(out, n, "uda:/apps/%s.%s", id, ext);
+    return access(out, R_OK) == 0;
+}
+
+static void sim_copy(const char *from, const char *to)
+{
+    char buf[8192];
+    size_t got;
+    FILE *in = fopen(from, "rb"), *out = in ? fopen(to, "wb") : NULL;
+    while (in && out && (got = fread(buf, 1, sizeof buf, in)) > 0) fwrite(buf, 1, got, out);
+    if (in) fclose(in);
+    if (out) fclose(out);
+}
+
+int plat_local_app_set(const char *id, int on)
+{
+    static const char *const exts[] = {"elf32", "txt", "ximg"};
+    char from[512], to[96];
+    int i;
+    if (!plat_local_app(id)) return 0;
+    fprintf(stderr, "sim: %s %s\n", on ? "on the home screen:" : "off the home screen:", id);
+    for (i = 0; i < 3; i++) {
+        snprintf(to, sizeof to, "uda:/apps/%s.%s", id, exts[i]);
+        if (!on) {
+            remove(to);
+            continue;
+        }
+        snprintf(from, sizeof from, "%s/%s%s%s", sim_lib(), id, i ? "." : "", i ? exts[i] : "");
+        if (access(to, F_OK) != 0) sim_copy(from, to);
+    }
+    return 1;
+}
+
 const char *plat_launch_error(void) { return ""; }
 
 /* Typing on a real keyboard: XSIM_TYPE="text" is typed the first time typing is switched on. */

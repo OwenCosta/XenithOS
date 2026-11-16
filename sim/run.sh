@@ -63,6 +63,21 @@ if [ -n "$XSIM_HOSTMC" ]; then
     export HOSTMC_JAVA="$here/hostmc/java"
 fi
 
+# XSIM_KIND=pc: XenithOS's own apps as a PC has them, built in a folder standing in for
+# /usr/lib/xenithos with their names and pictures, for the Store to list and install.
+# XSIM_UNINSTALLED="doom volt": ones that are built but not on the home screen.
+if [ "$XSIM_KIND" = pc ]; then
+    mkdir -p "$work/lib"
+    for app in volt doom tube photos hostmc; do
+        : > "$work/lib/$app"
+        [ -f "$here/../apps/$app/app.txt" ] && cp "$here/../apps/$app/app.txt" "$work/lib/$app.txt"
+        [ -f "$here/../art/thumbs/$app.ximg" ] && cp "$here/../art/thumbs/$app.ximg" "$work/lib/$app.ximg"
+    done
+    export XSIM_LIB="$work/lib"
+    # shellcheck disable=SC2086
+    for app in ${XSIM_UNINSTALLED:-}; do rm -f "$work/uda:/apps/$app".*; done
+fi
+
 bin="${XSIM_BIN:-xsim}"
 make -s -C "$here" "$bin"
 cd "$work"

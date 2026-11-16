@@ -111,7 +111,7 @@ void ui_fade_in(void)
 
 /* --------------------------------------------------------------- toasts */
 
-static char toast_title[64], toast_body[96];
+static char toast_title[64], toast_body[240];   /* long enough that the wrap's "..." does the cutting */
 static uint64_t toast_start;
 static int toast_on, toast_icon = ICON_CHECK, next_icon = ICON_CHECK;
 
@@ -130,10 +130,12 @@ void ui_toast(const char *title, const char *body)
     toast_on = 1;
 }
 
+/* As wide as its words need, from 420 up to half the screen. Past that the words wrap onto a
+ * second line and a long title ends in "...", so nothing runs off the edge of the screen. */
 static void draw_toast(void)
 {
     uint64_t t;
-    int w = 420, h = 76, x, y, a = 255;
+    int w, h = 76, x, y, a = 255, tw, need, lines = 0, clip[4];
     float slide;
     if (!toast_on) return;
     t = ui_ms() - toast_start;
@@ -141,14 +143,27 @@ static void draw_toast(void)
     slide = t < 250 ? 1.0f - t / 250.0f : 0.0f;
     if (t > 3000) a = (int)(255 * (3400 - t) / 400);
     slide = slide * slide;
+    need = gfx_str_w(FONT_BODY_SB, toast_title);
+    if (gfx_str_w(FONT_SMALL, toast_body) > need) need = gfx_str_w(FONT_SMALL, toast_body);
+    w = need + 72 + 24;
+    if (w < 420) w = 420;
+    if (w > SCR_W / 2) w = SCR_W / 2;
+    tw = w - 72 - 20;
+    if (toast_body[0]) {
+        gfx_get_clip(clip);
+        gfx_set_clip(0, 0, 0, 0);                    /* measure: nothing is drawn */
+        lines = gfx_wrap(FONT_SMALL, 0, 0, tw, 2, 0, toast_body, 2);
+        gfx_set_clip(clip[0], clip[1], clip[2], clip[3]);
+    }
+    if (lines > 1) h += gfx_line_h(FONT_SMALL) + 2;
     x = SCR_W - M - w + (int)(slide * (w + M));
     y = 28;
     gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 14, C_SURFACE, a);
     gfx_stroke_rrect((float)x, (float)y, (float)w, (float)h, 14, 1, C_LINE, a);
     gfx_circle(x + 38.0f, y + h / 2.0f, 20, C_ACCENT, a);
     if (a > 200) icon_draw(toast_icon, x + 38.0f, y + h / 2.0f, 22, 0xFFFFFF, C_ACCENT);
-    gfx_str_a(FONT_BODY_SB, x + 72, y + 12, C_TEXT, a, toast_title);
-    gfx_str_a(FONT_SMALL, x + 72, y + 42, C_SUB, a, toast_body);
+    gfx_str_fit_a(FONT_BODY_SB, x + 72, y + 12, C_TEXT, a, toast_title, tw);
+    gfx_wrap_a(FONT_SMALL, x + 72, y + 42, tw, 2, C_SUB, a, toast_body, 2);
 }
 
 /* ---------------------------------------------------------- frame pacing */
@@ -448,7 +463,7 @@ int ui_dialog(const char *title, const char *body, const char *const *options, i
 {
     size_t bytes = (size_t)SCR_W * SCR_H * 4;
     uint32_t *under = malloc(bytes), *dimmed = NULL;
-    int sel = 0, w = SCR_W * 46 / 100, row = 54, x, y, h, body_lines = 0, result = -1, i;
+    int sel = 0, w = SCR_W * 46 / 100, row = 54, x, y, h, body_lines = 0, body_max = 6, title_lines = 1, result = -1, i;
     float hl;
 
     if (under) {
@@ -460,15 +475,25 @@ int ui_dialog(const char *title, const char *body, const char *const *options, i
         }
     }
     if (w < 520) w = 520;
-    if (body) {
-        /* Measure the body by drawing it off to the side of a scratch clip. */
+    {
+        /* Measure the title and the body by drawing them off to the side of a scratch clip. A
+         * body that fills every line gets a wider box, and a long title wraps, so the words stay
+         * inside the box and on the screen. */
         int clip[4];
         gfx_get_clip(clip);
         gfx_set_clip(0, 0, 0, 0);
-        body_lines = gfx_wrap(FONT_BODY, 0, 0, w - 64, 4, 0, body, 6);
+        if (body) {
+            body_lines = gfx_wrap(FONT_BODY, 0, 0, w - 64, 4, 0, body, body_max);
+            if (body_lines == body_max && w < SCR_W * 64 / 100) {
+                w = SCR_W * 64 / 100;
+                body_max = 8;
+                body_lines = gfx_wrap(FONT_BODY, 0, 0, w - 64, 4, 0, body, body_max);
+            }
+        }
+        title_lines = gfx_wrap(FONT_TITLE, 0, 0, w - 64, 2, 0, title, 2);
         gfx_set_clip(clip[0], clip[1], clip[2], clip[3]);
     }
-    h = 32 + gfx_line_h(FONT_TITLE) + 10 + body_lines * (gfx_line_h(FONT_BODY) + 4) + 22 + n * row + 24;
+    h = 32 + title_lines * (gfx_line_h(FONT_TITLE) + 2) + 8 + body_lines * (gfx_line_h(FONT_BODY) + 4) + 22 + n * row + 24;
     x = (SCR_W - w) / 2;
     y = (SCR_H - h) / 2;
     hl = (float)sel;
@@ -491,9 +516,9 @@ int ui_dialog(const char *title, const char *body, const char *const *options, i
         }
         gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 14, C_SURFACE, 255);
         gfx_stroke_rrect((float)x, (float)y, (float)w, (float)h, 14, 1, C_LINE, 255);
-        gfx_str(FONT_TITLE, x + 32, y + 26, C_TEXT, title);
-        oy = y + 32 + gfx_line_h(FONT_TITLE) + 10;
-        if (body) gfx_wrap(FONT_BODY, x + 32, oy, w - 64, 4, C_SUB, body, 6);
+        gfx_wrap(FONT_TITLE, x + 32, y + 26, w - 64, 2, C_TEXT, title, 2);
+        oy = y + 32 + title_lines * (gfx_line_h(FONT_TITLE) + 2) + 8;
+        if (body) gfx_wrap(FONT_BODY, x + 32, oy, w - 64, 4, C_SUB, body, body_max);
         oy += body_lines * (gfx_line_h(FONT_BODY) + 4) + 22;
         hl = ui_ease(hl, (float)sel, 0.45f);
         /* The selected choice is a white button, like the site's Play */

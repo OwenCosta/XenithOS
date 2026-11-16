@@ -45,6 +45,7 @@ struct item {
     int own;                     /* the state of its own file; state also counts its game data */
     int needs[MAX_NEEDS], nneeds;   /* game data it comes with (indexes into items) */
     int needed;                  /* comes with another item, so it isn't listed by itself */
+    int local;                   /* XenithOS's own app, built on this PC: installing it puts it on the home screen */
     int unavailable;             /* not made for this machine's processor */
     int tab;
     char dest[96];
@@ -114,6 +115,7 @@ static int own_state(const struct item *it)
     int have;
     if (is_flathub(it)) return plat_flatpak_installed(it->ref) ? ST_INSTALLED : ST_NEW;
     if (is_steam_game(it)) return file_size(it->dest) >= 0 ? ST_INSTALLED : ST_NEW;
+    if (it->local) return file_size(it->dest) >= 0 ? ST_INSTALLED : ST_NEW;
     have = file_size(it->dest);
     if (is_update(it))
         return !strcmp(it->version, XENITH_VERSION) ? ST_INSTALLED : ST_UPDATE;
@@ -188,7 +190,7 @@ static int arch_fits(const char *arches)
 static int item_tab(const struct item *it)
 {
     if (is_steam_app(it) || is_steam_game(it)) return TAB_STEAM;
-    if (is_flathub(it)) return TAB_APPS;
+    if (is_flathub(it) || it->local) return TAB_APPS;
     return TAB_XENITH;
 }
 
@@ -232,17 +234,65 @@ static void add_store_rows(char *body)
             snprintf(it->file, sizeof it->file, "%s", f[6]);
             snprintf(it->desc, sizeof it->desc, "%s", f[7]);
             /* The Store's apps and "system" updates are Xbox programs. On a PC or Pi the apps
-             * come with XenithOS itself, so it offers game data and the "pc" update there. */
-            fits = plat_kind() == PLAT_XBOX ? strcmp(it->kind, "pc") != 0
-                                            : !strcmp(it->kind, "data") || !strcmp(it->kind, "pc");
-            if (fits && it->size > 0 && strlen(it->sha) == 64 && item_dest(it)) nitems++;
+             * are built along with XenithOS: the ones built here are listed, and installing one
+             * puts it on the home screen (with any game data it comes with). Game data and the
+             * "pc" update are downloads everywhere. */
+            if (plat_kind() == PLAT_XBOX) fits = strcmp(it->kind, "pc") != 0;
+            else if (!strcmp(it->kind, "app")) fits = it->local = plat_local_app(it->id);
+            else fits = !strcmp(it->kind, "data") || !strcmp(it->kind, "pc");
+            if (it->local) it->size = 0;            /* nothing of its own to download */
+            if (fits && (it->local || (it->size > 0 && strlen(it->sha) == 64)) && item_dest(it)) nitems++;
         }
         line = next;
     }
 }
 
+/* XenithOS's apps that only PCs have, so the Store's list (made for the Xbox) leaves them out.
+ * Listed when they're built here, with the version and picture this machine has for them. */
+static const struct { const char *id, *name, *desc; } pc_only[] = {
+    {"hostmc", "HostMC", "Host a Minecraft: Java Edition server, with playit.gg for friends who aren't on your network."},
+};
+
+static void set_icon(struct item *it, const char *data, int len);
+
+static void add_pc_only(void)
+{
+    int k, i;
+    if (plat_kind() != PLAT_PC) return;
+    for (k = 0; k < (int)(sizeof pc_only / sizeof pc_only[0]) && nitems < MAX_ITEMS; k++) {
+        struct item *it = &items[nitems];
+        char path[512], line[96];
+        FILE *f;
+        for (i = 0; i < nitems && strcmp(items[i].id, pc_only[k].id); i++)
+            ;
+        if (i < nitems || !plat_local_app(pc_only[k].id)) continue;
+        memset(it, 0, sizeof *it);
+        snprintf(it->id, sizeof it->id, "%s", pc_only[k].id);
+        snprintf(it->kind, sizeof it->kind, "app");
+        snprintf(it->name, sizeof it->name, "%s", pc_only[k].name);
+        snprintf(it->desc, sizeof it->desc, "%s", pc_only[k].desc);
+        snprintf(it->version, sizeof it->version, "1.0");
+        it->local = 1;
+        if (plat_local_app_file(it->id, "txt", path, sizeof path) && (f = fopen(path, "r"))) {
+            while (fgets(line, sizeof line, f))
+                if (!strncmp(line, "version=", 8)) {
+                    line[strcspn(line, "\r\n")] = 0;
+                    snprintf(it->version, sizeof it->version, "%s", line + 8);
+                }
+            fclose(f);
+        }
+        if (plat_local_app_file(it->id, "ximg", path, sizeof path) && (f = fopen(path, "rb"))) {
+            static char buf[256 * 1024];
+            int len = (int)fread(buf, 1, sizeof buf, f);
+            fclose(f);
+            if (len > 0 && len < (int)sizeof buf) set_icon(it, buf, len);
+        }
+        if (item_dest(it)) nitems++;
+    }
+}
+
 /* Game data that comes with an app (Freedoom with DOOM) is installed along with it, so it
- * isn't listed by itself. On a PC the apps aren't listed, and the data stays.
+ * isn't listed by itself.
  * id|data_id,data_id */
 static void add_needs(char *body)
 {
@@ -354,6 +404,7 @@ static int load_bundle(char *b, int n)
     if (ended) {
         add_store_rows(text[0]);
         if (text[1]) add_needs(text[1]);
+        add_pc_only();
         if (has_tabs && text[2]) add_flathub(text[2]);
         if (has_tabs && text[3] && !strcmp(plat_arch(), "x86_64")) {
             plat_sync_apps();                         /* which Steam games are installed */
@@ -386,6 +437,7 @@ static int load_separately(void)
     http_free(&r);
     if (cloud_get("/v1/store/needs", 8 * 1024, &r) == 200) add_needs(r.body);
     http_free(&r);
+    add_pc_only();
     if (has_tabs) {                                   /* PCs: Flathub, and Steam where it runs */
         if (cloud_get("/v1/store/flathub", 64 * 1024, &r) == 200) add_flathub(r.body);
         http_free(&r);
@@ -796,6 +848,99 @@ static void get_on_steam(struct item *it)
     }
 }
 
+/* ----------------------------------------------- XenithOS's own apps on a PC */
+
+/* They're built here already: installing downloads the game data one comes with (Freedoom with
+ * DOOM), then puts it on the home screen. */
+static void install_local(struct item *it)
+{
+    struct item *todo[MAX_NEEDS];
+    char q[96], body[240], list[120], sz[24], path[96];
+    int n = 0, i, bytes = 0;
+    if (it->state == ST_INSTALLED) { start_item(it); return; }
+    for (i = 0; i < it->nneeds; i++)
+        if (items[it->needs[i]].own != ST_INSTALLED) {
+            todo[n++] = &items[it->needs[i]];
+            bytes += items[it->needs[i]].size;
+        }
+    snprintf(q, sizeof q, "%s %s?", it->own == ST_INSTALLED ? "Update" : "Install", it->name);
+    if (it->nneeds) {
+        size_text(bytes, sz, sizeof sz);
+        needs_text(it, list, sizeof list);
+        snprintf(body, sizeof body, "%s comes with %s, so it's ready to play. %s to download.", it->name, list, sz);
+    } else {
+        snprintf(body, sizeof body, "%s It comes with XenithOS, so there's nothing to download.", it->desc);
+    }
+    if (!ui_confirm(q, body, it->own == ST_INSTALLED ? "Update" : "Install", "Cancel")) return;
+    for (i = 0; i < n; i++)
+        if (!fetch(todo[i], i + 1, n)) {
+            update_states();
+            return;
+        }
+    if (it->own != ST_INSTALLED && !plat_local_app_set(it->id, 1)) {
+        update_states();
+        sfx(SFX_ERROR);
+        snprintf(q, sizeof q, "%s didn't install", it->name);
+        ui_message(q, "It couldn't be put on the home screen. Try the XenithOS update in the Store, then try again.");
+        return;
+    }
+    /* Its name and picture for the home screen, from the Store when this machine had none. */
+    snprintf(path, sizeof path, "uda:/apps/%s.txt", it->id);
+    if (file_size(path) < 0) {
+        FILE *f = fopen(path, "w");
+        if (f) {
+            fprintf(f, "name=%s\nversion=%s\n", it->name, it->version);
+            fclose(f);
+        }
+    }
+    snprintf(path, sizeof path, "uda:/apps/%s.ximg", it->id);
+    if (file_size(path) < 0 && it->icon_raw) {
+        FILE *f = fopen(path, "wb");
+        if (f) {
+            fwrite(it->icon_raw, 1, it->icon_len, f);
+            fclose(f);
+        }
+    }
+    update_states();
+    sfx(SFX_SUCCESS);
+    snprintf(q, sizeof q, "%s is installed", it->name);
+    if (ui_confirm(q, "You'll find it on the home screen and in Apps.", "Start it", "Done")) start_item(it);
+}
+
+/* X on an installed one: off the home screen, with the game data it came with (other game files
+ * of your own stay). What you made with it stays too: saves, HostMC's worlds. */
+static void local_options(struct item *it)
+{
+    static const char *const opts[] = {"Remove", "Cancel"};
+    char title[64], body[200], list[120];
+    int i, k, m, still;
+    if (it->nneeds) {
+        needs_text(it, list, sizeof list);
+        snprintf(body, sizeof body, "%s comes off the home screen, and %s with it. Your saves stay on this machine.", it->name, list);
+    } else {
+        snprintf(body, sizeof body, "%s comes off the home screen. What you made with it stays on this machine, in case you install it again.", it->name);
+    }
+    if (ui_dialog(it->name, body, opts, 2) != 0) return;
+    if (!plat_local_app_set(it->id, 0)) {
+        sfx(SFX_ERROR);
+        ui_message("It wasn't removed", "Try again in a moment.");
+        return;
+    }
+    for (i = 0; i < it->nneeds; i++) {
+        struct item *d = &items[it->needs[i]];
+        still = 0;                               /* another installed app needs it too */
+        for (k = 0; k < nitems; k++)
+            if (&items[k] != it && items[k].own == ST_INSTALLED)
+                for (m = 0; m < items[k].nneeds; m++)
+                    if (items[k].needs[m] == it->needs[i]) still = 1;
+        if (!still) remove(d->dest);
+    }
+    update_states();
+    sfx(SFX_SUCCESS);
+    snprintf(title, sizeof title, "%s was removed", it->name);
+    ui_toast(title, NULL);
+}
+
 /* ---------------------------------------------------------------- the rest */
 
 static void install(struct item *it)
@@ -808,6 +953,10 @@ static void install(struct item *it)
         if (it->unavailable) not_here(it);
         else if (it->state == ST_INSTALLED) start_item(it);
         else install_flathub(it, 1);
+        return;
+    }
+    if (it->local) {
+        install_local(it);
         return;
     }
     if (is_steam_game(it)) {
@@ -887,6 +1036,9 @@ static void meta_text(const struct item *it, int with_version, char *out, int n)
         snprintf(out, n, "App  -  About %s", sz);
     } else if (is_steam_game(it)) {
         snprintf(out, n, "Steam game  -  %s", it->free_game ? "Free to play" : "Sold on Steam");
+    } else if (it->local && total_size(it) == 0) {
+        if (with_version) snprintf(out, n, "App  -  Version %s  -  Comes with XenithOS", it->version);
+        else snprintf(out, n, "App  -  Comes with XenithOS");
     } else {
         size_text(total_size(it), sz, sizeof sz);
         if (with_version) snprintf(out, n, "%s  -  Version %s  -  %s", kind_label(it->kind), it->version, sz);
@@ -903,6 +1055,8 @@ static void note_text(const struct item *it, char *out, int n)
         char list[120];
         needs_text(it, list, sizeof list);
         snprintf(out, n, "Comes with %s.", list);
+    } else if (it->local) {
+        snprintf(out, n, "It comes with XenithOS, so installing it puts it on the home screen.");
     } else if (is_flathub(it) && it->unavailable) {
         snprintf(out, n, "Not available for this machine's processor (%s).", plat_arch());
     } else if (is_steam_app(it)) {
@@ -974,6 +1128,9 @@ static const char *hints_for(const struct item *it)
     }
     if (is_steam_game(it))
         return it->state == ST_INSTALLED ? "A=Play;RB=Next section;Y=Refresh;B=Back" : "A=Get it on Steam;RB=Next section;Y=Refresh;B=Back";
+    if (it->local)
+        return it->state == ST_INSTALLED ? "A=Start;X=Remove;RB=Next section;B=Back"
+             : it->own == ST_INSTALLED ? "A=Update;X=Remove;RB=Next section;B=Back" : "A=Install;RB=Next section;Y=Refresh;B=Back";
     if (has_tabs)
         return it->state == ST_INSTALLED ? "A=Reinstall;RB=Next section;Y=Refresh;B=Back"
              : it->state == ST_UPDATE ? "A=Update;RB=Next section;Y=Refresh;B=Back" : "A=Install;RB=Next section;Y=Refresh;B=Back";
@@ -1015,6 +1172,10 @@ void screen_store(void)
         if (PRESSED(x) && nview && is_flathub(&items[view[sel]]) && items[view[sel]].state == ST_INSTALLED) {
             sfx(SFX_SELECT);
             flathub_options(&items[view[sel]]);
+        }
+        if (PRESSED(x) && nview && items[view[sel]].local && items[view[sel]].own == ST_INSTALLED) {
+            sfx(SFX_SELECT);
+            local_options(&items[view[sel]]);
         }
         if (sel >= nview) sel = nview ? nview - 1 : 0;
 

@@ -1831,7 +1831,9 @@ int plat_launch(const char *path)
     if (slash && !strcmp(slash + 1, "xenon.elf")) {       /* an app: back to XenithOS; XenithOS: restart */
         if (!guest && other.pid > 0) plat_close_running(NULL);   /* nothing left running behind */
         if (hook_before) hook_before();
-        if (!guest && self_path[0]) restart_self();
+        /* Only XenithOS itself (the one with the guide) starts again. An app started on its own,
+         * from a desktop's menu say, just closes, instead of starting again. */
+        if (!guest && self_path[0] && guide_fn) restart_self();
         quit_now(0);
     }
     if (guest) return 0;                                  /* apps don't start other apps */

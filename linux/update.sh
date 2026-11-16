@@ -25,11 +25,18 @@ for b in xenithos volt doom tube photos hostmc; do
     mv -f "$DEST/.$b.new" "$DEST/$b"
 done
 
-# The apps' names, versions and thumbnails, as XenithOS shows them
+# Each app's name, version and picture next to its program, for the Store to install it with.
+for app in volt doom tube photos hostmc; do
+    if [ -f "$SRC/apps/$app/app.txt" ]; then install -m 644 "$SRC/apps/$app/app.txt" "$DEST/$app.txt"; fi
+    if [ -f "$SRC/art/thumbs/$app.ximg" ]; then install -m 644 "$SRC/art/thumbs/$app.ximg" "$DEST/$app.ximg"; fi
+done
+
+# The apps on the home screen get their new names, versions and pictures. The rest stay off it:
+# they're installed from the Store, and one removed there stays removed.
 mkdir -p "$DATA/uda:/apps"
 for app in volt doom tube photos hostmc; do
-    if [ -f "$SRC/apps/$app/app.txt" ]; then cp "$SRC/apps/$app/app.txt" "$DATA/uda:/apps/$app.txt"; fi
-    if [ -f "$SRC/art/thumbs/$app.ximg" ]; then cp "$SRC/art/thumbs/$app.ximg" "$DATA/uda:/apps/$app.ximg"; fi
-    if [ ! -e "$DATA/uda:/apps/$app.elf32" ]; then ln -s "$DEST/$app" "$DATA/uda:/apps/$app.elf32"; fi
+    [ -e "$DATA/uda:/apps/$app.elf32" ] || [ -L "$DATA/uda:/apps/$app.elf32" ] || continue
+    if [ -f "$DEST/$app.txt" ]; then cp "$DEST/$app.txt" "$DATA/uda:/apps/$app.txt"; fi
+    if [ -f "$DEST/$app.ximg" ]; then cp "$DEST/$app.ximg" "$DATA/uda:/apps/$app.ximg"; fi
 done
 echo "Updated"

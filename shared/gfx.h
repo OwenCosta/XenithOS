@@ -43,9 +43,11 @@ int  gfx_str(int font, int x, int y, uint32_t c, const char *s);          /* ret
 int  gfx_str_a(int font, int x, int y, uint32_t c, int a, const char *s);
 int  gfx_str_w(int font, const char *s);
 int  gfx_str_fit(int font, int x, int y, uint32_t c, const char *s, int max_w);   /* adds "..." */
+int  gfx_str_fit_a(int font, int x, int y, uint32_t c, int a, const char *s, int max_w);
 void gfx_str_c(int font, int cx, int y, uint32_t c, const char *s);
 void gfx_str_r(int font, int right_x, int y, uint32_t c, const char *s);
 int  gfx_wrap(int font, int x, int y, int w, int gap, uint32_t c, const char *s, int max_lines);
+int  gfx_wrap_a(int font, int x, int y, int w, int gap, uint32_t c, int a, const char *s, int max_lines);
 int  gfx_line_h(int font);
 int  gfx_cap_h(int font);
 int  gfx_str_vc(int font, int x, int cy, uint32_t c, const char *s);     /* caps centred on cy */

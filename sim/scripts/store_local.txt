@@ -1,0 +1,41 @@
+# The Store on a PC with XenithOS's own apps: they're listed in Apps with HostMC, DOOM comes with
+# Freedoom as one package (installing downloads both, removing takes them away), and the
+# XenithOS section has the update alone. A long news message tests the toast's wrapping.
+#   XSIM_KIND=pc XSIM_UNINSTALLED=doom sim/run.sh sim/scripts/store_local.txt store_local 127.0.0.1:8795
+# against a local server with the Store's files (see sim/README.md).
+wait 260
+shot news_toast
+wait 30
+shot news_toast_later
+wait 250
+press right
+press a
+wait 90
+shot store_apps
+press down
+wait 20
+shot store_doom
+press a
+wait 25
+shot doom_confirm
+press a
+wait 400
+shot doom_installed
+press b
+wait 25
+shot store_doom_after
+press x
+wait 25
+shot doom_remove
+press a
+wait 40
+shot doom_removed
+press down
+press down
+press down
+wait 20
+shot store_hostmc
+press rb
+wait 25
+shot store_xenith
+quit

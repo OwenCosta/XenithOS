@@ -780,3 +780,112 @@ int linux_app_read(const char *path, struct linux_app *a, char *why, int why_len
     snprintf(a->name, sizeof a->name, "%s", name[0] ? name : "The app");
     return 1;
 }
+
+/* ------------------------------------------------- XenithOS's own apps (PCs) */
+
+/* Where XenithOS's programs are: /usr/lib/xenithos (XENITHOS_LIB for tests), as install.sh and
+ * update.sh leave them, with each app's name and picture next to it (<id>.txt, <id>.ximg). */
+static const char *local_lib(void)
+{
+    const char *l = getenv("XENITHOS_LIB");
+    return l && *l ? l : "/usr/lib/xenithos";
+}
+
+static int local_id_ok(const char *id)
+{
+    int i;
+    if (!id || !id[0] || strlen(id) > 24) return 0;
+    for (i = 0; id[i]; i++)
+        if (!islower((unsigned char)id[i]) && !isdigit((unsigned char)id[i]) && id[i] != '-' && id[i] != '_') return 0;
+    return 1;
+}
+
+int plat_local_app(const char *id)
+{
+    char path[PATH_MAX];
+    if (!local_id_ok(id)) return 0;
+    snprintf(path, sizeof path, "%s/%s", local_lib(), id);
+    return access(path, X_OK) == 0;
+}
+
+int plat_local_app_file(const char *id, const char *ext, char *out, int n)
+{
+    /* Next to the program (update.sh keeps those current), where install.sh and XenithOS
+     * Desktop's packages put them, the copy kept when it was taken off the home screen, and
+     * the home screen's own. */
+    static const char *const dirs[] = {NULL, "/usr/share/xenithos/apps", "optional-apps", "uda:/apps"};
+    int i;
+    if (!local_id_ok(id) || (strcmp(ext, "txt") && strcmp(ext, "ximg"))) return 0;
+    for (i = 0; i < (int)(sizeof dirs / sizeof dirs[0]); i++) {
+        snprintf(out, n, "%s/%s.%s", dirs[i] ? dirs[i] : local_lib(), id, ext);
+        if (access(out, R_OK) == 0) return 1;
+    }
+    return 0;
+}
+
+static int copy_small_file(const char *from, const char *to)
+{
+    char buf[8192];
+    size_t got;
+    int ok = 1;
+    FILE *in = fopen(from, "rb"), *out;
+    if (!in) return 0;
+    if (!(out = fopen(to, "wb"))) {
+        fclose(in);
+        return 0;
+    }
+    while ((got = fread(buf, 1, sizeof buf, in)) > 0)
+        if (fwrite(buf, 1, got, out) != got) {
+            ok = 0;
+            break;
+        }
+    fclose(in);
+    if (fclose(out) != 0) ok = 0;
+    if (!ok) unlink(to);
+    return ok;
+}
+
+/* XenithOS Desktop keeps the list of console apps you chose itself (Settings > Console apps).
+ * Its tool puts them on the home screen and takes them off, so the Store and Settings agree. */
+#define DESKTOP_CONSOLE_APPS "/usr/lib/xenithos-desktop/console-apps"
+
+int plat_local_app_set(const char *id, int on)
+{
+    static const char *const exts[] = {"txt", "ximg"};
+    char link[96], prog[PATH_MAX], from[PATH_MAX], to[96];
+    int i;
+    if (!plat_local_app(id)) return 0;
+    if (access(DESKTOP_CONSOLE_APPS, X_OK) == 0) {
+        char *argv[] = {DESKTOP_CONSOLE_APPS, on ? "install" : "remove", (char *)id, NULL};
+        int status;
+        pid_t pid = linux_spawn(argv, NULL, NULL, 0);
+        if (pid <= 0 || waitpid(pid, &status, 0) != pid || !WIFEXITED(status)) return 0;
+        if (WEXITSTATUS(status) == 0) return 1;
+        if (WEXITSTATUS(status) != 2) return 0;   /* 2: not one Desktop lets you choose, so it's done here */
+    }
+    snprintf(link, sizeof link, "uda:/apps/%s.elf32", id);
+    if (!on) {
+        /* Off the home screen. Its name and picture are kept, for when it comes back. */
+        unlink(link);
+        mkdir("optional-apps", 0755);
+        for (i = 0; i < 2; i++) {
+            snprintf(from, sizeof from, "uda:/apps/%s.%s", id, exts[i]);
+            snprintf(to, sizeof to, "optional-apps/%s.%s", id, exts[i]);
+            if (rename(from, to) != 0) unlink(from);
+        }
+        return access(link, F_OK) != 0;
+    }
+    for (i = 0; i < 2; i++) {
+        snprintf(to, sizeof to, "uda:/apps/%s.%s", id, exts[i]);
+        if (access(to, F_OK) != 0 && plat_local_app_file(id, exts[i], from, sizeof from)) copy_small_file(from, to);
+    }
+    snprintf(prog, sizeof prog, "%s/%s", local_lib(), id);
+    unlink(link);                                    /* one that pointed somewhere else */
+    if (symlink(prog, link) != 0) return 0;
+    /* Installed again: no longer kept aside (install.sh leaves alone what it finds there). */
+    for (i = 0; i < 2; i++) {
+        snprintf(to, sizeof to, "optional-apps/%s.%s", id, exts[i]);
+        unlink(to);
+    }
+    return 1;
+}

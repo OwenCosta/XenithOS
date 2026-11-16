@@ -106,6 +106,19 @@ int  plat_flatpak(const char *verb, const char *ref, int (*step)(int percent, in
 int  plat_steam_ready(void);
 int  plat_steam_open(const char *url);
 void plat_sync_apps(void);
+
+/* PCs and Pis: XenithOS's own apps (VOLT, DOOM, HostMC...) are built along with XenithOS, in
+ * /usr/lib/xenithos, and are on the home screen once they're installed from the Store. The
+ * Xbox gets them as downloads instead, so it has none of these: 0.
+ *   plat_local_app(id)          1 when that app's program is on this machine
+ *   plat_local_app_set(id, on)  puts it on the home screen (uda:/apps/<id>.elf32 with its name
+ *                               and picture) or takes it off; 1 when done. On XenithOS Desktop
+ *                               its own tool does it, so Settings > Console apps agrees.
+ *   plat_local_app_file(id, ext, out, n)  where this machine keeps that app's "txt" (name=,
+ *                               version=) or "ximg" (its picture), installed or not; 0 if nowhere */
+int  plat_local_app(const char *id);
+int  plat_local_app_set(const char *id, int on);
+int  plat_local_app_file(const char *id, const char *ext, char *out, int n);
 /* Why the last plat_launch() or plat_steam_open() returned 0, when the platform knows. */
 const char *plat_launch_error(void);
 /* fn(done, total) is called as plat_launch reads the program (Xbox), for a progress bar.

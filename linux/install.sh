@@ -121,6 +121,12 @@ say "Installing"
 install -d /usr/lib/xenithos /usr/share/xenithos/apps "$STATE"
 install -m 755 "$SRC/linux/xenithos" "$SRC/linux/volt" "$SRC/linux/doom" "$SRC/linux/tube" "$SRC/linux/photos" \
     "$SRC/linux/hostmc" /usr/lib/xenithos/
+# Each app's name, version and picture next to its program, for the Store to install it with
+# (update.sh keeps them current).
+for app in volt doom tube photos hostmc; do
+    if [ -f "$SRC/apps/$app/app.txt" ]; then install -m 644 "$SRC/apps/$app/app.txt" "/usr/lib/xenithos/$app.txt"; fi
+    if [ -f "$SRC/art/thumbs/$app.ximg" ]; then install -m 644 "$SRC/art/thumbs/$app.ximg" "/usr/lib/xenithos/$app.ximg"; fi
+done
 # The programs belong to the XenithOS user, so the Store's "XenithOS update" can build a new
 # version and put it in place without sudo (linux/update.sh). They only ever run as that user.
 chown -R "$USER_NAME": /usr/lib/xenithos
@@ -137,6 +143,8 @@ fi
 say "Setting up $USER_NAME"
 sudo -u "$USER_NAME" mkdir -p "$DATA/uda:/apps" "$DATA/uda:/xenith" "$HOME_DIR/.config/xenithos"
 for app in volt doom tube photos hostmc; do
+    # One removed in the Store stays off the home screen: the Store kept its name and picture.
+    if [ -f "$DATA/optional-apps/$app.txt" ]; then continue; fi
     sudo -u "$USER_NAME" ln -sfn "/usr/lib/xenithos/$app" "$DATA/uda:/apps/$app.elf32"
     for ext in ximg txt; do
         if [ -f "/usr/share/xenithos/apps/$app.$ext" ]; then

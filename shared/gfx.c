@@ -540,11 +540,11 @@ int gfx_str(int font, int x, int y, uint32_t c, const char *s)
     return gfx_str_a(font, x, y, c, 255, s);
 }
 
-int gfx_str_fit(int font, int x, int y, uint32_t c, const char *s, int max_w)
+int gfx_str_fit_a(int font, int x, int y, uint32_t c, int a, const char *s, int max_w)
 {
     char buf[256];
     int n;
-    if (gfx_str_w(font, s) <= max_w) return gfx_str(font, x, y, c, s);
+    if (gfx_str_w(font, s) <= max_w) return gfx_str_a(font, x, y, c, a, s);
     n = (int)strlen(s);
     if (n > (int)sizeof buf - 4) n = sizeof buf - 4;
     memcpy(buf, s, n);
@@ -554,7 +554,12 @@ int gfx_str_fit(int font, int x, int y, uint32_t c, const char *s, int max_w)
         strcpy(buf + n, "...");
         if (gfx_str_w(font, buf) <= max_w) break;
     }
-    return gfx_str(font, x, y, c, buf);
+    return gfx_str_a(font, x, y, c, a, buf);
+}
+
+int gfx_str_fit(int font, int x, int y, uint32_t c, const char *s, int max_w)
+{
+    return gfx_str_fit_a(font, x, y, c, 255, s, max_w);
 }
 
 void gfx_str_c(int font, int cx, int y, uint32_t c, const char *s)
@@ -575,6 +580,11 @@ int gfx_str_vc(int font, int x, int cy, uint32_t c, const char *s)
 
 int gfx_wrap(int font, int x, int y, int w, int gap, uint32_t c, const char *s, int max_lines)
 {
+    return gfx_wrap_a(font, x, y, w, gap, c, 255, s, max_lines);
+}
+
+int gfx_wrap_a(int font, int x, int y, int w, int gap, uint32_t c, int a, const char *s, int max_lines)
+{
     char line[256];
     int lines = 0, lh = gfx_line_h(font) + gap;
     while (*s && lines < max_lines) {
@@ -591,8 +601,8 @@ int gfx_wrap(int font, int x, int y, int w, int gap, uint32_t c, const char *s, 
         }
         memcpy(line, s, n);
         line[n] = 0;
-        if (lines == max_lines - 1 && s[n] && s[n] != '\n') gfx_str_fit(font, x, y, c, s, w);
-        else gfx_str(font, x, y, c, line);
+        if (lines == max_lines - 1 && s[n] && s[n] != '\n') gfx_str_fit_a(font, x, y, c, a, s, w);
+        else gfx_str_a(font, x, y, c, a, line);
         s += n;
         while (*s == ' ' || *s == '\n') s++;
         y += lh;

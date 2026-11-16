@@ -296,7 +296,7 @@
       <li><b>Desktop mode</b> is in XenithOS's power menu: the full Linux desktop, for a browser and everything else.</li>
       <li><b>Return to XenithOS</b> in the desktop's menu goes back to console mode.</li>
       <li><b>Updates</b> come from the Store: pick <b>XenithOS update</b>, and it builds the new version on your machine and restarts into it.</li>
-      <li><b>Minecraft</b> is in the Store's Apps section too (LB and RB switch sections). It installs from Flathub through XenithOS, starts from its home screen and gets the whole screen. X on the Apps screen removes an app from Flathub again.</li>
+      <li><b>The Store's Apps section</b> (LB and RB switch sections) has XenithOS's own apps, VOLT, DOOM, HostMC, Tube and Photos, and Minecraft from Flathub. DOOM comes with both Freedoom games. Installing an app puts it on the home screen, and X in the Store removes it again. Minecraft installs from Flathub through XenithOS, starts from its home screen and gets the whole screen.</li>
       <li><b>The guide</b>: press the Xbox button, or hold Esc, in a game. Return home leaves the game running (choose it again to go back), Switch game starts another, and the controller can work as a mouse for launchers or as a keyboard and mouse for Minecraft.</li>
       <li><b>HostMC</b> hosts a Minecraft: Java Edition server from your XenithOS machine. Friends on your network join with its address, and turning on playit.gg in its Internet page lets them join over the internet without opening ports.</li>
     
@@ -336,6 +336,8 @@
   <div class="wrap">
     <h2>Build log</h2>
     <ul class="log">
+      <li><b>0.6.6</b><time datetime="2026-11-16">Nov 16, 2026</time>
+        <p>On a PC, the Store's Apps section has XenithOS's own apps: VOLT, DOOM, HostMC, Tube and Photos. They come with XenithOS, so installing one puts it on the home screen straight away, and X removes it again. Updates leave alone what you removed. DOOM is one package with both Freedoom games: installing it downloads them, and removing it takes them away. Notifications and messages fit their words: a long one wraps onto another line or ends in "..." instead of running off the screen. An app started on its own, from a desktop's menu, closes when you leave it instead of starting again.</p></li>
       <li><b>0.6.5</b><time datetime="2026-11-16">Nov 16, 2026</time>
         <p>HostMC starts on Ubuntu. It stopped as it opened, because Ubuntu builds programs with a safety check that caught a buffer smaller than that check wants. XenithOS itself made the same mistake where it reads Steam's libraries, so a PC with Ubuntu and Steam could have stopped there too. Both are fixed, and every PC program is now tested built the way Ubuntu builds it.</p></li>
       <li><b>0.6.4</b><time datetime="2026-11-15">Nov 15, 2026</time>
@@ -504,7 +506,8 @@ async function refresh() {
     const KIND = { app: "App", data: "Game data", system: "System update", pc: "Update for PCs" };
     const items = $("items");
     items.replaceChildren();
-    rows(it).forEach(([id, kind, name, ver, size, sha]) => {
+    /* Game data comes with its app (Freedoom with DOOM), so it isn't listed by itself. */
+    rows(it).filter(([, kind]) => kind !== "data").forEach(([id, kind, name, ver, size, sha]) => {
       const tr = document.createElement("tr");
       const box = document.createElement("div");
       box.className = "item";

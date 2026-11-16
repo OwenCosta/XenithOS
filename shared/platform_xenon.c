@@ -417,6 +417,18 @@ int plat_flatpak(const char *verb, const char *ref, int (*step)(int percent, int
 int plat_steam_ready(void) { return 0; }
 int plat_steam_open(const char *url) { (void)url; return 0; }
 void plat_sync_apps(void) { }
+
+/* XenithOS's apps come to the Xbox as downloads from the Store: none are built here. */
+int plat_local_app(const char *id) { (void)id; return 0; }
+int plat_local_app_set(const char *id, int on) { (void)id; (void)on; return 0; }
+int plat_local_app_file(const char *id, const char *ext, char *out, int n)
+{
+    (void)id;
+    (void)ext;
+    (void)out;
+    (void)n;
+    return 0;
+}
 const char *plat_launch_error(void) { return ""; }
 
 /* The guide is for PCs: on the Xbox an app replaces XenithOS, and leaves through its own menu. */
