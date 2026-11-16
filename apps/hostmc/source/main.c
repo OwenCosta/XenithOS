@@ -46,6 +46,7 @@ void hm_frame(void)
 {
     sv_poll();
     pi_poll();
+    vps_poll();
 }
 
 /* ------------------------------------------------------------------ rows */
@@ -88,6 +89,7 @@ enum {
     V_TYPE, V_VERSION, V_UPDATE, V_CHECK, V_INSTALL,
     W_BACKUP, W_RESTORE, W_RESET,
     N_ON, N_OFF, N_FORGET,
+    N_VPS, N_VPS_CHECK, N_VPS_STEPS, N_VPS_EDIT, N_VPS_FORGET, N_VPS_OFF,
     ID_PLAYER = 100, ID_WL = 200, ID_OP = 300,
 };
 
@@ -483,12 +485,14 @@ static void build_server(void)
     if (lan_address(ip, sizeof ip)) snprintf(text, sizeof text, "%s%s", ip, port);
     else snprintf(text, sizeof text, "Not on a network");
     add(R_INFO, 0, "Your home network", text);
-    if (!hs.internet) snprintf(text, sizeof text, "Off. Turn it on in Internet");
+    if (hs.vps) vps_address(text, sizeof text);
+    else if (!hs.internet) snprintf(text, sizeof text, "Off. Turn it on in Internet");
     else if (pi.address[0]) snprintf(text, sizeof text, "%s", pi.address);
     else if (pi.state == PI_CLAIM) snprintf(text, sizeof text, "Waiting for playit.gg to be set up");
     else snprintf(text, sizeof text, "Waiting for playit.gg");
     r = add(R_INFO, 0, "The internet", text);
-    if (!hs.internet) r->color = C_DIM;
+    if (!hs.internet && !hs.vps) r->color = C_DIM;
+    else if (hs.vps && (!vps_up() || (vps.check[0] && !vps.check_ok))) r->color = C_SUB;   /* not yet working */
     if (prop_bool("white-list", 1) && !sv.nplayers)
         add(R_TEXT, 0, NULL, "The whitelist is on: add your friends' Minecraft names in Players first.")->color = C_SUB;
     snprintf(text, sizeof text, "%d of %d", sv.nplayers, props_get_int("max-players", 20));
@@ -620,15 +624,49 @@ static void build_world(void)
     add(R_TEXT, 0, NULL, b)->color = C_DIM;
 }
 
+/* The player's own VPS, when that's the way in. */
+static void build_vps(void)
+{
+    char addr[160], who[220];
+    uint32_t color;
+    const char *st = vps_status(&color);
+    vps_address(addr, sizeof addr);
+    add(R_INFO, 0, "Friends join at", addr);
+    snprintf(who, sizeof who, "%s@%s, SSH port %d", vps.cfg.user, vps.cfg.host, vps.cfg.ssh_port);
+    add(R_INFO, 0, "Your VPS", who);
+    add(R_INFO, 0, "Tunnel", st)->color = color;
+    if (vps.why[0] && !vps_up() && sv.state == SV_RUNNING) add(R_TEXT, 0, NULL, vps.why)->color = C_BAD;
+    if (vps_checking()) add(R_TEXT, 0, NULL, "Checking the way in from the internet...")->color = C_SUB;
+    else if (vps.check[0]) add(R_TEXT, 0, NULL, vps.check)->color = vps.check_ok ? C_OK : C_BAD;
+    add(R_GAP, 0, NULL, NULL);
+    if (vps_up()) add(R_BUTTON, N_VPS_CHECK, "Check from the internet", NULL);
+    add(R_BUTTON, N_VPS_STEPS, "Show the setup steps", NULL);
+    add(R_BUTTON, N_VPS_EDIT, "Change the VPS", NULL);
+    if (strstr(vps.why, "identity changed")) add(R_BUTTON, N_VPS_FORGET, "Forget the VPS's identity", NULL);
+    add(R_BUTTON, N_VPS_OFF, "Turn off the VPS route", NULL);
+    add(R_TEXT, 0, NULL, "Through the VPS every player shows up as 127.0.0.1, so bans by address don't work for them; "
+                         "bans by name do. It carries Java Edition, not Bedrock.")->color = C_DIM;
+}
+
 static void build_internet(void)
 {
     struct row *r;
+    if (hs.vps) {
+        build_vps();
+        return;
+    }
     switch (pi.state) {
     case PI_OFF:
-        add(R_TEXT, 0, NULL, "playit.gg gives the server an address on the internet, so friends who aren't on your home network can join, "
-                             "with no changes to your router. playit.gg is a free service, and you approve HostMC with a playit.gg account.");
-        add(R_TEXT, 0, NULL, "Turning it on downloads playit.gg's agent (about 9 MB) from playit's releases on GitHub. It runs only while the server does.")->color = C_SUB;
+        add(R_TEXT, 0, NULL, "Friends who aren't on your home network can join through playit.gg, or through a server of your own "
+                             "on the internet (a VPS). Your router stays as it is either way.");
+        add(R_HEAD, 0, "playit.gg", NULL);
+        add(R_TEXT, 0, NULL, "A free service: you approve HostMC with a playit.gg account, and its agent (about 9 MB, from playit's "
+                             "releases on GitHub) runs while the server does.")->color = C_SUB;
         add(R_BUTTON, N_ON, "Turn on playit.gg", NULL)->primary = 1;
+        add(R_HEAD, 0, "Your own server (VPS)", NULL);
+        add(R_TEXT, 0, NULL, "HostMC logs in to your VPS over SSH with a key of its own and keeps a tunnel to it open while the "
+                             "server runs. You add one line and one setting on the VPS. Java Edition only.")->color = C_SUB;
+        add(R_BUTTON, N_VPS, "Use your own server (VPS)", NULL);
         break;
     case PI_CLAIM:
         add(R_QR, 0, NULL, pi.claim_url);
@@ -919,10 +957,141 @@ static void act_world(int id)
     lists_at = 0;
 }
 
+/* What to do on the VPS, once: HostMC's key in authorized_keys, the sshd setting, the firewall. */
+static void vps_steps(void)
+{
+    static const char *const opts[2] = {"Test the login", "Done"};
+    char pub[240], cmd[420], sub[200], result[260] = "", why[220];
+    uint32_t result_color = C_SUB;
+    int sel = 0;
+    tunnel_pubkey(&vps.t, pub, sizeof pub);
+    snprintf(cmd, sizeof cmd, "mkdir -p ~/.ssh && echo '%s' >> ~/.ssh/authorized_keys", pub);
+    snprintf(sub, sizeof sub, "For %s@%s, once", vps.cfg.user, vps.cfg.host);
+    ui_fade_in();
+    for (;;) {
+        int top = HEADER_H + 4, ph = SCR_H - top - 70, qs = 236, x = M + 28, w = SCR_W - 2 * M - 56 - qs - 28, y, i, d;
+        int lh = gfx_line_h(FONT_SMALL) + 3;
+        char text[400];
+        ui_poll();
+        hm_frame();
+        d = ui_nav_x();
+        if (d && sel + d >= 0 && sel + d < 2) { sel += d; sfx(SFX_MOVE); }
+        if (PRESSED(b)) { sfx(SFX_BACK); ui_settle_input(); return; }
+        if (PRESSED(a)) {
+            sfx(SFX_SELECT);
+            if (sel == 1) { ui_settle_input(); return; }
+            why[0] = 0;
+            if (tunnel_test(&vps.t, &vps.cfg, why, sizeof why)) {
+                snprintf(result, sizeof result, "HostMC logged in to the VPS. With steps 2 and 3 done too, start the server.");
+                result_color = C_OK;
+                sfx(SFX_SUCCESS);
+            } else if (strcmp(why, "Cancelled.")) {
+                snprintf(result, sizeof result, "%s", why);
+                result_color = C_BAD;
+                sfx(SFX_ERROR);
+            }
+            ui_settle_input();
+        }
+        ui_bg();
+        ui_header("Set up your VPS", sub);
+        ui_panel(M, top, SCR_W - 2 * M, ph);
+        y = top + 20;
+        gfx_str(FONT_BODY_SB, x, y, C_TEXT, "1   Let HostMC log in");
+        y += gfx_line_h(FONT_BODY_SB) + 4;
+        snprintf(text, sizeof text, "Add this line to ~/.ssh/authorized_keys for %s on the VPS. The code holds a command that adds it, "
+                                    "to paste into the VPS from your phone.", vps.cfg.user);
+        y += wrap(FONT_SMALL, x + 28, y, w - 28, 3, C_SUB, text, 3, 1) * lh + 4;
+        y += wrap(FONT_SMALL, x + 28, y, w - 28, 3, C_TEXT, pub, 3, 1) * lh + 14;
+        gfx_str(FONT_BODY_SB, x, y, C_TEXT, "2   Let it take players");
+        y += gfx_line_h(FONT_BODY_SB) + 4;
+        y += wrap(FONT_SMALL, x + 28, y, w - 28, 3, C_SUB, "In /etc/ssh/sshd_config, add the line GatewayPorts clientspecified, "
+                                                            "then run sudo systemctl restart ssh.", 3, 1) * lh + 14;
+        gfx_str(FONT_BODY_SB, x, y, C_TEXT, "3   Open the port");
+        y += gfx_line_h(FONT_BODY_SB) + 4;
+        snprintf(text, sizeof text, "Let port %d in through the VPS's firewall (sudo ufw allow %d/tcp), and through your "
+                                    "provider's firewall if it has one.", vps.cfg.public_port, vps.cfg.public_port);
+        y += wrap(FONT_SMALL, x + 28, y, w - 28, 3, C_SUB, text, 3, 1) * lh + 10;
+        if (result[0]) wrap(FONT_SMALL, x, y, w, 3, result_color, result, 2, 1);
+        qr_draw(cmd, SCR_W - M - 28 - qs, top + 20, qs);
+        gfx_str_c(FONT_SMALL, SCR_W - M - 28 - qs / 2, top + 28 + qs, C_DIM, "Step 1 as a command");
+        for (i = 0; i < 2; i++) {
+            int bw = 260, bx = x + i * (bw + 16), by = top + ph - 66;
+            gfx_fill_rrect((float)bx, (float)by, (float)bw, 46, 10, i == sel ? C_TEXT : C_SURFACE2, 255);
+            gfx_str_vc(FONT_BODY_SB, bx + 20, by + 23, i == sel ? C_INK : C_TEXT, opts[i]);
+        }
+        ui_hints("A=Select;Left=Previous;Right=Next;B=Back");
+        ui_end_frame();
+    }
+}
+
+static int ask_port(const char *title, const char *hint, int *port)
+{
+    char v[16];
+    snprintf(v, sizeof v, "%d", *port);
+    for (;;) {
+        if (!ask_text(title, hint, v, 5) || !v[0]) return 0;
+        if (strspn(v, "0123456789") == strlen(v) && atoi(v) >= 1 && atoi(v) <= 65535) {
+            *port = atoi(v);
+            return 1;
+        }
+        message("That isn't a port", "Ports are numbers from 1 to 65535.");
+    }
+}
+
+/* The own-VPS route: its address, user and ports, typed in (with the usual ones ready), HostMC's
+ * key made, then the steps on the VPS. */
+static void vps_setup(void)
+{
+    struct tunnel_cfg c = vps.cfg;
+    char why[220] = "";
+    int other_vps, changed;
+    if (!ask_text("Your VPS's address", "Its IP address or its name, like 203.0.113.5", c.host, 120) || !c.host[0]) return;
+    if (!ask_text("User name on the VPS", "The account HostMC logs in as, often root", c.user, 32) || !c.user[0]) return;
+    if (!ask_port("SSH port on the VPS", "Usually 22", &c.ssh_port)) return;
+    if (!ask_port("Port for players", "What friends connect to on the VPS. 25565 is Minecraft's own", &c.public_port)) return;
+    c.local_port = server_port();
+    if (!tunnel_cfg_ok(&c, why, sizeof why)) {
+        message("That won't work", why);
+        return;
+    }
+    other_vps = strcmp(c.host, vps.cfg.host) || c.ssh_port != vps.cfg.ssh_port;
+    changed = other_vps || strcmp(c.user, vps.cfg.user) || c.public_port != vps.cfg.public_port;
+    if (other_vps) tunnel_forget_host(&vps.t);                 /* another machine: its own identity */
+    if (changed) tunnel_stop(&vps.t);                          /* it starts again with these */
+    vps.cfg = c;
+    vps_save();
+    if (!vps_turn_on(why, sizeof why)) {
+        message("Your VPS can't be used yet", why);
+        return;
+    }
+    vps_steps();
+}
+
 static void act_internet(int id)
 {
     char why[220] = "";
     switch (id) {
+    case N_VPS:
+    case N_VPS_EDIT:
+        vps_setup();
+        if (hs.vps) sel_id = N_VPS_STEPS;
+        break;
+    case N_VPS_STEPS:
+        vps_steps();
+        break;
+    case N_VPS_CHECK:
+        if (vps_up()) vps_check();
+        break;
+    case N_VPS_FORGET:
+        if (!ui_confirm("Forget the VPS's identity?", "Only if you reinstalled or replaced the VPS: HostMC then trusts the one it "
+                                                      "finds next time.", "Forget it", "Cancel")) break;
+        tunnel_forget_host(&vps.t);
+        vps.why[0] = 0;
+        break;
+    case N_VPS_OFF:
+        vps_turn_off();
+        sel_id = N_ON;
+        break;
     case N_ON:
         if (pi_turn_on(why, sizeof why)) {
             sfx(SFX_SELECT);
@@ -997,7 +1166,10 @@ static void act(int id, int dir)
         break;
     }
     case W_BACKUP: case W_RESTORE: case W_RESET: act_world(id); break;
-    case N_ON: case N_OFF: case N_FORGET: act_internet(id); break;
+    case N_ON: case N_OFF: case N_FORGET:
+    case N_VPS: case N_VPS_CHECK: case N_VPS_STEPS: case N_VPS_EDIT: case N_VPS_FORGET: case N_VPS_OFF:
+        act_internet(id);
+        break;
     }
 }
 
@@ -1266,6 +1438,10 @@ static void draw_menu(int x, int y, int w)
             gfx_circle(x + w - 22.0f, (float)cy, 5, c, 255);
         } else if (i == P_INTERNET && hs.internet) {
             gfx_circle(x + w - 22.0f, (float)cy, 5, pi.state == PI_ON ? C_OK : pi.state == PI_PROBLEM ? C_BAD : C_WARN, 255);
+        } else if (i == P_INTERNET && hs.vps) {
+            uint32_t c = vps_up() && (vps.check_ok || !vps.check[0]) ? C_OK : sv.state != SV_RUNNING ? C_DIM
+                       : vps.why[0] || vps.check[0] ? C_BAD : C_WARN;
+            gfx_circle(x + w - 22.0f, (float)cy, 5, c, 255);
         } else if (i == P_PLAYERS && sv.nplayers) {
             char n[8];
             snprintf(n, sizeof n, "%d", sv.nplayers);
@@ -1355,6 +1531,7 @@ int main(int argc, char **argv)
     hi_load();
     sv_attach();
     pi_init();
+    vps_init();
     ui_fade_in();
 
     for (;;) {

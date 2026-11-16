@@ -1,0 +1,27 @@
+# HostMC's own-VPS route, third run, from sim/hostmc/test-vps.sh: the VPS's sshd without
+# GatewayPorts. The tunnel comes up, but sshd listens on its own loopback only, so the check from
+# outside fails and says what to change.
+wait 60
+press a
+press a
+wait 600
+shot nogateway_server
+press b
+press down
+press down
+press down
+press down
+press down
+press down
+wait 30
+shot nogateway_vps
+press up
+press up
+press up
+press up
+press up
+press up
+press a
+press a
+wait 240
+quit

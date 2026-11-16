@@ -483,6 +483,7 @@ void pi_init(void)
 
 int pi_turn_on(char *why, int n)
 {
+    if (hs.vps) vps_turn_off();                     /* one way in at a time */
     mkdirs(HM_PLAYIT);
     chmod(HM_PLAYIT, 0700);                       /* the secret lives here */
     if (!get_agent(why, n)) return 0;

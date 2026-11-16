@@ -154,9 +154,27 @@ and Internet (playit.gg).
   to approve it with your playit.gg account. The agent's key stays in `playit/playit.toml`, readable by you
   only, and the agent runs while the server does. HostMC asks playit.gg for a Minecraft tunnel to the
   server, and shows its address.
+- Or, in place of playit.gg, a VPS of your own: HostMC asks for its address, the user it logs in as, its SSH
+  port and the port for players, then keeps an SSH reverse tunnel to it while the server runs
+  (`ssh -N -R 0.0.0.0:<port for players>:127.0.0.1:<server port>`), so friends join at the VPS's address.
+  - HostMC logs in with a key of its own (ed25519, in `vps/`, readable by you only), never a password, and
+    shows the one line to add to `~/.ssh/authorized_keys` on the VPS, with a QR code of a command that adds
+    it. The VPS's host key is trusted the first time and checked after that, in a `known_hosts` of its own.
+  - The VPS needs `GatewayPorts clientspecified` in `/etc/ssh/sshd_config` (without it sshd listens on its
+    own loopback only) and the port open in its firewall. Each time the tunnel comes up, HostMC pings the
+    server through the VPS's public address, the way a friend's game would, and says plainly which of
+    those is missing (and keeps what it found in `vps/check.txt`).
+  - A small `sh` loop keeps ssh going and starts it again when it drops, waiting a little longer each time
+    (up to a minute), whether HostMC is open or not; the next HostMC finds it by `vps/tunnel.pid`. Its
+    tries are in `vps/tunnel.log`.
+  - TCP only, which Java Edition is. Every player arrives from 127.0.0.1, so bans by address don't work
+    for them; bans by name do. It needs `ssh` (openssh-client), which the installer puts in.
+  - `sim/hostmc/test-vps.sh` tries all of it with a private sshd standing in for the VPS (run as you, on
+    spare ports): the key, the login test, a ping through the VPS, ssh killed and coming back by itself, a
+    new HostMC picking the tunnel up, and the message when GatewayPorts is off.
 - In `~/.local/share/xenithos/hostmc/`: `server/` (the server, its world, `server.properties` and
-  `console.log`), `java/`, `backups/` (the newest 20, as `.tar.gz`), `playit/` and `cache/` (version lists).
-  `HOSTMC_JAVA` points it at another `java` (the simulator uses a stand-in).
+  `console.log`), `java/`, `backups/` (the newest 20, as `.tar.gz`), `playit/`, `vps/` and `cache/`
+  (version lists). `HOSTMC_JAVA` points it at another `java` (the simulator uses a stand-in).
 
 ## Updates
 

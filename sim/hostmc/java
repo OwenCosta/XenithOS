@@ -8,11 +8,15 @@ HostMC sends through its standard input (list, say, save-all, op, whitelist, sto
 It keeps ops.json and whitelist.json like the server does, makes a small world folder, refuses
 to start without eula=true in eula.txt, and saves and stops on "stop" or SIGTERM.
 
+It answers a server list ping on its port (127.0.0.1 only), as Minecraft does, so a route to the
+server (HostMC's own-VPS tunnel) can be checked; anyone trying to join is turned away politely.
+
 HOSTMC_FAKE_PLAYERS="Steve,Alex" changes who joins ("" for nobody).
 """
 import json
 import os
 import signal
+import socket
 import sys
 import threading
 import time
@@ -124,6 +128,94 @@ def command(cmd):
         log("INFO", cmd + "<--[HERE]")
 
 
+def varint(n):
+    n &= 0xFFFFFFFF
+    out = bytearray()
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        out.append(b | 0x80 if n else b)
+        if not n:
+            return bytes(out)
+
+
+def read_varint(conn):
+    n = shift = 0
+    while True:
+        b = conn.recv(1)
+        if not b:
+            raise EOFError
+        n |= (b[0] & 0x7F) << shift
+        shift += 7
+        if not b[0] & 0x80:
+            return n
+
+
+def read_packet(conn):
+    length = read_varint(conn)
+    data = b""
+    while len(data) < length:
+        chunk = conn.recv(length - len(data))
+        if not chunk:
+            raise EOFError
+        data += chunk
+    return data
+
+
+def packet(pid, data):
+    body = varint(pid) + data
+    return varint(len(body)) + body
+
+
+def mc_string(s):
+    b = s.encode("utf-8")
+    return varint(len(b)) + b
+
+
+def answer(conn):
+    """One connection: a server list ping answered, or someone trying to join turned away."""
+    try:
+        conn.settimeout(5)
+        handshake = read_packet(conn)          # id, protocol, address, port, next state
+        if handshake[-1] == 1:
+            read_packet(conn)                  # the status request
+            p = props()
+            status = {"version": {"name": "26.3", "protocol": 777},
+                      "players": {"max": int(p.get("max-players") or 20), "online": len(online)},
+                      "description": {"text": p.get("motd") or "A Minecraft Server"}}
+            conn.sendall(packet(0, mc_string(json.dumps(status))))
+            ping = read_packet(conn)           # the ping, sent back as the pong
+            conn.sendall(varint(len(ping)) + ping)
+        else:
+            reason = {"text": "This is HostMC's stand-in server: there's no world to join."}
+            conn.sendall(packet(0, mc_string(json.dumps(reason))))
+    except (OSError, EOFError, IndexError, ValueError):
+        pass
+    finally:
+        conn.close()
+
+
+def listen(port):
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        srv.bind(("127.0.0.1", port))
+    except OSError:
+        log("WARN", "The stand-in can't listen on port %d, so it won't answer pings" % port)
+        return
+    srv.listen(8)
+    srv.settimeout(0.5)
+    while not stopping.is_set():
+        try:
+            conn, _ = srv.accept()
+        except socket.timeout:
+            continue
+        except OSError:
+            break
+        threading.Thread(target=answer, args=(conn,), daemon=True).start()
+    srv.close()
+
+
 def console():
     for line in sys.stdin:
         line = line.strip()
@@ -151,6 +243,7 @@ def main():
     log("INFO", "Default game type: " + p.get("gamemode", "survival").upper())
     log("INFO", "Generating keypair")
     log("INFO", "Starting Minecraft server on *:" + port)
+    threading.Thread(target=listen, args=(int(port) if port.isdigit() else 25565,), daemon=True).start()
     log("INFO", "Using epoll channel type", "Server thread")
     level = p.get("level-name", "world") or "world"
     os.makedirs(os.path.join(level, "region"), exist_ok=True)

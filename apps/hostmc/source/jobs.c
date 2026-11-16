@@ -22,7 +22,7 @@
 #define JOB_LOG HM_DIR "/jobs.log"
 
 /* A program's full path from PATH, found before fork(). */
-static const char *which(const char *name, char *out, int n)
+const char *find_program(const char *name, char *out, int n)
 {
     const char *path = getenv("PATH");
     char dirs[1024], *d, *save = NULL;
@@ -43,7 +43,7 @@ int job_spawn(struct job *j, const char *const argv[], const char *out, const ch
     struct sigaction dfl;
     pid_t pid;
     memset(j, 0, sizeof *j);
-    if (!which(argv[0], prog, sizeof prog)) return 0;
+    if (!find_program(argv[0], prog, sizeof prog)) return 0;
     in_fd = open("/dev/null", O_RDONLY);
     out_fd = out ? open(out, O_WRONLY | O_CREAT | O_TRUNC, 0600) : open("/dev/null", O_WRONLY);
     err_fd = open(err ? err : JOB_LOG, O_WRONLY | O_CREAT | O_APPEND, 0600);
@@ -137,8 +137,16 @@ static void busy_frame(const char *title, const char *detail, long long done, lo
 int job_run(const char *const argv[], const char *out, const char *title, const char *detail,
             const char *watch, long long total, int can_cancel)
 {
+    return job_run_err(argv, out, NULL, title, detail, watch, total, can_cancel);
+}
+
+/* job_run with what the program says on stderr kept in err (made empty first). */
+int job_run_err(const char *const argv[], const char *out, const char *err, const char *title, const char *detail,
+                const char *watch, long long total, int can_cancel)
+{
     struct job j;
-    if (!job_spawn(&j, argv, out, NULL)) return -1;
+    if (err) unlink(err);
+    if (!job_spawn(&j, argv, out, err)) return -1;
     for (;;) {
         if (job_done(&j)) return j.status;
         ui_poll();
