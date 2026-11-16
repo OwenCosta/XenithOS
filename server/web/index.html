@@ -353,8 +353,8 @@ function logo(svg, big) {
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
   const ht = svg.getAttribute("height");
   if (ht) svg.setAttribute("width", Math.round(w / h * ht));
-  if (big) add("image", { href: "static/insignia.svg", x: 0, y: 0, width: 136, height: 136 });
-  else add("image", { href: "static/mark.svg", x: 0, y: 5, width: 30, height: 20 });
+  if (big) add("image", { href: "static/insignia.svg?v=2", x: 0, y: 0, width: 136, height: 136 });
+  else add("image", { href: "static/mark.svg?v=2", x: 0, y: 5, width: 30, height: 20 });
   const font = "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
   add("text", { x: big ? 154 : 38, y: big ? cy + 16.5 : cy + 7.5, fill: "#f1f3f6", "font-family": font, "font-weight": 700,
                 "font-size": big ? 46 : 20, "letter-spacing": "-0.02em" }, "XenithOS");
