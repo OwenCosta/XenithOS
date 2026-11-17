@@ -25,8 +25,10 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
 - Cloud: who's playing, XenithOS news, and the VOLT leaderboard with avatars
 - Profile: a gamertag and passcode, saved to XenithOS Cloud so it follows you to any machine
 - Avatar editor: thirteen parts in three tabs (face, hair, outfit), colour swatches, random looks
-- Settings: volume, interface sounds, start-up chime, network, system info (with start-up times and sound
-  stats), controller test, about
+- Settings: volume, interface sounds, start-up chime, theme, network, system info (with start-up times and
+  sound stats), controller test, about
+- Themes: six colour themes for XenithOS and its apps (XenithOS's red, Ocean, Forest, Ember, Violet, Teal) and
+  six wallpapers for the home screen, all flat and dark and drawn in code, picked in Settings > Theme
 
 **Apps** (`apps/`)
 - VOLT: a light-trail game. Scores go to your profile on the leaderboard.
@@ -184,7 +186,9 @@ sim/run.sh sim/scripts/tour.txt tour          # offline screens -> sim/out/tour/
 ## Layout
 
 ```
-source/                  the system: main.c (boot, home), screen_*.c, avatar_editor.c, apps.c, cloud_api.c
+source/                  the system: main.c (boot, home), screen_*.c, avatar_editor.c, apps.c, cloud_api.c,
+                         wallpaper.c (the home screen's wallpapers)
+shared/theme.c           the colour themes; theme.h has the colours every screen draws with
 shared/platform.h        everything XenithOS needs from the machine
 shared/platform_xenon.c  ...on a real Xbox 360
 linux/                   ...on PCs and Raspberry Pis (SDL2), plus the installer and session scripts

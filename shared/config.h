@@ -4,7 +4,7 @@
 /* Files XenithOS keeps on the USB stick, all plain key=value text:
  *
  *   xenith/config.txt    written by you or build.sh: server address, console key
- *   xenith/settings.txt  written by XenithOS: volume, sounds, inbox position
+ *   xenith/settings.txt  written by XenithOS: volume, sounds, inbox position, theme
  *   xenith/profile.txt   written by XenithOS: the signed-in account
  *   xenith/route.txt     written by XenithOS: XenithOS Cloud's address on this network, when
  *                        the console is on the network it runs on (cloud_route_check)
@@ -26,6 +26,8 @@ struct xenith_settings {
     int auto_connect;         /* connect to the network after boot */
     int last_inbox;           /* newest inbox message already shown */
     char last_app[96];        /* most recently launched app */
+    char theme[16];           /* the colour theme's id (theme.h); "" is the first one */
+    char wallpaper[16];       /* the home screen's wallpaper (source/wallpaper.c); "" is none */
 };
 
 struct xenith_profile {

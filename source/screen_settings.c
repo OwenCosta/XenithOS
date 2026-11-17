@@ -13,11 +13,12 @@
 #include "startlog.h"
 #include "theme.h"
 #include "ui.h"
+#include "wallpaper.h"
 
-enum { S_VOLUME, S_UI_SOUNDS, S_BOOT, S_CONNECT, S_NETWORK, S_SYSTEM, S_CONTROLLER, S_ABOUT, S_SIGN_OUT, S_COUNT };
+enum { S_VOLUME, S_UI_SOUNDS, S_BOOT, S_CONNECT, S_THEME, S_NETWORK, S_SYSTEM, S_CONTROLLER, S_ABOUT, S_SIGN_OUT, S_COUNT };
 
 static const char *const label[S_COUNT] = {
-    "Volume", "Interface sounds", "Start-up chime", "Connect at start-up",
+    "Volume", "Interface sounds", "Start-up chime", "Connect at start-up", "Theme",
     "Network", "System info", "Controller test", "About XenithOS", "Sign out",
 };
 
@@ -29,6 +30,12 @@ static void value_of(int i, char *out, int n)
     case S_UI_SOUNDS: snprintf(out, n, st.ui_sounds ? "On" : "Off"); break;
     case S_BOOT: snprintf(out, n, st.boot_sound ? "On" : "Off"); break;
     case S_CONNECT: snprintf(out, n, st.auto_connect ? "On" : "Off"); break;
+    case S_THEME: {
+        int w = wallpaper_find(st.wallpaper);
+        if (w == WALL_PLAIN) snprintf(out, n, "%s", theme_name(theme_current()));
+        else snprintf(out, n, "%s, %s", theme_name(theme_current()), wallpaper_name(w));
+        break;
+    }
     case S_NETWORK: snprintf(out, n, net_is_up() ? net_ip() : "Not connected"); break;
     }
 }
@@ -276,7 +283,8 @@ void screen_settings(void)
                         cloud_sync(0);
                         ui_toast("Connected", net_ip());
                     }
-                } else if (sel == S_SYSTEM) system_info();
+                } else if (sel == S_THEME) screen_theme();
+                else if (sel == S_SYSTEM) system_info();
                 else if (sel == S_CONTROLLER) controller_test();
                 else if (sel == S_ABOUT) about();
                 else if (sel == S_SIGN_OUT) {

@@ -14,7 +14,8 @@ the USB stick (copied from `usb/`, so run `build.sh` first). Pass a server like 
 online screens against a local `server/xenith_cloud.py`.
 
 Environment: `XSIM_KEY` (console key for the inbox), `XSIM_PROFILE` (a profile.txt to boot signed in),
-`XSIM_BIN` (`xsim` or `xvolt`).
+`XSIM_BIN` (`xsim` or `xvolt`), `XSIM_SETTINGS` (settings.txt to start with, its lines separated by spaces:
+`XSIM_SETTINGS="theme=ocean wallpaper=peaks"`).
 
 Checks for things that only exist on the console:
 

@@ -23,6 +23,7 @@
 #include "startlog.h"
 #include "theme.h"
 #include "ui.h"
+#include "wallpaper.h"
 
 /* ------------------------------------------------------------------ boot */
 
@@ -140,7 +141,7 @@ static void draw_home(void)
     int cw = 232, ch = cw * 9 / 16, cy, cgap = 18;
     char sub[48];
 
-    ui_bg();
+    wallpaper_bg(wallpaper_find(st.wallpaper));
 
     /* Top: who's here */
     avatar_draw(prof.avatar, M, 34, asz);

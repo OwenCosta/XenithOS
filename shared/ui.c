@@ -26,11 +26,25 @@ static int fading;
 
 /* --------------------------------------------------------------- input */
 
+/* The look (theme.h) goes along to the next program, so the frames it draws before it has read
+ * the settings are in the same colours, and on the Xbox the switch still doesn't show. */
+static void look_give(void)
+{
+    handoff_set("look", theme_id(theme_current()));
+}
+
+static void look_take(void)
+{
+    const char *l = handoff_get("look");
+    if (l) theme_apply(theme_find(l));
+}
+
 void ui_init(void)
 {
     M = SCR_W * 6 / 100;
     HEADER_H = 112;
     ui_desktop = plat_desktop();
+    look_take();
 }
 
 int ui_mouse_in(int x, int y, int w, int h)
@@ -263,14 +277,14 @@ void ui_logo(float cx, float cy, float size, float build, float spin, int alpha)
         len = (k->a1 - k->a0) * (0.31f + 0.69f * p);
         end = k->a1 - (1 - p) * 6.6f;
         gfx_arc(cx, cy, R * (k->r + 2.3f * (1 - e)), R * (k->w + 0.046f * (1 - e)), end - len, end,
-                k->red ? C_ACCENT : C_TEXT, (int)(alpha * (p < 0.15f ? p / 0.15f : 1)));
+                k->red ? C_BRAND : C_TEXT, (int)(alpha * (p < 0.15f ? p / 0.15f : 1)));
     }
     if (build > 0) {
         /* the double ring: each piece sweeps round from its end nearest 3, 6, 9 or 12 o'clock */
         for (i = 0; i < (int)(sizeof logo_arcs / sizeof logo_arcs[0]); i++) {
             const struct logo_arc *k = &logo_arcs[i];
             float len = (k->a1 - k->a0) * build;
-            uint32_t c = k->red ? C_ACCENT : LOGO_GREY;
+            uint32_t c = k->red ? C_BRAND : LOGO_GREY;
             if (off_tick(k->a0) <= off_tick(k->a1)) gfx_sector(cx, cy, k->r * R, k->w * R, k->a0, k->a0 + len, c, alpha);
             else gfx_sector(cx, cy, k->r * R, k->w * R, k->a1 - len, k->a1, c, alpha);
         }
@@ -279,7 +293,7 @@ void ui_logo(float cx, float cy, float size, float build, float spin, int alpha)
             const struct logo_poly *p = &logo_x[i];
             float d = sqrtf(p->ox * p->ox + p->oy * p->oy), o = (1 - build) * 0.7f / d;
             gfx_poly(p->xy, p->n, cx + p->ox * (1 + o) * R, cy + p->oy * (1 + o) * R, R,
-                     p->red ? C_ACCENT : LOGO_GREY, (int)(alpha * build));
+                     p->red ? C_BRAND : LOGO_GREY, (int)(alpha * build));
         }
     }
 }
@@ -291,7 +305,7 @@ void ui_mark(float cx, float cy, float size, int alpha)
     int i;
     for (i = 0; i < 3; i++)
         gfx_poly(logo_x[i].xy, logo_x[i].n, ox + logo_x[i].ox * R, oy + logo_x[i].oy * R, R,
-                 logo_x[i].red ? C_ACCENT : LOGO_GREY_SMALL, alpha);
+                 logo_x[i].red ? C_BRAND : LOGO_GREY_SMALL, alpha);
 }
 
 /* The wordmark: the X, then the name in bold. Returns its width; measure_only draws nothing. */
@@ -430,6 +444,7 @@ int ui_launch(const char *path, const char *title, const char *detail)
     launch_detail = detail;
     launch_drawn = 0;
     ui_loading_progress(title, detail, 0, 0);
+    look_give();
     plat_set_launch_progress(launch_frame);
     started = plat_launch(path);
     plat_set_launch_progress(NULL);

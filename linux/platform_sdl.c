@@ -48,6 +48,7 @@
 #include <unistd.h>
 #include <zlib.h>
 
+#include "handoff.h"
 #include "platform.h"
 #include "platform_linux.h"
 #include "theme.h"
@@ -1154,7 +1155,7 @@ static int inside_guide(struct guest_shm *g, const char *path, uint32_t shown)
  * 1 once the app has run (its exit status in *status). */
 static int run_inside(const char *path, int *status)
 {
-    char fdvar[48], *argv[2], **env;
+    char fdvar[48], *argv[HANDOFF_MAX + 3], **env;
     struct guest_shm *g;
     struct pad acc;
     uint32_t shown = 0, rumble_seen = 0, flush_seen = 0, read_seen = 0;
@@ -1170,8 +1171,7 @@ static int run_inside(const char *path, int *status)
     g->version = GUEST_VERSION;
     g->size = sizeof *g;
     env = guest_env(fd, fdvar, sizeof fdvar);
-    argv[0] = (char *)path;
-    argv[1] = NULL;
+    argv[handoff_argv(path, argv, HANDOFF_MAX + 2)] = NULL;     /* what the app's first frames need (the look) */
     pid = env ? fork() : -1;
     if (pid == 0) {
         execve(path, argv, env);

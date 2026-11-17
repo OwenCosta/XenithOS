@@ -7,6 +7,7 @@
 #include "avatar.h"
 #include "config.h"
 #include "net.h"
+#include "theme.h"
 
 struct xenith_config cfg = {.name = "PLAYER"};
 struct xenith_settings st = {80, 1, 1, 1, 0, ""};
@@ -126,11 +127,15 @@ static void on_settings(const char *k, const char *v)
     else if (!strcmp(k, "auto_connect")) st.auto_connect = atoi(v) != 0;
     else if (!strcmp(k, "last_inbox")) st.last_inbox = atoi(v);
     else if (!strcmp(k, "last_app")) snprintf(st.last_app, sizeof st.last_app, "%s", v);
+    else if (!strcmp(k, "theme")) copy_alnum(st.theme, sizeof st.theme, v, 0);
+    else if (!strcmp(k, "wallpaper")) copy_alnum(st.wallpaper, sizeof st.wallpaper, v, 0);
 }
 
 void settings_load(void)
 {
     read_kv(XENITH_SETTINGS_PATH, on_settings);
+    /* Every program loads the settings, so every program takes the look from here. */
+    theme_apply(theme_find(st.theme));
 }
 
 static FILE *open_write(const char *path)
@@ -145,6 +150,7 @@ void settings_save(void)
     if (!f) return;
     fprintf(f, "# Written by XenithOS\nvolume=%d\nui_sounds=%d\nboot_sound=%d\nauto_connect=%d\nlast_inbox=%d\nlast_app=%s\n",
             st.volume, st.ui_sounds, st.boot_sound, st.auto_connect, st.last_inbox, st.last_app);
+    fprintf(f, "theme=%s\nwallpaper=%s\n", st.theme, st.wallpaper);
     fclose(f);
 }
 
