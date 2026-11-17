@@ -54,9 +54,12 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
 - Photos: your pictures (JPEG, PNG, BMP, GIF) from a `photos` folder on the USB stick, or `~/Pictures` on a
   PC, as a grid of thumbnails. Full screen with zoom, turning and slideshows.
 - HostMC (PCs and Pis): a Minecraft: Java Edition server for you and your friends, Minecraft's own or Paper.
-  Start and stop it, see who's on, type commands, change its settings, back the world up, and with
-  [playit.gg](https://playit.gg) turned on, let friends join from anywhere. It keeps running after you leave
-  HostMC, so you can play on it. Your friends on XenithOS see its address in Friends while it's reachable.
+  Start and stop it, see who's on, type commands, change its settings, back the world up, and let friends
+  join from anywhere through [playit.gg](https://playit.gg), a VPS of your own, or, for supporters on
+  Patreon, the supporter relay, with a name of its own (and, with Paper, players' real addresses). With
+  Paper, Bedrock Edition players can join too, through Geyser and Floodgate. It keeps running after you
+  leave HostMC, so you can play on it. Your friends on XenithOS see its address in Friends while it's
+  reachable. On XenithOS Desktop it's a desktop app, with the mouse and keyboard.
   See [linux/README.md](linux/README.md#hostmc-a-minecraft-server).
 
 | DOOM control | |
@@ -138,7 +141,7 @@ updates all of it (ffmpeg, Deno, the yt-dlp standalone build, the plugin and the
 download against its published checksum.
 
 ```bash
-python3 server/xenith_cloud.py --selftest      # 238 checks, no network needed
+python3 server/xenith_cloud.py --selftest      # 302 checks, no network needed
 ```
 
 Profiles: passcodes are stored as salted PBKDF2 hashes and sign-in tokens as SHA-256 hashes, so the state
@@ -207,6 +210,13 @@ bash /opt/xenith-cloud/setup-tube.sh
 
 From the server: `xenith send "XenithOS 0.5 is out"` (news), `xenith motd "Welcome"` (banner), `xenith status`,
 `xenith tube-update` (newest yt-dlp, Deno and token helper, when YouTube changes something).
+
+HostMC's supporter relay (off unless `XENITH_RELAY_DOMAIN` is set) gives supporters on Patreon a name for their
+Minecraft server and tells the relay machine (`server/mcrelay/`, a VPS of its own) the names, ports and
+HostMC keys, and which servers want players' real addresses (Paper), which the relay's router then sends them
+in a PROXY protocol header, in syncs signed both ways with a secret the two share. Who's a supporter comes from OCAccounts
+(`XENITH_OCACCOUNT_URL`). `xenith relay list`, `xenith relay off <name>`, `xenith relay on <name>` and
+`xenith relay check <name>` look after it. Setting it up: [server/mcrelay/README.md](server/mcrelay/README.md).
 
 ## Building
 

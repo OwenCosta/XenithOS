@@ -129,7 +129,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [linux/test-hostmc.sh, sim/hostmc/test-vps.sh, sim/hostmc/test-relay.sh]
+        test: [linux/test-hostmc.sh, sim/hostmc/test-vps.sh, sim/hostmc/test-relay.sh, sim/hostmc/test-bedrock.sh]
     env:
       TEST: ${{ matrix.test }}
     steps:
@@ -171,6 +171,7 @@ jobs:
             /tmp/xos-hostmc/
             /tmp/hostmc-vps-test/
             /tmp/hostmc-relay-test/
+            /tmp/hostmc-bedrock-test/
             sim/out/
           retention-days: 7
           if-no-files-found: ignore

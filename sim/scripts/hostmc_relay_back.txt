@@ -1,0 +1,46 @@
+# HostMC's supporter relay, second run (sim/hostmc/test-relay.sh): a new HostMC picks up the
+# server and the tunnel left running and shows the relay's page (asking XenithOS Cloud again),
+# changes the server's name to one typed in (XSIM_TYPE), gives the name up, which turns the
+# relay off and closes the tunnel, then stops the server.
+wait 90
+press down
+press down
+press down
+press down
+press down
+press down
+wait 10
+press a
+wait 90
+shot relay_page_again
+press down
+press down
+press a
+wait 30
+shot rename_dialog
+press down
+press a
+wait 120
+shot renamed
+wait 400
+press down
+press down
+press a
+wait 30
+shot give_up
+press a
+wait 90
+shot gave_up
+press b
+press up
+press up
+press up
+press up
+press up
+press up
+wait 10
+press a
+press a
+wait 600
+shot stopped
+quit

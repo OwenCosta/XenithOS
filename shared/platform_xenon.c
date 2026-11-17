@@ -457,6 +457,8 @@ int plat_desktop(void) { return 0; }
 void plat_mouse(struct plat_mouse *m) { memset(m, 0, sizeof *m); m->x = m->y = -1; }
 void plat_mouse_grab(int on) { (void)on; }
 int plat_key_event(int *key, int *down) { (void)key; (void)down; return 0; }
+int plat_clipboard_set(const char *text) { (void)text; return 0; }
+int plat_clipboard_get(char *out, int n) { if (n > 0) out[0] = 0; return 0; }
 
 void plat_reboot(void)
 {

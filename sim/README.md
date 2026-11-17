@@ -51,13 +51,21 @@ More switches:
   what it would have downloaded already in `hostmc/` (`sim/hostmc/data`), so nothing is downloaded
   (`sim/scripts/hostmc.txt`). It runs in real time, since the stand-in does. Without `XSIM_HOSTMC`, HostMC
   downloads Java and a real server and runs it. A server a script leaves running is stopped afterwards.
-  The stand-in answers server list pings on its port (127.0.0.1 only), and `sim/hostmc/ping.py` sends one.
+  The stand-in answers server list pings on its port (on `server-ip`, or 127.0.0.1), and `sim/hostmc/ping.py`
+  sends one. With Paper's `proxies.proxy-protocol` on in `config/paper-global.yml` it wants a PROXY header
+  first, as Paper does, and notes who each connection was from in `connections.log`.
 - `XSIM_STORE_KEY=<public key in hex>` makes the Store trust that key instead of `source/store_key.h`'s, so a
   local XenithOS Cloud can sign with a key made for a test (`xenith_cloud.py store-key new`), and
   `XSIM_STORE_KEY=none` acts as a build without one. The Store's checks go to the log as `store: <reply>:
   signed` or `... refused`.
 - `XSIM_NET_TIME=1` lets virtual time pass while waiting on the network, as real time does on a console, so a
   screen that draws during a download (the Store's downloads queue) gets its frames and reads its buttons then.
+- `XSIM_DESKTOP=1` runs the program as a desktop app, as XenithOS Desktop's Apps menu opens it
+  (`plat_desktop()`): the script drives a mouse and the keyboard's own keys too (below), and
+  `XSIM_CLIPBOARD` is what's been copied when it starts (what the program copies is said on stderr, as
+  `sim: copied: ...`). Use `XSIM_W=1280 XSIM_H=720`, the picture's real size, so clicks land where they
+  would on a PC. `sim/scripts/hostmc_desktop.txt` is HostMC's desktop version: run it like `hostmc.txt`,
+  with `XSIM_DESKTOP=1 XSIM_W=1280 XSIM_H=720 XSIM_CLIPBOARD=vps.example.com` added.
 - `sim/store/test-store.sh` runs the Store's signatures and its downloads queue end to end through the
   `store_signed.txt`, `store_refused.txt`, `store_install_first.txt`, `store_queue.txt` and `store_queue_pc.txt`
   scripts, against a local XenithOS Cloud with a Store and a key of its own and `sim/store/between.py`
@@ -66,6 +74,18 @@ More switches:
 - `sim/hostmc/test-vps.sh` runs HostMC's own-VPS route through the `hostmc_vps*.txt` scripts, with a private
   sshd (run as you, on spare ports) standing in for the VPS, and checks each step; screenshots go to
   `sim/out/hostmc-vps`.
+- `sim/hostmc/test-relay.sh` runs HostMC's supporter relay through the `hostmc_relay*.txt` scripts against a
+  local XenithOS Cloud, a stand-in for OCAccounts (`sim/hostmc/ocaccounts.py`) and the relay's own software
+  (`server/mcrelay`, with its sshd run as you on a spare port), and checks each step; screenshots go to
+  `sim/out/hostmc-relay`. HostMC runs in a user namespace with a hosts file of its own (`unshare`,
+  `nsenter`), so its check asks by name. `ping.py` takes a third argument, the name a player typed, and a
+  fourth, the address to connect from (another loopback address stands for a player elsewhere, so the
+  server can tell players' addresses apart: `hostmc_relay_paper.txt` is that part).
+- `sim/hostmc/test-bedrock.sh` runs HostMC's Bedrock players (Geyser and Floodgate) through the
+  `hostmc_bedrock*.txt` scripts against a stand-in for GeyserMC's download service (`sim/hostmc/geysermc.py`,
+  through `HOSTMC_GEYSER_API`), with the stand-in server acting as Paper (it loads the two plugins and takes
+  Floodgate's `fwhitelist`), and checks the downloads, their checksums, a refused update and turning it off;
+  screenshots go to `sim/out/hostmc-bedrock`.
 - `sim/social/test-friends.sh` runs friends between two consoles: a XenithOS Cloud of its own (on port 18795,
   `XSIM_CLOUD_PORT` for another), two profiles, and simulator runs with one or the other (`friends_*.txt`):
   asking by gamertag, the request at start-up and saying yes, a friend playing Minecraft on a PC while their
@@ -97,6 +117,19 @@ One command per line; each controller poll is one frame.
 | `quit` | stop and write audio.wav |
 
 Buttons: `up down left right a b x y lb rb lt rt start back guide ls rs`.
+
+With `XSIM_DESKTOP=1`, for desktop apps (each takes a frame, then one with nothing pressed):
+
+| Command | |
+|---|---|
+| `mouse X Y` | the pointer moves to X, Y in the picture |
+| `click X Y`, `rclick X Y` | it moves there and the left or right button is clicked |
+| `wheel N` | the wheel turns N clicks (positive is away from you, up the page) |
+| `key NAME`, `key ctrl+NAME` | a key of the keyboard's own (`plat_key_event`): a letter or digit, `tab`, `enter`, `esc`, `backspace`, `delete`, `home`, `end`, `pageup`, `pagedown`, the arrows, `f1` to `f12` |
+| `type TEXT`, `type "TEXT"` | typed into the text field that's open (`\|` is Enter); quotes keep spaces at the ends |
+
+`key` is only the keyboard's own key: what a key also does as the controller (Enter is A, Esc is B, the
+arrows are the D-pad) is a `press`.
 
 ## All the scripts at once
 
