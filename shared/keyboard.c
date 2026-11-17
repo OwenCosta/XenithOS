@@ -77,12 +77,268 @@ static int find_near(int row, float cx)
     return best;
 }
 
+/* ------------------------------------------------------------ desktop apps */
+
+/* What a field takes: the same rules as the on-screen keyboard's. */
+static int allowed(const struct kb_field *f, char c)
+{
+    if (f->mode == KB_PIN) return isdigit((unsigned char)c);
+    if (f->mode == KB_LINE) return c >= ' ' && c <= '~';
+    return isalnum((unsigned char)c) || c == ' ';
+}
+
+/* c at the caret: no space first, or next to another. */
+static int field_insert(struct kb_field *f, char c)
+{
+    int len = (int)strlen(f->buf);
+    if (!allowed(f, c)) return 0;
+    if (c == ' ' && (f->caret == 0 || f->buf[f->caret - 1] == ' ' || f->buf[f->caret] == ' ')) return 0;
+    if (len >= f->max) return -1;
+    memmove(f->buf + f->caret + 1, f->buf + f->caret, (size_t)(len - f->caret + 1));
+    f->buf[f->caret++] = c;
+    return 1;
+}
+
+/* How wide n characters of s are. */
+static int sub_w(int font, const char *s, int n)
+{
+    char tmp[300];
+    if (n <= 0) return 0;
+    if (n > (int)sizeof tmp - 1) n = (int)sizeof tmp - 1;
+    memcpy(tmp, s, (size_t)n);
+    tmp[n] = 0;
+    return gfx_str_w(font, tmp);
+}
+
+void kb_field_init(struct kb_field *f, char *buf, int max, int mode)
+{
+    f->buf = buf;
+    f->max = max;
+    f->mode = mode;
+    f->caret = (int)strlen(buf);
+    f->first = 0;
+    f->all = 0;
+}
+
+/* With all of it selected, what's typed, deleted or pasted replaces it. */
+static void replace_all(struct kb_field *f)
+{
+    if (!f->all) return;
+    f->buf[0] = 0;
+    f->caret = f->first = 0;
+    f->all = 0;
+}
+
+int kb_field_input(struct kb_field *f)
+{
+    char typed[64];
+    int n, i, len = (int)strlen(f->buf), got = 0, full = 0, dx;
+    if (f->caret > len) f->caret = len;
+    if (f->caret < 0) f->caret = 0;
+    n = plat_text_take(typed, sizeof typed);
+    for (i = 0; i < n; i++) {
+        if (typed[i] == '\n') { sfx(SFX_SELECT); f->all = 0; return 1; }
+        if (typed[i] == '\b') {
+            if (f->all) { replace_all(f); got = 1; }
+            else if (f->caret > 0) {
+                memmove(f->buf + f->caret - 1, f->buf + f->caret, strlen(f->buf + f->caret) + 1);
+                f->caret--;
+                got = 1;
+            }
+            continue;
+        }
+        if (allowed(f, typed[i])) replace_all(f);
+        switch (field_insert(f, typed[i])) {
+        case 1: got = 1; break;
+        case -1: full = 1; break;
+        }
+    }
+    len = (int)strlen(f->buf);
+    if (ui_key(PLAT_KEY_DELETE)) {
+        if (f->all) { replace_all(f); got = 1; }
+        else if (f->caret < len) {
+            memmove(f->buf + f->caret, f->buf + f->caret + 1, (size_t)(len - f->caret));
+            got = 1;
+        }
+    }
+    if (ui_key('a') == 2 && f->buf[0]) f->all = 1;
+    if (ui_key('v') == 2) {                          /* paste: the first line of what was copied */
+        char clip[256];
+        if (plat_clipboard_get(clip, sizeof clip)) {
+            replace_all(f);
+            for (i = 0; clip[i] && clip[i] != '\n' && clip[i] != '\r'; i++) {
+                int r = field_insert(f, clip[i] == '\t' ? ' ' : clip[i]);
+                if (r < 0) { full = 1; break; }
+                if (r > 0) got = 1;
+            }
+        }
+    }
+    len = (int)strlen(f->buf);
+    dx = ui_nav_x();
+    if (f->all && (dx || ui_key(PLAT_KEY_HOME) || ui_key(PLAT_KEY_END))) {
+        f->caret = dx < 0 || ui_key(PLAT_KEY_HOME) ? 0 : len;    /* to that end of what was selected */
+        f->all = 0;
+    } else {
+        if (ui_key(PLAT_KEY_HOME)) f->caret = 0;
+        if (ui_key(PLAT_KEY_END)) f->caret = len;
+        if (dx && f->caret + dx >= 0 && f->caret + dx <= len) f->caret += dx;
+    }
+    if (full) sfx(SFX_ERROR);
+    else if (got) sfx(SFX_KEY);
+    return 0;
+}
+
+int kb_field_click(struct kb_field *f, int x, int y, int w, int h, int font)
+{
+    int i, len = (int)strlen(f->buf), best = len, best_d = 1 << 30;
+    if (!ui_clicked(x, y, w, h)) return 0;
+    f->all = 0;
+    if (f->mode != KB_PIN) {
+        for (i = f->first; i <= len; i++) {
+            int px = x + 16 + sub_w(font, f->buf + f->first, i - f->first), d = abs(px - mouse.x);
+            if (d < best_d) { best_d = d; best = i; }
+            if (px > x + w) break;
+        }
+    }
+    f->caret = best;
+    return 1;
+}
+
+void kb_field_draw(struct kb_field *f, int x, int y, int w, int h, int font, const char *placeholder, int focused)
+{
+    int pad = 16, inner = w - 2 * pad - 4, len = (int)strlen(f->buf), cy = y + h / 2, cx, ch = gfx_cap_h(font) + 12, clip[4], i;
+    gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 10, C_SURFACE2, 255);
+    if (focused) gfx_stroke_rrect((float)x, (float)y, (float)w, (float)h, 10, 2, C_ACCENT, 255);
+    else gfx_stroke_rrect((float)x, (float)y, (float)w, (float)h, 10, 1, C_LINE, 255);
+    gfx_get_clip(clip);
+    gfx_clip_intersect(x + 4, y + 2, w - 8, h - 4);
+    if (f->mode == KB_PIN) {
+        for (i = 0; i < len; i++) gfx_circle(x + pad + 8.0f + i * 28, (float)cy, 7, C_TEXT, 255);
+        cx = x + pad + len * 28;
+    } else {
+        /* The part with the caret in it: as much as fits, ending where the text ends if it can. */
+        if (f->caret > len) f->caret = len;
+        if (f->first > f->caret) f->first = f->caret;
+        while (f->first < f->caret && sub_w(font, f->buf + f->first, f->caret - f->first) > inner) f->first++;
+        while (f->first > 0 && sub_w(font, f->buf + f->first - 1, len - f->first + 1) <= inner) f->first--;
+        if (f->all && len) {                         /* all of it selected */
+            int sw = sub_w(font, f->buf + f->first, len - f->first);
+            gfx_fill_rrect(x + pad - 4.0f, (float)(cy - ch / 2), sw + 8.0f, (float)ch, 4, RGB(52, 84, 150), 255);
+        }
+        if (!len && placeholder) gfx_str_vc(font, x + pad, cy, C_DIM, placeholder);
+        else gfx_str_vc(font, x + pad, cy, C_TEXT, f->buf + f->first);
+        cx = x + pad + sub_w(font, f->buf + f->first, f->caret - f->first);
+    }
+    if (focused && !f->all && (ui_ms() / 530) % 2 == 0) gfx_rect(cx + 1, cy - ch / 2, 2, ch, C_ACCENT_HI);
+    gfx_set_clip(clip[0], clip[1], clip[2], clip[3]);
+}
+
+/* keyboard() in a desktop app: a box over the screen with the field, OK and Cancel. */
+static int desktop_keyboard(const char *title, const char *hint, char *buf, int maxlen, int mode)
+{
+    size_t bytes = (size_t)SCR_W * SCR_H * 4;
+    uint32_t *under = malloc(bytes), *dimmed = NULL;
+    char before[512];
+    struct kb_field f;
+    int w = SCR_W * 46 / 100, x, y, h, title_lines = 1, hint_lines = 0, result = -1, keys_were = ui_keys_on, i;
+    int fh = 60, bw = 150, bh = 46;
+    static const char *const labels[2] = {"OK", "Cancel"};
+
+    snprintf(before, sizeof before, "%s", buf);
+    if (under) {
+        memcpy(under, gfx_bb, bytes);
+        dimmed = malloc(bytes);                /* the screen behind, darkened once */
+        if (dimmed) {
+            gfx_rect_a(0, 0, SCR_W, SCR_H, RGB(0, 0, 0), 150);
+            memcpy(dimmed, gfx_bb, bytes);
+        }
+    }
+    if (w < 600) w = 600;
+    {
+        int clip[4];
+        gfx_get_clip(clip);
+        gfx_set_clip(0, 0, 0, 0);              /* measure only */
+        title_lines = gfx_wrap(FONT_TITLE, 0, 0, w - 64, 2, 0, title, 2);
+        if (hint && *hint) hint_lines = gfx_wrap(FONT_BODY, 0, 0, w - 64, 4, 0, hint, 3);
+        gfx_set_clip(clip[0], clip[1], clip[2], clip[3]);
+    }
+    h = 32 + title_lines * (gfx_line_h(FONT_TITLE) + 2) + 8 + hint_lines * (gfx_line_h(FONT_BODY) + 4) + 18 + fh + 12 + 26 + 18 + bh + 28;
+    x = (SCR_W - w) / 2;
+    y = (SCR_H - h) / 2;
+    kb_field_init(&f, buf, maxlen, mode);
+    f.all = buf[0] != 0;                       /* what's there is selected: typing replaces it */
+    plat_text_input(1);
+    if (!keys_were) {                          /* keys from before the box opened aren't for it */
+        int k, d;
+        while (plat_key_event(&k, &d)) { }
+        ui_keys_on = 1;
+        ui_ctrl = 0;
+    }
+
+    while (result < 0) {
+        int fy = y + 32 + title_lines * (gfx_line_h(FONT_TITLE) + 2) + 8 + hint_lines * (gfx_line_h(FONT_BODY) + 4) + 18;
+        int by = y + h - 28 - bh, hx = x + 32, cyh = fy + fh + 12 + 13;
+        ui_poll();
+        if (kb_field_input(&f)) result = 1;
+        else if (PRESSED(b)) { sfx(SFX_BACK); result = 0; }
+        for (i = 0; i < 2 && result < 0; i++)
+            if (ui_clicked(x + w - 32 - (2 - i) * bw - (1 - i) * 12, by, bw, bh)) {
+                sfx(i == 0 ? SFX_SELECT : SFX_BACK);
+                result = i == 0;
+            }
+        kb_field_click(&f, x + 32, fy, w - 64, fh, FONT_LABEL);
+
+        if (dimmed) memcpy(gfx_bb, dimmed, bytes);
+        else {
+            if (under) memcpy(gfx_bb, under, bytes);
+            gfx_rect_a(0, 0, SCR_W, SCR_H, RGB(0, 0, 0), 150);
+        }
+        gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 14, C_SURFACE, 255);
+        gfx_stroke_rrect((float)x, (float)y, (float)w, (float)h, 14, 1, C_LINE, 255);
+        gfx_wrap(FONT_TITLE, x + 32, y + 26, w - 64, 2, C_TEXT, title, 2);
+        if (hint_lines) gfx_wrap(FONT_BODY, x + 32, y + 32 + title_lines * (gfx_line_h(FONT_TITLE) + 2) + 8, w - 64, 4, C_SUB, hint, 3);
+        kb_field_draw(&f, x + 32, fy, w - 64, fh, FONT_LABEL, mode == KB_PIN ? NULL : "Type here", 1);
+        {
+            char count[16];
+            snprintf(count, sizeof count, "%d/%d", (int)strlen(buf), maxlen);
+            gfx_str_r(FONT_SMALL, x + w - 34, cyh - gfx_line_h(FONT_SMALL) / 2, C_DIM, count);
+        }
+        hx += ui_button_glyph(hx, cyh, "Enter") + 8;
+        hx += gfx_str(FONT_SMALL, hx, cyh - gfx_line_h(FONT_SMALL) / 2, C_SUB, "OK") + 22;
+        hx += ui_button_glyph(hx, cyh, "Esc") + 8;
+        hx += gfx_str(FONT_SMALL, hx, cyh - gfx_line_h(FONT_SMALL) / 2, C_SUB, "Cancel") + 22;
+        if (mode != KB_PIN) {
+            hx += ui_button_glyph(hx, cyh, "Ctrl+V") + 8;
+            gfx_str(FONT_SMALL, hx, cyh - gfx_line_h(FONT_SMALL) / 2, C_SUB, "Paste");
+        }
+        for (i = 0; i < 2; i++) {
+            int bx = x + w - 32 - (2 - i) * bw - (1 - i) * 12, over = ui_mouse_in(bx, by, bw, bh);
+            uint32_t fill = i == 0 ? (over ? 0xFFFFFF : C_TEXT) : (over ? C_SEL : C_SURFACE2);
+            gfx_fill_rrect((float)bx, (float)by, (float)bw, (float)bh, 10, fill, 255);
+            if (i == 1) gfx_stroke_rrect((float)bx, (float)by, (float)bw, (float)bh, 10, 1, C_LINE, 255);
+            gfx_str_c(FONT_BODY_SB, bx + bw / 2, by + (bh - gfx_line_h(FONT_BODY_SB)) / 2, i == 0 ? C_INK : C_TEXT, labels[i]);
+        }
+        ui_end_frame();
+    }
+    plat_text_input(0);
+    ui_keys_on = keys_were;
+    if (!result) snprintf(buf, (size_t)maxlen + 1, "%s", before);
+    if (under) {
+        memcpy(gfx_bb, under, bytes);
+        free(under);
+    }
+    free(dimmed);
+    do { ui_poll(); } while (cur.a || cur.b);
+    return result;
+}
+
 int keyboard(const char *title, const char *hint, char *buf, int maxlen, int mode)
 {
     int sel = 0, shift = 1, i;
     float unit = mode == KB_PIN ? 104.0f : 70.0f, kh = mode == KB_PIN ? 72.0f : mode == KB_LINE ? 50.0f : 58.0f, gap = 10;
     float hx = 0, hy = 0;
 
+    if (ui_desktop) return desktop_keyboard(title, hint, buf, maxlen, mode);
     layout(mode);
     if ((mode == KB_TEXT && buf[0]) || mode == KB_LINE) shift = 0;
     ui_fade_in();

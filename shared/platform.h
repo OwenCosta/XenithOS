@@ -50,18 +50,23 @@ int  plat_text_take(char *out, int n);
  *   plat_key_event()   the keyboard's own presses and releases, oldest first: 1 with *key and
  *                      *down set, 0 when there are none. Letters and digits are their lower-case
  *                      characters, ' ' is Space, '-' and '=' are those keys, and the rest are
- *                      PLAT_KEY_* below. The keys also still act as the controller's buttons. */
+ *                      PLAT_KEY_* below. The keys also still act as the controller's buttons.
+ *   plat_clipboard_set(), plat_clipboard_get()   the desktop's clipboard, as text: copy and
+ *                      paste. 1 when it worked. */
 struct plat_mouse { int x, y, buttons, clicks, wheel, dx, dy; };
 enum {
     PLAT_KEY_ESC = 256, PLAT_KEY_ENTER, PLAT_KEY_TAB, PLAT_KEY_BACKSPACE, PLAT_KEY_DELETE,
     PLAT_KEY_UP, PLAT_KEY_DOWN, PLAT_KEY_LEFT, PLAT_KEY_RIGHT,
     PLAT_KEY_SHIFT, PLAT_KEY_CTRL, PLAT_KEY_ALT, PLAT_KEY_PAUSE,
-    PLAT_KEY_F1                                  /* F1 to F12 are PLAT_KEY_F1 + 0 to 11 */
+    PLAT_KEY_F1,                                 /* F1 to F12 are PLAT_KEY_F1 + 0 to 11 */
+    PLAT_KEY_HOME = PLAT_KEY_F1 + 12, PLAT_KEY_END, PLAT_KEY_PAGEUP, PLAT_KEY_PAGEDOWN
 };
 int  plat_desktop(void);
 void plat_mouse(struct plat_mouse *m);
 void plat_mouse_grab(int on);
 int  plat_key_event(int *key, int *down);
+int  plat_clipboard_set(const char *text);
+int  plat_clipboard_get(char *out, int n);
 
 #define PLAT_AUDIO_RATE  48000
 #define PLAT_AUDIO_BLOCK 512                 /* frames per submit */

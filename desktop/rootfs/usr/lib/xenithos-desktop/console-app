@@ -7,10 +7,10 @@
 #   console-app APP --window              the console version in a window
 #   console-app --has-desktop-version APP     exit 0 when APP has a desktop version
 #
-# The desktop versions: VOLT and DOOM are the same programs as on XenithOS Console, run as
-# desktop apps (XENITHOS_DESKTOP=1: a window, the mouse and the keyboard, from the XenithOS
-# Console that has desktop mode on; an older one just opens in a window). Photos and Tube are
-# desktop apps of their own, photos.py and tube.py in this folder. The others (HostMC) open as on
+# The desktop versions: VOLT, DOOM and HostMC are the same programs as on XenithOS Console, run
+# as desktop apps (XENITHOS_DESKTOP=1: a window, the mouse and the keyboard, from a XenithOS
+# Console that has desktop mode for them; an older one just opens in a window). Photos and Tube
+# are desktop apps of their own, photos.py and tube.py in this folder. Any other app opens as on
 # the console.
 #
 # Everything keeps XenithOS Console's data, so a game's scores or HostMC's servers are the same
@@ -18,7 +18,7 @@
 LIB=/usr/lib/xenithos-desktop
 
 has_desktop_version() {
-    case "$1" in volt|doom|photos|tube) return 0 ;; *) return 1 ;; esac
+    case "$1" in volt|doom|hostmc|photos|tube) return 0 ;; *) return 1 ;; esac
 }
 
 if [ "${1:-}" = --has-desktop-version ]; then

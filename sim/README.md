@@ -41,6 +41,12 @@ More switches:
   (`sim/scripts/hostmc.txt`). It runs in real time, since the stand-in does. Without `XSIM_HOSTMC`, HostMC
   downloads Java and a real server and runs it. A server a script leaves running is stopped afterwards.
   The stand-in answers server list pings on its port (127.0.0.1 only), and `sim/hostmc/ping.py` sends one.
+- `XSIM_DESKTOP=1` runs the program as a desktop app, as XenithOS Desktop's Apps menu opens it
+  (`plat_desktop()`): the script drives a mouse and the keyboard's own keys too (below), and
+  `XSIM_CLIPBOARD` is what's been copied when it starts (what the program copies is said on stderr, as
+  `sim: copied: ...`). Use `XSIM_W=1280 XSIM_H=720`, the picture's real size, so clicks land where they
+  would on a PC. `sim/scripts/hostmc_desktop.txt` is HostMC's desktop version: run it like `hostmc.txt`,
+  with `XSIM_DESKTOP=1 XSIM_W=1280 XSIM_H=720 XSIM_CLIPBOARD=vps.example.com` added.
 - `sim/hostmc/test-vps.sh` runs HostMC's own-VPS route through the `hostmc_vps*.txt` scripts, with a private
   sshd (run as you, on spare ports) standing in for the VPS, and checks each step; screenshots go to
   `sim/out/hostmc-vps`.
@@ -64,3 +70,16 @@ One command per line; each controller poll is one frame.
 | `quit` | stop and write audio.wav |
 
 Buttons: `up down left right a b x y lb rb lt rt start back guide ls rs`.
+
+With `XSIM_DESKTOP=1`, for desktop apps (each takes a frame, then one with nothing pressed):
+
+| Command | |
+|---|---|
+| `mouse X Y` | the pointer moves to X, Y in the picture |
+| `click X Y`, `rclick X Y` | it moves there and the left or right button is clicked |
+| `wheel N` | the wheel turns N clicks (positive is away from you, up the page) |
+| `key NAME`, `key ctrl+NAME` | a key of the keyboard's own (`plat_key_event`): a letter or digit, `tab`, `enter`, `esc`, `backspace`, `delete`, `home`, `end`, `pageup`, `pagedown`, the arrows, `f1` to `f12` |
+| `type TEXT`, `type "TEXT"` | typed into the text field that's open (`\|` is Enter); quotes keep spaces at the ends |
+
+`key` is only the keyboard's own key: what a key also does as the controller (Enter is A, Esc is B, the
+arrows are the D-pad) is a `press`.

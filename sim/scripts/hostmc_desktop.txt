@@ -1,0 +1,122 @@
+# HostMC as a desktop app (XENITHOS_DESKTOP=1 on XenithOS Desktop), with the stand-in server: the
+# mouse opens pages and clicks rows, buttons and dialogs, the wheel scrolls, and the keyboard types
+# into the text box (the server's message, a name for the whitelist) and the console's command
+# line. Run at the real picture's size, so the clicks land where they would on a PC:
+#   XSIM_BIN=xhostmc XSIM_KIND=pc XSIM_THREAD=1 XSIM_HOSTMC=1 XSIM_DESKTOP=1 XSIM_W=1280 XSIM_H=720 \
+#     sim/run.sh sim/scripts/hostmc_desktop.txt hostmc-desktop
+wait 60
+mouse 190 308
+wait 6
+shot menu_hover
+# Settings: the server's message, typed into the text box
+click 190 308
+wait 10
+mouse 500 160
+wait 6
+shot settings
+click 500 160
+wait 20
+shot text_box
+type Built on a desktop
+key home
+type "Hello. "
+wait 6
+shot text_box_typed
+click 671 469
+wait 20
+shot settings_message
+# Difficulty: its value's right end goes on, a right click goes back
+mouse 500 256
+wait 6
+click 1150 256
+wait 6
+shot difficulty_next
+rclick 500 256
+wait 6
+shot difficulty_back
+# Start from the Server page: the EULA's button takes a click
+click 190 140
+wait 10
+shot server_page
+click 450 270
+wait 30
+shot eula
+click 288 530
+wait 420
+shot running
+# Console: a command typed into its command line, then something said (Tab), the wheel
+click 190 196
+wait 20
+type list|
+wait 60
+shot console_command
+key tab
+wait 4
+type Hello from the desktop|
+wait 60
+shot console_say
+wheel 2
+wait 6
+shot console_scrolled
+wheel -2
+click 1100 629
+wait 20
+shot quick_commands
+press b
+wait 20
+# Players: someone added to the whitelist through the text box, OK clicked
+click 190 252
+wait 20
+shot players
+click 500 361
+wait 20
+type DeskFriend
+wait 6
+shot whitelist_box
+type |
+wait 90
+shot whitelist_added
+# Back to the Server page and stop it with a click
+click 190 140
+wait 10
+click 450 270
+wait 240
+shot stopped
+# Internet: the own-VPS route, its address pasted (XSIM_CLIPBOARD) and the rest kept with Enter,
+# then the command for the VPS copied from the steps, and the route turned off again
+click 190 476
+wait 20
+press down
+wait 4
+press a
+wait 20
+key ctrl+v
+wait 6
+shot vps_address_pasted
+type |
+wait 20
+type |
+wait 20
+type |
+wait 20
+type |
+wait 90
+shot vps_steps
+click 480 607
+wait 10
+shot vps_copied
+click 736 607
+wait 20
+shot vps_page
+press down
+wait 4
+press down
+wait 4
+press a
+wait 20
+shot internet_off
+press b
+wait 10
+press b
+wait 40
+quit

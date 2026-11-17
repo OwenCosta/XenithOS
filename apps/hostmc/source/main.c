@@ -16,6 +16,7 @@
  * EULA themselves; HostMC never agrees to it for them. Everything lives in hostmc/ in XenithOS's
  * data folder. PCs only: an Xbox can't run the server.
  */
+#include <fcntl.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,6 +67,13 @@ struct row {
 static struct row rows[MAX_ROWS];
 static int nrows;
 
+/* On the desktop (ui_desktop) the mouse clicks rows: where the last frame drew each one that can
+ * be chosen, and for a setting that cycles, its value's pill (its ends go back and on). */
+struct hit { int id, x, y, w, h, pill_x, pill_w; };
+static struct hit hits[MAX_ROWS];
+static int nhits;
+static int reveal;                     /* the keyboard moved the selection: scroll it into view */
+
 static struct row *add(int kind, int id, const char *label, const char *value)
 {
     static struct row spare;
@@ -89,7 +97,7 @@ enum {
     A_WL_ADD, S_MOTD, S_MODE, S_DIFF, S_MAX, S_WL, S_ONLINE, S_SEED, S_RAM, S_PORT,
     V_TYPE, V_VERSION, V_UPDATE, V_CHECK, V_INSTALL,
     W_BACKUP, W_RESTORE, W_RESET,
-    N_ON, N_OFF, N_FORGET,
+    N_ON, N_OFF, N_FORGET, N_CLAIM_OPEN,
     N_VPS, N_VPS_CHECK, N_VPS_STEPS, N_VPS_EDIT, N_VPS_FORGET, N_VPS_OFF,
     N_RELAY, N_RELAY_CHECK, N_RELAY_MEMBER, N_RELAY_NAME, N_RELAY_OFF, N_RELAY_GIVEUP,
     ID_PLAYER = 100, ID_WL = 200, ID_OP = 300,
@@ -252,6 +260,70 @@ static void message(const char *title, const char *body)
     ui_message(title, body);
 }
 
+/* On the desktop: a link opened in the web browser (with xdg-open, as the desktop does). 0 when
+ * it couldn't be, which says so. */
+static int open_link(const char *url)
+{
+    char prog[600], *argv[3];
+    int in_fd, out_fd;
+    pid_t pid = 0;
+    if (strncmp(url, "https://", 8) && strncmp(url, "http://", 7)) return 0;
+    if (!find_program("xdg-open", prog, sizeof prog)) {
+        message("There's no web browser to open", "Scan the code with your phone instead.");
+        return 0;
+    }
+    argv[0] = prog;
+    argv[1] = (char *)url;
+    argv[2] = NULL;
+    in_fd = open("/dev/null", O_RDONLY);
+    out_fd = open("/dev/null", O_WRONLY);
+    if (in_fd >= 0 && out_fd >= 0) pid = spawn_detached(hm_root(), argv, in_fd, out_fd);
+    if (in_fd >= 0) close(in_fd);
+    if (out_fd >= 0) close(out_fd);
+    if (pid <= 0) {
+        message("The browser didn't open", "Scan the code with your phone instead.");
+        return 0;
+    }
+    sfx(SFX_SELECT);
+    ui_toast_icon(ICON_NETWORK);
+    ui_toast("Opening it in your browser", strstr(url, "://") + 3);
+    return 1;
+}
+
+/* The buttons along the bottom of a full screen, n of them from x, w wide: on the desktop the
+ * pointer picks one as it moves onto it, and a click is returned (-1 for none). */
+static int buttons_mouse(int x, int y, int w, int n, int *sel)
+{
+    int i;
+    if (!ui_desktop) return -1;
+    for (i = 0; i < n; i++)
+        if (ui_mouse_in(x + i * (w + 16), y, w, 46)) {
+            if ((mouse.dx || mouse.dy) && *sel != i) { *sel = i; sfx(SFX_MOVE); }
+            if (mouse.clicks & 1) return i;
+        }
+    return -1;
+}
+
+static void buttons_draw(int x, int y, int w, const char *const *labels, int n, int sel)
+{
+    int i;
+    for (i = 0; i < n; i++) {
+        int bx = x + i * (w + 16);
+        gfx_fill_rrect((float)bx, (float)y, (float)w, 46, 10, i == sel ? C_TEXT : C_SURFACE2, 255);
+        gfx_str_vc(FONT_BODY_SB, bx + 20, y + 23, i == sel ? C_INK : C_TEXT, labels[i]);
+    }
+}
+
+/* On the desktop, a link to open in the browser, 34 high: under a QR code, which a phone can
+ * scan instead. Its clicks are the caller's (ui_clicked on the same box). */
+static void link_button(int x, int y, int w, const char *label)
+{
+    int over = ui_mouse_in(x, y, w, 34);
+    gfx_fill_rrect((float)x, (float)y, (float)w, 34, 17, over ? C_SEL : C_SURFACE2, 255);
+    gfx_stroke_rrect((float)x, (float)y, (float)w, 34, 17, 1, over ? C_TEXT : C_LINE, 255);
+    gfx_str_c(FONT_SMALL, x + w / 2, y + (34 - gfx_line_h(FONT_SMALL)) / 2, C_TEXT, label);
+}
+
 /* A list to choose from: the index, or -1 for B. */
 static int pick(const char *title, const char *sub, char items[][64], int n, int sel)
 {
@@ -266,6 +338,21 @@ static int pick(const char *title, const char *sub, char items[][64], int n, int
         hm_frame();
         d = ui_nav_y();
         if (d && sel + d >= 0 && sel + d < n) { sel += d; sfx(SFX_MOVE); }
+        if (ui_desktop) {
+            /* The wheel scrolls the list, the pointer picks, a click chooses. */
+            if (mouse.wheel) {
+                first -= mouse.wheel;
+                if (first > n - visible) first = n - visible;
+                if (first < 0) first = 0;
+                if (sel < first) sel = first;
+                if (sel >= first + visible) sel = first + visible - 1;
+            }
+            for (i = first; i < n && i < first + visible; i++)
+                if (ui_mouse_in(M, top + (i - first) * rowh, w, rowh - 8)) {
+                    if ((mouse.dx || mouse.dy) && sel != i) { sel = i; sfx(SFX_MOVE); }
+                    if (mouse.clicks & 1) { sfx(SFX_SELECT); ui_settle_input(); return i; }
+                }
+        }
         if (PRESSED(a)) { sfx(SFX_SELECT); ui_settle_input(); return sel; }
         if (PRESSED(b)) { sfx(SFX_BACK); ui_settle_input(); return -1; }
         if (sel < first) first = sel;
@@ -281,7 +368,7 @@ static int pick(const char *title, const char *sub, char items[][64], int n, int
             snprintf(pos, sizeof pos, "%d of %d", sel + 1, n);
             gfx_str_r(FONT_SMALL, SCR_W - M, SCR_H - 46, C_DIM, pos);
         }
-        ui_hints("A=Choose;B=Back");
+        ui_hints(ui_desktop ? "Click=Choose;Wheel=Scroll;A=Choose;B=Back" : "A=Choose;B=Back");
         ui_end_frame();
     }
 }
@@ -302,16 +389,30 @@ static int eula_screen(void)
     int sel = 0;
     ui_fade_in();
     for (;;) {
-        int d, top = HEADER_H + 10, ph = SCR_H - top - 80, qs = 230, tx = M + 32, tw, y, i;
+        int d, top = HEADER_H + 10, ph = SCR_H - top - 80, qs = 230, tx = M + 32, tw = SCR_W - 2 * M - 64 - qs - 40, y, i;
+        int choose = -1, url_y, url_w = gfx_str_w(FONT_LABEL, EULA_URL), buttons_y = top + ph - 2 * 58 - 18, over_url;
         static const char *const opts[2] = {"I agree to the EULA", "Not now"};
+        static const char *const intro = "The Minecraft server is Mojang's software. To run it you have to agree to Minecraft's End User "
+                                         "License Agreement, the EULA. Please read it first.";
+        url_y = top + 28 + wrap(FONT_BODY, 0, 0, tw, 6, 0, intro, 6, 0) * (gfx_line_h(FONT_BODY) + 6) + 14;
         ui_poll();
         hm_frame();
         d = ui_nav_y();
         if (d && sel + d >= 0 && sel + d < 2) { sel += d; sfx(SFX_MOVE); }
+        if (ui_desktop) {
+            /* The address opens in the browser; the two choices take the pointer and a click. */
+            for (i = 0; i < 2; i++)
+                if (ui_mouse_in(tx, buttons_y + i * 58, 360, 48)) {
+                    if ((mouse.dx || mouse.dy) && sel != i) { sel = i; sfx(SFX_MOVE); }
+                    if (mouse.clicks & 1) choose = i;
+                }
+            if (ui_clicked(tx, url_y, url_w, gfx_line_h(FONT_LABEL))) open_link(EULA_URL);
+        }
         if (PRESSED(b)) { sfx(SFX_BACK); return 0; }
-        if (PRESSED(a)) {
+        if (PRESSED(a)) choose = sel;
+        if (choose >= 0) {
             sfx(SFX_SELECT);
-            if (sel == 1) return 0;
+            if (choose == 1) return 0;
             {
                 time_t now = time(NULL);
                 struct tm tm;
@@ -325,25 +426,25 @@ static int eula_screen(void)
         ui_bg();
         ui_header("Minecraft's EULA", "Before the server starts for the first time");
         ui_panel(M, top, SCR_W - 2 * M, ph);
-        tw = SCR_W - 2 * M - 64 - qs - 40;
-        y = top + 28;
-        y += wrap(FONT_BODY, tx, y, tw, 6, C_TEXT,
-                  "The Minecraft server is Mojang's software. To run it you have to agree to Minecraft's End User "
-                  "License Agreement, the EULA. Please read it first.", 6, 1) * (gfx_line_h(FONT_BODY) + 6) + 14;
-        gfx_str(FONT_LABEL, tx, y, C_TEXT, EULA_URL);
+        wrap(FONT_BODY, tx, top + 28, tw, 6, C_TEXT, intro, 6, 1);
+        y = url_y;
+        over_url = ui_desktop && ui_mouse_in(tx, url_y, url_w, gfx_line_h(FONT_LABEL));
+        gfx_str(FONT_LABEL, tx, y, ui_desktop ? RGB(150, 186, 240) : C_TEXT, EULA_URL);   /* a link on the desktop */
+        if (over_url) gfx_rect(tx, y + gfx_line_h(FONT_LABEL) - 4, url_w, 2, RGB(150, 186, 240));
         y += gfx_line_h(FONT_LABEL) + 14;
         wrap(FONT_SMALL, tx, y, tw, 4, C_SUB,
-             "Scan the code to read it on your phone. When you agree, HostMC writes your answer into the server's "
-             "eula.txt, as the server asks, and doesn't ask again.", 4, 1);
+             ui_desktop ? "Click the address to read it in your browser, or scan the code with your phone. When you agree, HostMC "
+                          "writes your answer into the server's eula.txt, as the server asks, and doesn't ask again."
+                        : "Scan the code to read it on your phone. When you agree, HostMC writes your answer into the server's "
+                          "eula.txt, as the server asks, and doesn't ask again.", 4, 1);
         qr_draw(EULA_URL, SCR_W - M - 32 - qs, top + 28, qs);
         gfx_str_c(FONT_SMALL, SCR_W - M - 32 - qs / 2, top + 36 + qs, C_DIM, "Scan to read the EULA");
-        y = top + ph - 2 * 58 - 18;
         for (i = 0; i < 2; i++) {
-            int by = y + i * 58, bw = 360;
+            int by = buttons_y + i * 58, bw = 360;
             gfx_fill_rrect((float)tx, (float)by, (float)bw, 48, 10, i == sel ? C_TEXT : C_SURFACE2, 255);
             gfx_str_vc(FONT_BODY_SB, tx + 20, by + 24, i == sel ? C_INK : C_TEXT, opts[i]);
         }
-        ui_hints("A=Select;B=Back");
+        ui_hints(ui_desktop ? "Click=Choose;A=Choose;B=Back" : "A=Select;B=Back");
         ui_end_frame();
     }
 }
@@ -480,6 +581,9 @@ static void build_server(void)
     }
     if (sv.why[0] && sv.state == SV_STOPPED) add(R_TEXT, 0, NULL, sv.why)->color = C_BAD;
     if (needs_restart && sv.state == SV_RUNNING) add(R_TEXT, 0, NULL, "Restart the server to use the new settings.")->color = C_WARN;
+    /* A desktop window can be closed without HostMC's goodbye, which says this once. */
+    if (ui_desktop && sv.state != SV_STOPPED)
+        add(R_TEXT, 0, NULL, "It keeps running when HostMC is closed. Open HostMC again to stop it.")->color = C_DIM;
     add(R_HEAD, 0, "Join at", NULL);
     if (server_port() != DEFAULT_PORT) snprintf(port, sizeof port, ":%d", server_port());
     snprintf(text, sizeof text, "localhost%s", port);
@@ -718,6 +822,7 @@ static void build_internet(void)
         break;
     case PI_CLAIM:
         add(R_QR, 0, NULL, pi.claim_url);
+        if (ui_desktop) add(R_BUTTON, N_CLAIM_OPEN, "Open the link in your browser", NULL)->primary = 1;
         add(R_BUTTON, N_OFF, "Cancel", NULL);
         break;
     case PI_STARTING:
@@ -1008,26 +1113,42 @@ static void act_world(int id)
 /* What to do on the VPS, once: HostMC's key in authorized_keys, the sshd setting, the firewall. */
 static void vps_steps(void)
 {
+    /* On the desktop, the command for step 1 can be copied, to paste into the VPS's terminal. */
     static const char *const opts[2] = {"Test the login", "Done"};
+    static const char *const desktop_opts[3] = {"Test the login", "Copy the command", "Done"};
+    const char *const *labels = ui_desktop ? desktop_opts : opts;
     char pub[240], cmd[420], sub[200], result[260] = "", why[220];
     uint32_t result_color = C_SUB;
-    int sel = 0;
+    int sel = 0, n = ui_desktop ? 3 : 2, bw = ui_desktop ? 240 : 260;
     tunnel_pubkey(&vps.t, pub, sizeof pub);
     snprintf(cmd, sizeof cmd, "mkdir -p ~/.ssh && echo '%s' >> ~/.ssh/authorized_keys", pub);
     snprintf(sub, sizeof sub, "For %s@%s, once", vps.cfg.user, vps.cfg.host);
     ui_fade_in();
     for (;;) {
-        int top = HEADER_H + 4, ph = SCR_H - top - 70, qs = 236, x = M + 28, w = SCR_W - 2 * M - 56 - qs - 28, y, i, d;
+        int top = HEADER_H + 4, ph = SCR_H - top - 70, qs = 236, x = M + 28, w = SCR_W - 2 * M - 56 - qs - 28, y, d, choose;
         int lh = gfx_line_h(FONT_SMALL) + 3;
         char text[400];
         ui_poll();
         hm_frame();
         d = ui_nav_x();
-        if (d && sel + d >= 0 && sel + d < 2) { sel += d; sfx(SFX_MOVE); }
+        if (d && sel + d >= 0 && sel + d < n) { sel += d; sfx(SFX_MOVE); }
+        choose = buttons_mouse(x, top + ph - 66, bw, n, &sel);
         if (PRESSED(b)) { sfx(SFX_BACK); ui_settle_input(); return; }
-        if (PRESSED(a)) {
+        if (PRESSED(a)) choose = sel;
+        if (choose == n - 1) { sfx(SFX_SELECT); ui_settle_input(); return; }
+        if (choose == 1) {
+            if (plat_clipboard_set(cmd)) {
+                snprintf(result, sizeof result, "Copied. Paste it into a terminal that's logged in to the VPS, and press Enter.");
+                result_color = C_OK;
+                sfx(SFX_SELECT);
+            } else {
+                snprintf(result, sizeof result, "It couldn't be copied. Scan the code with your phone instead.");
+                result_color = C_BAD;
+                sfx(SFX_ERROR);
+            }
+        }
+        if (choose == 0) {
             sfx(SFX_SELECT);
-            if (sel == 1) { ui_settle_input(); return; }
             why[0] = 0;
             if (tunnel_test(&vps.t, &vps.cfg, why, sizeof why)) {
                 snprintf(result, sizeof result, "HostMC logged in to the VPS. With steps 2 and 3 done too, start the server.");
@@ -1046,8 +1167,12 @@ static void vps_steps(void)
         y = top + 20;
         gfx_str(FONT_BODY_SB, x, y, C_TEXT, "1   Let HostMC log in");
         y += gfx_line_h(FONT_BODY_SB) + 4;
-        snprintf(text, sizeof text, "Add this line to ~/.ssh/authorized_keys for %s on the VPS. The code holds a command that adds it, "
-                                    "to paste into the VPS from your phone.", vps.cfg.user);
+        if (ui_desktop)
+            snprintf(text, sizeof text, "Add this line to ~/.ssh/authorized_keys for %s on the VPS: choose Copy the command and paste "
+                                        "it into the VPS's terminal, or scan the code with your phone.", vps.cfg.user);
+        else
+            snprintf(text, sizeof text, "Add this line to ~/.ssh/authorized_keys for %s on the VPS. The code holds a command that adds it, "
+                                        "to paste into the VPS from your phone.", vps.cfg.user);
         y += wrap(FONT_SMALL, x + 28, y, w - 28, 3, C_SUB, text, 3, 1) * lh + 4;
         y += wrap(FONT_SMALL, x + 28, y, w - 28, 3, C_TEXT, pub, 3, 1) * lh + 14;
         gfx_str(FONT_BODY_SB, x, y, C_TEXT, "2   Let it take players");
@@ -1062,12 +1187,8 @@ static void vps_steps(void)
         if (result[0]) wrap(FONT_SMALL, x, y, w, 3, result_color, result, 2, 1);
         qr_draw(cmd, SCR_W - M - 28 - qs, top + 20, qs);
         gfx_str_c(FONT_SMALL, SCR_W - M - 28 - qs / 2, top + 28 + qs, C_DIM, "Step 1 as a command");
-        for (i = 0; i < 2; i++) {
-            int bw = 260, bx = x + i * (bw + 16), by = top + ph - 66;
-            gfx_fill_rrect((float)bx, (float)by, (float)bw, 46, 10, i == sel ? C_TEXT : C_SURFACE2, 255);
-            gfx_str_vc(FONT_BODY_SB, bx + 20, by + 23, i == sel ? C_INK : C_TEXT, opts[i]);
-        }
-        ui_hints("A=Select;Left=Previous;Right=Next;B=Back");
+        buttons_draw(x, top + ph - 66, bw, labels, n, sel);
+        ui_hints(ui_desktop ? "Click=Choose;A=Choose;Left=Previous;Right=Next;B=Back" : "A=Select;Left=Previous;Right=Next;B=Back");
         ui_end_frame();
     }
 }
@@ -1124,19 +1245,25 @@ static int relay_steps(void)
     int sel = 0;
     ui_fade_in();
     for (;;) {
-        int top = HEADER_H + 4, ph = SCR_H - top - 70, qs = 196, x = M + 28, w = SCR_W - 2 * M - 56 - 2 * qs - 64, y, i, d;
-        int lh = gfx_line_h(FONT_SMALL) + 3, qx = SCR_W - M - 28 - qs;
+        int top = HEADER_H + 4, ph = SCR_H - top - 70, qs = 196, x = M + 28, w = SCR_W - 2 * M - 56 - 2 * qs - 64, y, d, choose;
+        int lh = gfx_line_h(FONT_SMALL) + 3, qx = SCR_W - M - 28 - qs, link_y = top + 28 + qs - 6;
         const char *site = strstr(relay.account, "://") ? strstr(relay.account, "://") + 3 : relay.account;
         char text[300];
         ui_poll();
         hm_frame();
         d = ui_nav_x();
         if (d && sel + d >= 0 && sel + d < 2) { sel += d; sfx(SFX_MOVE); }
+        choose = buttons_mouse(x, top + ph - 66, 260, 2, &sel);
+        if (ui_desktop) {                              /* the codes' links open in the browser */
+            if (relay.patreon[0] && ui_clicked(qx - qs - 36, link_y, qs, 34)) open_link(relay.patreon);
+            if (ui_clicked(qx, link_y, qs, 34)) open_link(relay.account);
+        }
         if (PRESSED(b)) { sfx(SFX_BACK); ui_settle_input(); return 0; }
-        if (PRESSED(a)) {
+        if (PRESSED(a)) choose = sel;
+        if (choose >= 0) {
             char why[240];
             sfx(SFX_SELECT);
-            if (sel == 1) { ui_settle_input(); return 0; }
+            if (choose == 1) { ui_settle_input(); return 0; }
             if (!relay_ask("status", NULL, why, sizeof why)) message("XenithOS Cloud couldn't be asked", why);
             else if (!strcmp(relay.step, "ok")) { sfx(SFX_SUCCESS); ui_settle_input(); return 1; }
             else sfx(SFX_ERROR);
@@ -1148,11 +1275,15 @@ static int relay_steps(void)
         y = top + 20;
         gfx_str(FONT_BODY_SB, x, y, C_TEXT, "1   Support on Patreon");
         y += gfx_line_h(FONT_BODY_SB) + 4;
-        y += wrap(FONT_SMALL, x + 28, y, w - 28, 3, C_SUB, relay.patreon[0] ? "Join at the supporter tier or a higher one. The first code "
-                                                                             "opens the Patreon page." : "Join at the supporter tier or a higher one.", 3, 1) * lh + 14;
+        y += wrap(FONT_SMALL, x + 28, y, w - 28, 3, C_SUB, !relay.patreon[0] ? "Join at the supporter tier or a higher one."
+                                                         : ui_desktop ? "Join at the supporter tier or a higher one. Open Patreon "
+                                                                        "takes you to its page."
+                                                         : "Join at the supporter tier or a higher one. The first code opens the Patreon page.",
+                  3, 1) * lh + 14;
         gfx_str(FONT_BODY_SB, x, y, C_TEXT, "2   Link Patreon to an OCAccount");
         y += gfx_line_h(FONT_BODY_SB) + 4;
-        snprintf(text, sizeof text, "On %s (the second code), sign in or make an OCAccount, and link your Patreon to it.", site);
+        snprintf(text, sizeof text, ui_desktop ? "On %s (Open OCAccount), sign in or make an OCAccount, and link your Patreon to it."
+                                               : "On %s (the second code), sign in or make an OCAccount, and link your Patreon to it.", site);
         y += wrap(FONT_SMALL, x + 28, y, w - 28, 3, C_SUB, text, 3, 1) * lh + 14;
         gfx_str(FONT_BODY_SB, x, y, C_TEXT, "3   Link this XenithOS profile");
         y += gfx_line_h(FONT_BODY_SB) + 4;
@@ -1161,16 +1292,14 @@ static int relay_steps(void)
         if (relay.message[0]) wrap(FONT_SMALL, x, y, w, 3, C_WARN, relay.message, 3, 1);
         if (relay.patreon[0]) {
             qr_draw(relay.patreon, qx - qs - 36, top + 20, qs);
-            gfx_str_c(FONT_SMALL, qx - 36 - qs / 2, top + 28 + qs, C_DIM, "Patreon");
+            if (ui_desktop) link_button(qx - qs - 36, link_y, qs, "Open Patreon");
+            else gfx_str_c(FONT_SMALL, qx - 36 - qs / 2, top + 28 + qs, C_DIM, "Patreon");
         }
         qr_draw(relay.account, qx, top + 20, qs);
-        gfx_str_c(FONT_SMALL, qx + qs / 2, top + 28 + qs, C_DIM, "OCAccount");
-        for (i = 0; i < 2; i++) {
-            int bw = 260, bx = x + i * (bw + 16), by = top + ph - 66;
-            gfx_fill_rrect((float)bx, (float)by, (float)bw, 46, 10, i == sel ? C_TEXT : C_SURFACE2, 255);
-            gfx_str_vc(FONT_BODY_SB, bx + 20, by + 23, i == sel ? C_INK : C_TEXT, opts[i]);
-        }
-        ui_hints("A=Select;Left=Previous;Right=Next;B=Back");
+        if (ui_desktop) link_button(qx, link_y, qs, "Open OCAccount");
+        else gfx_str_c(FONT_SMALL, qx + qs / 2, top + 28 + qs, C_DIM, "OCAccount");
+        buttons_draw(x, top + ph - 66, 260, opts, 2, sel);
+        ui_hints(ui_desktop ? "Click=Choose;A=Choose;Left=Previous;Right=Next;B=Back" : "A=Select;Left=Previous;Right=Next;B=Back");
         ui_end_frame();
     }
 }
@@ -1317,6 +1446,9 @@ static void act_internet(int id)
         pi_turn_off();
         sel_id = N_ON;
         break;
+    case N_CLAIM_OPEN:
+        if (pi.state == PI_CLAIM) open_link(pi.claim_url);
+        break;
     case N_FORGET:
         if (!ui_confirm("Forget the agent?", "HostMC deletes this PC's playit.gg key. Turning playit.gg on again makes a new one, which "
                                              "you approve again. Remove the old agent on playit.gg too.", "Forget it", "Cancel")) break;
@@ -1379,7 +1511,7 @@ static void act(int id, int dir)
         break;
     }
     case W_BACKUP: case W_RESTORE: case W_RESET: act_world(id); break;
-    case N_ON: case N_OFF: case N_FORGET:
+    case N_ON: case N_OFF: case N_FORGET: case N_CLAIM_OPEN:
     case N_VPS: case N_VPS_CHECK: case N_VPS_STEPS: case N_VPS_EDIT: case N_VPS_FORGET: case N_VPS_OFF:
     case N_RELAY: case N_RELAY_CHECK: case N_RELAY_MEMBER: case N_RELAY_NAME: case N_RELAY_OFF: case N_RELAY_GIVEUP:
         act_internet(id);
@@ -1415,10 +1547,68 @@ static const char *console_text(const char *line, char *stamp)
     return line;
 }
 
+/* On the desktop the console has a command line under it, typed into with the keyboard: a
+ * command, or with Say (Tab), something everyone on the server sees. Send and Quick commands are
+ * buttons beside it. */
+#define CMD_H   50
+#define CMD_GAP 12
+static char cmdline[220];
+static int cmd_say, cmd_typing;
+static struct kb_field cmdfield;
+
+/* The command line takes the keyboard's typing while the console is open (and not while a
+ * message is up over it). */
+static void console_typing(int on)
+{
+    if (!cmdfield.buf) kb_field_init(&cmdfield, cmdline, 200, KB_LINE);
+    if (on == cmd_typing) return;
+    cmd_typing = on;
+    plat_text_input(on);
+    if (on) kb_field_init(&cmdfield, cmdline, 200, KB_LINE);
+}
+
+/* The command line's parts, from the left: Command or Say, the field, Send, Quick commands. */
+static void cmdbar_parts(int x, int w, int *field_x, int *field_w, int *send_x, int *quick_x)
+{
+    *field_x = x + 142;
+    *field_w = w - 456;
+    *send_x = *field_x + *field_w + 10;
+    *quick_x = *send_x + 114;
+}
+
+static void draw_cmdbar(int x, int y, int w)
+{
+    int fx, fw, sx, qx, over;
+    const char *placeholder = sv.state == SV_STOPPED ? "Start the server to send it commands"
+                            : cmd_say ? "A message for everyone on the server" : "A command, like time set day";
+    cmdbar_parts(x, w, &fx, &fw, &sx, &qx);
+    over = ui_mouse_in(x, y, 132, CMD_H);
+    gfx_fill_rrect((float)x, (float)y, 132, CMD_H, 10, over ? C_SEL : C_SURFACE2, 255);
+    gfx_stroke_rrect((float)x, (float)y, 132, CMD_H, 10, 1, C_LINE, 255);
+    gfx_str_c(FONT_BODY_SB, x + 66, y + (CMD_H - gfx_line_h(FONT_BODY_SB)) / 2, C_TEXT, cmd_say ? "Say" : "Command");
+    kb_field_draw(&cmdfield, fx, y, fw, CMD_H, FONT_BODY, placeholder, cmd_typing);
+    over = ui_mouse_in(sx, y, 104, CMD_H);
+    gfx_fill_rrect((float)sx, (float)y, 104, CMD_H, 10, over ? 0xFFFFFF : C_TEXT, 255);
+    gfx_str_c(FONT_BODY_SB, sx + 52, y + (CMD_H - gfx_line_h(FONT_BODY_SB)) / 2, C_INK, "Send");
+    over = ui_mouse_in(qx, y, 190, CMD_H);
+    gfx_fill_rrect((float)qx, (float)y, 190, CMD_H, 10, over ? C_SEL : C_SURFACE2, 255);
+    gfx_stroke_rrect((float)qx, (float)y, 190, CMD_H, 10, 1, C_LINE, 255);
+    gfx_str_c(FONT_BODY_SB, qx + 95, y + (CMD_H - gfx_line_h(FONT_BODY_SB)) / 2, C_TEXT, "Quick commands");
+}
+
 static void draw_console(int px, int py, int pw, int ph)
 {
-    int x = px + 24, w = pw - 48 - 86, lh = gfx_line_h(FONT_SMALL) + 3, bottom = py + ph - 18, y = bottom, i, clip[4];
+    int x, w, lh, bottom, y, i, clip[4];
     int skip = console_back;
+    if (ui_desktop) {
+        draw_cmdbar(px, py + ph - CMD_H, pw);
+        ph -= CMD_H + CMD_GAP;
+    }
+    x = px + 24;
+    w = pw - 48 - 86;
+    lh = gfx_line_h(FONT_SMALL) + 3;
+    bottom = py + ph - 18;
+    y = bottom;
     ui_panel(px, py, pw, ph);
     gfx_get_clip(clip);
     gfx_clip_intersect(px + 1, py + 10, pw - 2, ph - 20);
@@ -1443,14 +1633,70 @@ static void draw_console(int px, int py, int pw, int ph)
     }
 }
 
-static void console_input(void)
+/* Older lines (lines > 0) or newer ones, as far as there are. */
+static void scroll_console(int lines)
+{
+    console_back += lines;
+    if (console_back > sv.nlines - 1) console_back = sv.nlines > 0 ? sv.nlines - 1 : 0;
+    if (console_back < 0) console_back = 0;
+}
+
+static void quick_commands(void)
+{
+    static const char *const opts[] = {"Make it day", "Clear the weather", "Save the world", "Who's on", "Cancel"};
+    static const char *const cmds[] = {"time set day", "weather clear", "save-all", "list"};
+    int c;
+    sfx(SFX_SELECT);
+    console_typing(0);                             /* the message takes the keys */
+    if (sv.state != SV_RUNNING) { message("The server isn't running", "Start it on the Server page first."); return; }
+    c = ui_dialog("Quick commands", NULL, opts, 5);
+    if (c >= 0 && c < 4) { sv_command(cmds[c]); console_back = 0; }
+}
+
+/* The desktop's command line: what's typed goes to the server. */
+static void send_line(void)
+{
+    char cmd[240];
+    if (!cmdline[0]) return;
+    if (sv.state == SV_STOPPED) {
+        console_typing(0);
+        message("The server isn't running", "Start it on the Server page first.");
+        return;
+    }
+    snprintf(cmd, sizeof cmd, "%s%s", cmd_say ? "say " : "", cmdline[0] == '/' ? cmdline + 1 : cmdline);
+    if (!sv_command(cmd)) {
+        console_typing(0);
+        message("The command didn't reach the server", "It may still be starting. Try again in a moment.");
+        return;
+    }
+    cmdline[0] = 0;
+    cmdfield.caret = cmdfield.first = 0;
+    console_back = 0;
+}
+
+static void console_input(int px, int py, int pw, int ph)
 {
     char buf[220] = "", cmd[240];
     int d = ui_nav_y();
-    if (d < 0 && console_back < sv.nlines - 1) { console_back += 3; if (console_back > sv.nlines - 1) console_back = sv.nlines - 1; }
-    if (d > 0 && console_back > 0) { console_back -= 3; if (console_back < 0) console_back = 0; }
-    if (PRESSED(lb)) { console_back += 15; if (console_back > sv.nlines - 1) console_back = sv.nlines > 0 ? sv.nlines - 1 : 0; }
-    if (PRESSED(rb)) { console_back -= 15; if (console_back < 0) console_back = 0; }
+    if (d) scroll_console(-3 * d);
+    if (ui_desktop) {
+        int by = py + ph - CMD_H, fx, fw, sx, qx;
+        cmdbar_parts(px, pw, &fx, &fw, &sx, &qx);
+        if (mouse.wheel && ui_mouse_in(px, py, pw, ph - CMD_H - CMD_GAP)) scroll_console(3 * mouse.wheel);
+        if (ui_key(PLAT_KEY_PAGEUP)) scroll_console(15);
+        if (ui_key(PLAT_KEY_PAGEDOWN)) scroll_console(-15);
+        if (kb_field_input(&cmdfield)) send_line();
+        else if (ui_clicked(sx, by, 104, CMD_H)) { sfx(SFX_SELECT); send_line(); }
+        kb_field_click(&cmdfield, fx, by, fw, CMD_H, FONT_BODY);
+        if (ui_key(PLAT_KEY_TAB) || ui_clicked(px, by, 132, CMD_H)) {
+            cmd_say = !cmd_say;
+            sfx(SFX_MOVE);
+        }
+        if (ui_key(PLAT_KEY_F1 + 1) || ui_clicked(qx, by, 190, CMD_H)) quick_commands();
+        return;
+    }
+    if (PRESSED(lb)) scroll_console(15);
+    if (PRESSED(rb)) scroll_console(-15);
     if (PRESSED(a) || PRESSED(y)) {
         int say = PRESSED(y);
         sfx(SFX_SELECT);
@@ -1460,15 +1706,7 @@ static void console_input(void)
         if (!sv_command(cmd)) message("The command didn't reach the server", "It may still be starting. Try again in a moment.");
         console_back = 0;
     }
-    if (PRESSED(x)) {
-        static const char *const opts[] = {"Make it day", "Clear the weather", "Save the world", "Who's on", "Cancel"};
-        static const char *const cmds[] = {"time set day", "weather clear", "save-all", "list"};
-        int c;
-        sfx(SFX_SELECT);
-        if (sv.state != SV_RUNNING) { message("The server isn't running", "Start it on the Server page first."); return; }
-        c = ui_dialog("Quick commands", NULL, opts, 5);
-        if (c >= 0 && c < 4) { sv_command(cmds[c]); console_back = 0; }
-    }
+    if (PRESSED(x)) quick_commands();
 }
 
 /* ---------------------------------------------------------------- drawing */
@@ -1494,6 +1732,23 @@ static int row_height(const struct row *r, int w)
     case R_QR: return 250;
     default: return 14;
     }
+}
+
+/* A row that can be clicked, as much of it as shows between top and bottom. */
+static void add_hit(int id, int x, int y, int w, int h, int top, int bottom, int pill_x, int pill_w)
+{
+    struct hit *t;
+    if (y < top) { h -= top - y; y = top; }
+    if (y + h > bottom) h = bottom - y;
+    if (h <= 0 || nhits >= MAX_ROWS) return;
+    t = &hits[nhits++];
+    t->id = id;
+    t->x = x;
+    t->y = y;
+    t->w = w;
+    t->h = h;
+    t->pill_x = pill_x;
+    t->pill_w = pill_w;
 }
 
 static void draw_status(int x, int y, int w)
@@ -1544,16 +1799,20 @@ static void draw_rows(int px, int py, int pw, int ph)
         if (rows[i].id == sel_id && selectable(&rows[i]) && sel_i < 0) { sel_i = i; sel_top = ys[i]; sel_h = hs_[i]; }
         if (rows[i].kind == R_BUTTON && gfx_str_w(FONT_BODY_SB, rows[i].label) + 56 > btn_w) btn_w = gfx_str_w(FONT_BODY_SB, rows[i].label) + 56;
     }
-    /* Keep the selected row in view (and the top of the page when nothing is selected). */
-    if (in_page && sel_i >= 0) {
+    /* Keep the selected row in view (and the top of the page when nothing is selected). On the
+     * desktop only when the keys moved it: the wheel scrolls past it, and the pointer picks
+     * rows that are in view already. */
+    if (in_page && sel_i >= 0 && (!ui_desktop || reveal)) {
         if (sel_top - scroll_y < 0) scroll_y = sel_top - (sel_i > 0 && !selectable(&rows[sel_i - 1]) ? hs_[sel_i - 1] : 0);
         if (sel_top + sel_h - scroll_y > ph - 44) scroll_y = sel_top + sel_h - (ph - 44);
     }
+    reveal = 0;
     if (scroll_y > total - (ph - 44)) scroll_y = total - (ph - 44);
     if (scroll_y < 0) scroll_y = 0;
     gfx_get_clip(clip);
     gfx_clip_intersect(px + 1, py + 1, pw - 2, ph - 2);
     y = py + 22 - scroll_y;
+    nhits = 0;
     if (in_page && sel_i >= 0 && rows[sel_i].kind == R_ITEM) {
         float target = (float)(y + sel_top);
         sel_y_hl = sel_y_hl < 0 ? target : ui_ease(sel_y_hl, target, 0.45f);
@@ -1574,20 +1833,22 @@ static void draw_rows(int px, int py, int pw, int ph)
             uint32_t fill = on ? C_TEXT : r->primary ? C_ACCENT : C_SURFACE2;
             gfx_fill_rrect((float)x, (float)ry, (float)bw, 46, 10, fill, 255);
             gfx_str_vc(FONT_BODY_SB, x + 22, ry + 23, on ? C_INK : C_TEXT, r->label);
+            add_hit(r->id, x, ry, bw, 46, py + 1, py + ph - 1, 0, 0);
             break;
         }
         case R_ITEM: {
-            int cy = ry + (h - 6) / 2;
+            int cy = ry + (h - 6) / 2, vw = 0;
             gfx_str_vc(FONT_BODY_SB, x, cy, C_TEXT, r->label);
             if (r->value[0]) {
                 char shown[200];
-                int vw, maxw = w - gfx_str_w(FONT_BODY_SB, r->label) - 60;
+                int maxw = w - gfx_str_w(FONT_BODY_SB, r->label) - 60;
                 snprintf(shown, sizeof shown, "%s%s%s", on && r->cycle ? "<  " : "", r->value, on && r->cycle ? "  >" : "");
                 vw = gfx_str_w(FONT_SMALL, shown) + 28;
                 if (vw > maxw) vw = maxw;
                 gfx_fill_rrect((float)(x + w - vw), cy - 15.0f, (float)vw, 30, 15, on ? C_TEXT : C_SURFACE2, 255);
                 gfx_str_fit(FONT_SMALL, x + w - vw + 14, cy - gfx_line_h(FONT_SMALL) / 2, on ? C_INK : C_TEXT, shown, vw - 28);
             }
+            add_hit(r->id, x - 14, ry, w + 28, h - 6, py + 1, py + ph - 1, r->cycle && vw ? x + w - vw : 0, r->cycle ? vw : 0);
             break;
         }
         case R_HEAD:
@@ -1619,7 +1880,9 @@ static void draw_rows(int px, int py, int pw, int ph)
         case R_QR: {
             int qs = 226, tx = x + qs + 32, tw = w - qs - 32, ty = ry + 4;
             qr_draw(r->value, x, ry, qs);
-            ty += wrap(FONT_BODY, tx, ty, tw, 4, C_TEXT, "Scan this with your phone, or open the link on any device. Sign in to playit.gg there and approve this PC.", 5, 1)
+            ty += wrap(FONT_BODY, tx, ty, tw, 4, C_TEXT, ui_desktop
+                       ? "Open the link in your browser (the button below), or scan this with your phone. Sign in to playit.gg there and approve this PC."
+                       : "Scan this with your phone, or open the link on any device. Sign in to playit.gg there and approve this PC.", 5, 1)
                   * (gfx_line_h(FONT_BODY) + 4) + 12;
             gfx_str_fit(FONT_LABEL, tx, ty, C_TEXT, r->value + 8, tw);       /* without "https://" */
             ty += gfx_line_h(FONT_LABEL) + 14;
@@ -1636,15 +1899,21 @@ static void draw_rows(int px, int py, int pw, int ph)
     }
 }
 
+#define MENU_ROW 56
+
 static void draw_menu(int x, int y, int w)
 {
-    int i, rowh = 56;
+    int i, rowh = MENU_ROW;
     menu_hl = ui_ease(menu_hl, (float)page, 0.45f);
     if (!in_page) ui_select_box((float)x, y + menu_hl * rowh, (float)w, rowh - 8.0f, 10);
     else gfx_fill_rrect((float)x, y + page * rowh + 0.0f, (float)w, rowh - 8.0f, 10, C_SURFACE, 255);
     for (i = 0; i < P_COUNT; i++) {
         int cy = y + i * rowh + (rowh - 8) / 2, on = i == page;
         uint32_t bg = on ? (in_page ? C_SURFACE : C_SEL) : C_BG;
+        if (ui_desktop && !on && ui_mouse_in(x, y + i * rowh, w, rowh - 8)) {   /* under the pointer */
+            gfx_fill_rrect((float)x, (float)(y + i * rowh), (float)w, rowh - 8.0f, 10, C_SURFACE, 255);
+            bg = C_SURFACE;
+        }
         icon_draw(page_icons[i], x + 26.0f, (float)cy, 24, on ? C_TEXT : C_SUB, bg);
         gfx_str_vc(FONT_BODY_SB, x + 52, cy, on ? C_TEXT : C_SUB, page_names[i]);
         if (i == P_SERVER) {
@@ -1710,6 +1979,81 @@ static int first_selectable(void)
     return 0;
 }
 
+/* Another page in the menu. */
+static void go_page(int p)
+{
+    page = p;
+    scroll_y = 0;
+    console_back = 0;
+    if (page != P_CONSOLE) build();
+    sel_id = first_selectable();
+}
+
+/* Into the page (A, Right, or a click): 0 when it has nothing to choose. */
+static int enter_page(void)
+{
+    if (page != P_CONSOLE && !first_selectable()) return 0;
+    in_page = 1;
+    sel_id = first_selectable();
+    sel_y_hl = -1;
+    reveal = 1;
+    if (page == P_VERSION && !versions_ok[!strcmp(hs.type, "paper")]) {
+        char why[200];
+        int paper = !strcmp(hs.type, "paper");
+        /* The list from last time is enough to show what's newest; Check asks again. */
+        if (versions_get(paper, -1, &versions[paper], why, sizeof why)) versions_ok[paper] = 1;
+    }
+    if (page == P_INTERNET && hs.relay && (!relay.asked || ui_ms() - relay.asked > 10 * 60 * 1000)) {
+        char why[240];
+        relay_ask("status", NULL, why, sizeof why);   /* as it is now; without an answer, the last one shows */
+    }
+    return 1;
+}
+
+/* The mouse on the desktop: a click in the menu opens that page; in a page the pointer picks a
+ * row as it moves onto it (so it doesn't fight the arrow keys while it rests), a click chooses
+ * it, a click on either end of a setting's value takes it back or on (so does the right button,
+ * back), and the wheel scrolls. The console's own are in console_input(). */
+static void desktop_mouse(int px, int py, int pw, int ph)
+{
+    int i;
+    for (i = 0; i < P_COUNT; i++) {
+        if (!ui_clicked(M, py + i * MENU_ROW, 230, MENU_ROW - 8)) continue;
+        if (i != page || !in_page) {
+            sfx(SFX_SELECT);
+            if (i != page) go_page(i);
+            in_page = 0;
+            enter_page();
+        }
+        return;
+    }
+    if (page == P_CONSOLE) return;
+    if (mouse.wheel && ui_mouse_in(px, py, pw, ph)) scroll_y -= mouse.wheel * 60;
+    for (i = 0; i < nhits; i++) {
+        const struct hit *t = &hits[i];
+        int dir = 0;
+        if (!ui_mouse_in(t->x, t->y, t->w, t->h)) continue;
+        if ((mouse.dx || mouse.dy || mouse.clicks) && (sel_id != t->id || !in_page)) {
+            if (sel_id != t->id) sfx(SFX_MOVE);
+            sel_id = t->id;
+            if (!in_page) {
+                in_page = 1;
+                sel_y_hl = -1;
+            }
+        }
+        if (t->pill_w && mouse.x < t->pill_x + 36 && mouse.x >= t->pill_x) dir = -1;
+        else if (t->pill_w && mouse.x >= t->pill_x + t->pill_w - 36 && mouse.x < t->pill_x + t->pill_w) dir = 1;
+        if (mouse.clicks & 1) {
+            sfx(SFX_SELECT);
+            act(t->id, dir);
+        } else if ((mouse.clicks & 2) && t->pill_w) {
+            sfx(SFX_SELECT);
+            act(t->id, -1);
+        }
+        return;
+    }
+}
+
 int main(int argc, char **argv)
 {
     int started = 0;
@@ -1718,6 +2062,7 @@ int main(int argc, char **argv)
     plat_init();
     gfx_init();
     ui_init();
+    ui_keys_on = ui_desktop;                   /* Tab, F2, Delete and Ctrl+V on the desktop */
     ui_loading_frame("HostMC", "Loading");
     plat_storage_init();
     config_load();
@@ -1759,46 +2104,35 @@ int main(int argc, char **argv)
             do_start();
         }
         if (page != P_CONSOLE) build();
+        console_typing(ui_desktop && in_page && page == P_CONSOLE);
+        if (ui_desktop) desktop_mouse(px, py, pw, ph);
 
         if (!in_page) {
             int d = ui_nav_y();
             if (d && page + d >= 0 && page + d < P_COUNT) {
-                page += d;
                 sfx(SFX_MOVE);
-                scroll_y = 0;
-                console_back = 0;
-                if (page != P_CONSOLE) build();
-                sel_id = first_selectable();
+                go_page(page + d);
             }
-            if (PRESSED(a) || PRESSED(right) || (cur.lx > STICK_TH && prev.lx <= STICK_TH)) {
-                if (page == P_CONSOLE || first_selectable()) {
-                    in_page = 1;
-                    sfx(SFX_SELECT);
-                    sel_id = first_selectable();
-                    sel_y_hl = -1;
-                    if (page == P_VERSION && !versions_ok[!strcmp(hs.type, "paper")]) {
-                        char why[200];
-                        int paper = !strcmp(hs.type, "paper");
-                        /* The list from last time is enough to show what's newest; Check asks again. */
-                        if (versions_get(paper, -1, &versions[paper], why, sizeof why)) versions_ok[paper] = 1;
-                    }
-                    if (page == P_INTERNET && hs.relay && (!relay.asked || ui_ms() - relay.asked > 10 * 60 * 1000)) {
-                        char why[240];
-                        relay_ask("status", NULL, why, sizeof why);   /* as it is now; without an answer, the last one shows */
-                    }
-                }
+            if ((PRESSED(a) || PRESSED(right) || (cur.lx > STICK_TH && prev.lx <= STICK_TH)) &&
+                (page == P_CONSOLE || first_selectable())) {
+                sfx(SFX_SELECT);
+                enter_page();
             }
-            if (PRESSED(b)) { sfx(SFX_BACK); leave(); return 0; }
+            if (PRESSED(b)) { sfx(SFX_BACK); console_typing(0); leave(); return 0; }
         } else if (page == P_CONSOLE) {
-            if (PRESSED(b) || (PRESSED(left))) { sfx(SFX_BACK); in_page = 0; }
-            else console_input();
+            /* On the desktop, Left moves the command line's caret: only Esc goes back. */
+            if (PRESSED(b) || (!ui_desktop && PRESSED(left))) { sfx(SFX_BACK); in_page = 0; }
+            else console_input(px, py, pw, ph);
         } else {
             int dy = ui_nav_y(), dx = ui_nav_x(), i;
             struct row *r = NULL;
             for (i = 0; i < nrows; i++)
                 if (rows[i].id == sel_id && selectable(&rows[i])) { r = &rows[i]; break; }
             if (!r && first_selectable()) { sel_id = first_selectable(); }
-            if (dy) move_sel(dy);
+            if (dy) {
+                move_sel(dy);
+                reveal = 1;
+            }
             if (PRESSED(b)) { sfx(SFX_BACK); in_page = 0; }
             else if (dx && r && r->cycle) act(r->id, dx);
             else if (dx < 0) { sfx(SFX_BACK); in_page = 0; }
@@ -1810,7 +2144,19 @@ int main(int argc, char **argv)
         draw_menu(M, py, 230);
         if (page == P_CONSOLE) draw_console(px, py, pw, ph);
         else { build(); draw_rows(px, py, pw, ph); }
-        if (!in_page) ui_hints("A=Open;B=Leave HostMC");
+        if (ui_desktop) {
+            /* Keys (Enter for A, Esc for B...) and the mouse. */
+            if (!in_page) ui_hints("Click=Open a page;A=Open;B=Close HostMC");
+            else if (page == P_CONSOLE) ui_hints("A=Send;Tab=Command or say;F2=Quick commands;Wheel=Older and newer;B=Back");
+            else {
+                const char *hint = "Click=Choose;Wheel=Scroll;A=Choose;B=Back";
+                int i;
+                for (i = 0; i < nrows; i++)
+                    if (rows[i].id == sel_id && selectable(&rows[i]) && rows[i].cycle)
+                        hint = "Click=Next;Right click=Previous;Left=Less;Right=More;B=Back";
+                ui_hints(hint);
+            }
+        } else if (!in_page) ui_hints("A=Open;B=Leave HostMC");
         else if (page == P_CONSOLE) ui_hints("A=Command;Y=Say;X=Quick commands;LB=Older;RB=Newer;B=Back");
         else {
             const char *hint = "A=Select;B=Back";

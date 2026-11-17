@@ -20,6 +20,8 @@ struct pad cur, prev;
 int M, HEADER_H;
 int ui_desktop;
 struct plat_mouse mouse = {-1, -1, 0, 0, 0, 0, 0};
+int ui_keys_on, ui_ctrl;
+static int keys_down[16], nkeys_down;           /* this frame's presses, with ui_keys_on */
 
 static uint64_t next_frame, fade_start;
 static int fading;
@@ -41,6 +43,30 @@ int ui_mouse_in(int x, int y, int w, int h)
 int ui_clicked(int x, int y, int w, int h)
 {
     return (mouse.clicks & 1) && ui_mouse_in(x, y, w, h);
+}
+
+#define WITH_CTRL 0x10000                       /* a press made while Ctrl was held */
+
+int ui_key(int key)
+{
+    int i;
+    for (i = 0; i < nkeys_down; i++)
+        if ((keys_down[i] & ~WITH_CTRL) == key) return keys_down[i] & WITH_CTRL ? 2 : 1;
+    return 0;
+}
+
+/* Ctrl is noted with each press, since Ctrl's own press and release can come in the same frame
+ * as the key's (a quick Ctrl+V, or one typed by a program). */
+static void take_keys(void)
+{
+    int key, down;
+    nkeys_down = 0;
+    if (!ui_keys_on) return;
+    while (plat_key_event(&key, &down)) {
+        if (key == PLAT_KEY_CTRL) ui_ctrl = down;
+        else if (down && nkeys_down < (int)(sizeof keys_down / sizeof keys_down[0]))
+            keys_down[nkeys_down++] = key | (ui_ctrl ? WITH_CTRL : 0);
+    }
 }
 
 uint64_t ui_ms(void)
@@ -68,6 +94,7 @@ void ui_poll(void)
     prev = cur;
     plat_poll(&cur);
     plat_mouse(&mouse);
+    take_keys();
     if (settle) {
         settle = 0;
         prev = cur;
@@ -340,9 +367,25 @@ static const char *desktop_key(const char *b)
     return b;
 }
 
+/* A mouse, its left or right button or its wheel lit, for the hints of desktop apps. */
+static int mouse_glyph(int x, int cy, int part)
+{
+    gfx_fill_rrect(x + 2.0f, cy - 12.0f, 16, 24, 8, C_SURFACE2, 255);
+    gfx_stroke_rrect(x + 2.0f, cy - 12.0f, 16, 24, 8, 1.5f, C_SUB, 255);
+    gfx_line(x + 3.0f, cy - 2.0f, x + 17.0f, cy - 2.0f, 1.2f, C_SUB, 255);
+    gfx_line(x + 10.0f, cy - 11.0f, x + 10.0f, cy - 2.0f, 1.2f, C_SUB, 255);
+    if (part == 0) gfx_fill_rrect(x + 4.0f, cy - 10.0f, 5, 7, 2, C_TEXT, 255);
+    else if (part == 1) gfx_fill_rrect(x + 11.0f, cy - 10.0f, 5, 7, 2, C_TEXT, 255);
+    else gfx_fill_rrect(x + 8.5f, cy - 9.0f, 3, 8, 1.5f, C_TEXT, 255);
+    return 20;
+}
+
 int ui_button_glyph(int x, int cy, const char *b)
 {
     uint32_t c = 0;
+    if (ui_desktop && !strcmp(b, "Click")) return mouse_glyph(x, cy, 0);
+    if (ui_desktop && !strcmp(b, "Right click")) return mouse_glyph(x, cy, 1);
+    if (ui_desktop && !strcmp(b, "Wheel")) return mouse_glyph(x, cy, 2);
     if (ui_desktop) b = desktop_key(b);              /* a key, drawn as a key cap below */
     else if (!strcmp(b, "A")) c = C_BTN_A;
     else if (!strcmp(b, "B")) c = C_BTN_B;

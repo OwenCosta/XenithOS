@@ -143,10 +143,54 @@ static void write_wav(void)
 
 /* ----------------------------------------------------------- input script */
 
-struct cmd { char op[16]; char arg[64]; int n, a, b; };
+struct cmd { char op[16]; char arg[64]; int n, a, b; char text[128]; };
 static struct cmd *cmds;
 static int ncmds, pc, cmd_left = -1, polls;
 static struct pad held;
+
+/* XSIM_DESKTOP=1: the program runs as a desktop app (plat_desktop), and the script drives a
+ * mouse, the keyboard's own keys and typing (sim/README.md). */
+static int sim_desktop;
+static struct plat_mouse sim_mouse = {-1, -1, 0, 0, 0, 0, 0};
+static int sim_keys[64], sim_keys_head, sim_keys_tail;
+static char sim_text[1024], sim_clipboard[1024];
+static int sim_text_len, sim_text_at, typing_on;
+
+static void sim_key(int key, int down)
+{
+    int next = (sim_keys_head + 1) % 64;
+    if (!key || next == sim_keys_tail) return;
+    sim_keys[sim_keys_head] = down ? key : -key;
+    sim_keys_head = next;
+}
+
+/* A key's name in a script: a letter or digit, or tab, enter, esc, backspace, delete, home,
+ * end, pageup, pagedown, up, down, left, right, shift, ctrl, alt, f1 to f12. 0 if unknown. */
+static int key_named(const char *s)
+{
+    static const struct { const char *n; int k; } names[] = {
+        {"tab", PLAT_KEY_TAB}, {"enter", PLAT_KEY_ENTER}, {"esc", PLAT_KEY_ESC}, {"backspace", PLAT_KEY_BACKSPACE},
+        {"delete", PLAT_KEY_DELETE}, {"home", PLAT_KEY_HOME}, {"end", PLAT_KEY_END}, {"pageup", PLAT_KEY_PAGEUP},
+        {"pagedown", PLAT_KEY_PAGEDOWN}, {"up", PLAT_KEY_UP}, {"down", PLAT_KEY_DOWN}, {"left", PLAT_KEY_LEFT},
+        {"right", PLAT_KEY_RIGHT}, {"shift", PLAT_KEY_SHIFT}, {"ctrl", PLAT_KEY_CTRL}, {"alt", PLAT_KEY_ALT},
+        {"space", ' '},
+    };
+    unsigned i;
+    if (s[0] && !s[1] && (islower((unsigned char)s[0]) || isdigit((unsigned char)s[0]))) return s[0];
+    if ((s[0] == 'f' || s[0] == 'F') && atoi(s + 1) >= 1 && atoi(s + 1) <= 12) return PLAT_KEY_F1 + atoi(s + 1) - 1;
+    for (i = 0; i < sizeof names / sizeof *names; i++)
+        if (!strcasecmp(s, names[i].n)) return names[i].k;
+    return 0;
+}
+
+static void sim_type(const char *s)
+{
+    if (!typing_on) {
+        fprintf(stderr, "sim: \"%s\" typed with no text field open: it goes nowhere\n", s);
+        return;
+    }
+    for (; *s && sim_text_len < (int)sizeof sim_text; s++) sim_text[sim_text_len++] = *s == '|' ? '\n' : *s;
+}
 
 static int set_button(struct pad *p, const char *name, int v)
 {
@@ -176,6 +220,16 @@ static void load_script(const char *path)
         memset(&c, 0, sizeof c);
         c.n = -1;
         if (sscanf(s, "%15s %63s %d %d %d", c.op, c.arg, &c.n, &c.a, &c.b) < 1) continue;
+        if (!strcmp(c.op, "type")) {                /* the rest of the line, or what's "in quotes" */
+            const char *t = s + 4;
+            if (*t == ' ') t++;
+            if (*t == '"') {
+                t++;
+                snprintf(c.text, sizeof c.text, "%.*s", (int)strcspn(t, "\"\r\n"), t);
+            } else {
+                snprintf(c.text, sizeof c.text, "%.*s", (int)strcspn(t, "\r\n"), t);
+            }
+        }
         cmds = realloc(cmds, sizeof *cmds * (ncmds + 1));
         cmds[ncmds++] = c;
     }
@@ -209,6 +263,7 @@ static void step_script(void)
         if (cmd_left > 0) { cmd_left--; return; }
         if (cmd_left == 0) {                     /* end of a press: release everything it held */
             memset(&held, 0, sizeof held);
+            sim_mouse.buttons = 0;
             cmd_left = -1;
             pc++;
             return;                              /* one poll with everything released */
@@ -234,6 +289,40 @@ static void step_script(void)
             else if (!strcmp(c->arg, "ry")) held.ry = c->n;
             cmd_left = (c->a > 0 ? c->a : 2) - 1;
             return;
+        } else if (!strcmp(c->op, "mouse") || !strcmp(c->op, "click") || !strcmp(c->op, "rclick")) {
+            /* mouse X Y: the pointer moves there; click and rclick: and the left or right button
+             * goes down there for this frame */
+            int x = atoi(c->arg), y = c->n, bit = !strcmp(c->op, "click") ? 1 : !strcmp(c->op, "rclick") ? 2 : 0;
+            memset(&held, 0, sizeof held);
+            sim_mouse.dx += sim_mouse.x >= 0 ? x - sim_mouse.x : 1;
+            sim_mouse.dy += sim_mouse.y >= 0 ? y - sim_mouse.y : 1;
+            sim_mouse.x = x;
+            sim_mouse.y = y;
+            sim_mouse.buttons |= bit;
+            sim_mouse.clicks |= bit;
+            cmd_left = 0;
+            return;
+        } else if (!strcmp(c->op, "wheel")) {        /* wheel N: clicks, positive away from you */
+            memset(&held, 0, sizeof held);
+            sim_mouse.wheel += atoi(c->arg);
+            cmd_left = 0;
+            return;
+        } else if (!strcmp(c->op, "key")) {          /* key NAME, or key ctrl+NAME: pressed and let go */
+            int ctrl = !strncasecmp(c->arg, "ctrl+", 5), k = key_named(c->arg + (ctrl ? 5 : 0));
+            if (!k) { fprintf(stderr, "sim: unknown key %s\n", c->arg); finish(2); }
+            memset(&held, 0, sizeof held);
+            if (ctrl) sim_key(PLAT_KEY_CTRL, 1);
+            sim_key(k, 1);
+            sim_key(k, 0);
+            if (ctrl) sim_key(PLAT_KEY_CTRL, 0);
+            if (k == PLAT_KEY_BACKSPACE && typing_on) sim_type("\b");   /* as a real keyboard's comes */
+            cmd_left = 0;
+            return;
+        } else if (!strcmp(c->op, "type")) {         /* type TEXT: typed, '|' is Enter */
+            memset(&held, 0, sizeof held);
+            sim_type(c->text);
+            cmd_left = 0;
+            return;
         } else if (!strcmp(c->op, "shot")) {
             save_png(c->arg);
             pc++;
@@ -251,6 +340,8 @@ static void step_script(void)
 void plat_init(void)
 {
     const char *s = getenv("XSIM_SCRIPT");
+    sim_desktop = getenv("XSIM_DESKTOP") && !strcmp(getenv("XSIM_DESKTOP"), "1");
+    if (getenv("XSIM_CLIPBOARD")) snprintf(sim_clipboard, sizeof sim_clipboard, "%s", getenv("XSIM_CLIPBOARD"));
     if (getenv("XSIM_OUT")) out_dir = getenv("XSIM_OUT");
     if (getenv("XSIM_W")) W = atoi(getenv("XSIM_W"));
     if (getenv("XSIM_H")) H = atoi(getenv("XSIM_H"));
@@ -441,11 +532,47 @@ int plat_kind(void) { return sim_is_pc() ? PLAT_PC : PLAT_XBOX; }
 int plat_can_exit_to_loader(void) { return !sim_is_pc(); }
 int plat_has_desktop(void) { return sim_is_pc(); }
 
-/* The simulator runs apps as they are inside XenithOS: not as desktop apps. */
-int plat_desktop(void) { return 0; }
-void plat_mouse(struct plat_mouse *m) { memset(m, 0, sizeof *m); m->x = m->y = -1; }
+/* The simulator runs apps as they are inside XenithOS, or with XSIM_DESKTOP=1 as desktop apps,
+ * with the script's mouse and keys (see step_script). */
+int plat_desktop(void) { return sim_desktop; }
+
+void plat_mouse(struct plat_mouse *m)
+{
+    *m = sim_mouse;
+    if (!sim_desktop) {
+        memset(m, 0, sizeof *m);
+        m->x = m->y = -1;
+    }
+    sim_mouse.clicks = sim_mouse.wheel = sim_mouse.dx = sim_mouse.dy = 0;
+}
+
 void plat_mouse_grab(int on) { (void)on; }
-int plat_key_event(int *key, int *down) { (void)key; (void)down; return 0; }
+
+int plat_key_event(int *key, int *down)
+{
+    if (!sim_desktop || sim_keys_tail == sim_keys_head) return 0;
+    *down = sim_keys[sim_keys_tail] > 0;
+    *key = *down ? sim_keys[sim_keys_tail] : -sim_keys[sim_keys_tail];
+    sim_keys_tail = (sim_keys_tail + 1) % 64;
+    return 1;
+}
+
+/* XSIM_CLIPBOARD is what's copied at the start; what the program copies is said on stderr. */
+int plat_clipboard_set(const char *text)
+{
+    if (!sim_desktop) return 0;
+    snprintf(sim_clipboard, sizeof sim_clipboard, "%s", text ? text : "");
+    fprintf(stderr, "sim: copied: %s\n", sim_clipboard);
+    return 1;
+}
+
+int plat_clipboard_get(char *out, int n)
+{
+    if (n > 0) out[0] = 0;
+    if (!sim_desktop || n <= 0) return 0;
+    snprintf(out, (size_t)n, "%s", sim_clipboard);
+    return out[0] != 0;
+}
 void plat_switch_to_desktop(void)
 {
     if (hook_before) hook_before();
@@ -679,16 +806,25 @@ int plat_local_app_set(const char *id, int on)
 const char *plat_launch_error(void) { return ""; }
 
 /* Typing on a real keyboard: XSIM_TYPE="text" is typed the first time typing is switched on, as
- * much each frame as the caller takes (a real keyboard's text arrives in pieces too). */
-static int typing_on, typed_at, typed_done;
-void plat_text_input(int on) { typing_on = on; }
+ * much each frame as the caller takes (a real keyboard's text arrives in pieces too). After that,
+ * what the script's type commands typed. */
+static int typed_at, typed_done;
+void plat_text_input(int on)
+{
+    typing_on = on;
+    sim_text_len = sim_text_at = 0;                /* nothing typed before counts */
+}
 int plat_text_take(char *out, int n)
 {
     const char *t = getenv("XSIM_TYPE");
-    int i;
-    if (!typing_on || typed_done || !t) return 0;
-    for (i = 0; t[typed_at] && i < n; i++, typed_at++) out[i] = t[typed_at] == '|' ? '\n' : t[typed_at];
-    if (!t[typed_at]) typed_done = 1;
+    int i = 0;
+    if (!typing_on) return 0;
+    if (t && !typed_done) {
+        for (; t[typed_at] && i < n; i++, typed_at++) out[i] = t[typed_at] == '|' ? '\n' : t[typed_at];
+        if (!t[typed_at]) typed_done = 1;
+        return i;
+    }
+    while (i < n && sim_text_at < sim_text_len) out[i++] = sim_text[sim_text_at++];
     return i;
 }
 

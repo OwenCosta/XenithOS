@@ -3,6 +3,8 @@
 # server (the simulator's stand-in, sim/hostmc/java: nothing is downloaded), and then the part
 # that only a real PC has: leaving HostMC must leave the server running, as a process of its own
 # that HostMC isn't the parent of, and opening HostMC again must pick it up. Then HostMC stops it.
+# Then HostMC as a desktop app, as XenithOS Desktop's Apps menu opens it: its own window, clicks,
+# typing into its text box and its console's command line, and the server outliving the window.
 # Needs xvfb, xdotool, x11-apps, imagemagick and python3. Run after make -C linux.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 T=/tmp/xos-hostmc
@@ -78,8 +80,68 @@ press Escape
 press Escape
 sleep 2
 shot back_home
-
 kill "$XP" 2>/dev/null; wait "$XP" 2>/dev/null
+
+# HostMC as a desktop app (XenithOS Desktop's Apps menu starts it with XENITHOS_DESKTOP=1): a window
+# of its own named after the app, which the mouse clicks and the keyboard types into. The window
+# shows the 1280x720 picture scaled, so a click at picture point (x, y) goes to (x * W / 1280, y * H / 720).
+echo "  $(ms) ms  HostMC as a desktop app"
+mkdir -p "$T/lib"
+cp "$repo/linux/hostmc" "$T/lib/hostmc"
+cp "$repo/apps/hostmc/app.txt" "$T/lib/hostmc.txt"    # its name, as /usr/lib/xenithos/hostmc.txt
+desktop_app() {
+    XENITHOS_DESKTOP=1 XENITHOS_DATA="$T" SDL_AUDIODRIVER=dummy "$T/lib/hostmc" 2>> "$T/hostmc-desktop.log" &
+    HP=$!
+    WID=$(xdotool search --sync --name '^HostMC$' | head -n 1)
+    xdotool windowfocus "$WID" > /dev/null 2>&1
+    eval "$(xdotool getwindowgeometry --shell "$WID")"
+    sleep 2
+}
+at() { xdotool mousemove --window "$WID" $(( $1 * WIDTH / 1280 )) $(( $2 * HEIGHT / 720 )); sleep 0.15; }
+click() { at "$1" "$2"; xdotool click 1; sleep 0.6; }
+desktop_app
+check "its window is named HostMC" "[ -n \"$WID\" ]"
+check "a window, not the whole screen (${WIDTH}x${HEIGHT} of 1280x720)" "[ \"$WIDTH\" -lt 1280 ] && [ \"$WIDTH\" -ge 640 ]"
+click 190 308                     # Settings, in the menu
+click 500 160                     # the message of the day: the text box
+shot desktop_text_box
+xdotool type --delay 40 "Typed on a desktop"
+xdotool key Return
+sleep 0.8
+shot desktop_settings
+check "the message typed in the text box is the server's (server.properties)" \
+      "grep -qx 'motd=Typed on a desktop' '$T/hostmc/server/server.properties'"
+click 190 140                     # Server
+click 450 270                     # Start the server
+sleep 8
+shot desktop_running
+check "a click started the server" server_alive
+click 190 196                     # Console: its command line takes the typing
+sleep 0.5
+xdotool type --delay 40 "say Hello from xdotool"
+xdotool key Return
+sleep 1.5
+shot desktop_console
+check "a command typed on the console's command line reached the server" \
+      "grep -q '\\[Server\\] Hello from xdotool' '$T/hostmc/server/console.log'"
+pid=$(server_pid)
+kill -TERM "$HP"                  # as closing the window does (SDL's quit)
+wait "$HP" 2>/dev/null
+check "closing the window left the server running (pid $pid)" "[ \"\$(server_pid)\" = \"$pid\" ] && server_alive"
+desktop_app
+check "HostMC opened again found it" "[ \"\$(server_pid)\" = \"$pid\" ] && server_alive"
+click 190 140                     # Server
+click 450 270                     # Stop the server
+sleep 4
+shot desktop_stopped
+check "a click stopped it" "! server_alive"
+xdotool key Escape
+sleep 0.3
+xdotool key Escape                # back to the menu, then close
+sleep 1
+check "Esc from the menu closed HostMC" "! kill -0 $HP 2>/dev/null"
+kill "$HP" 2>/dev/null; wait "$HP" 2>/dev/null
+
 kill "$XV" 2>/dev/null; wait "$XV" 2>/dev/null
 if server_alive; then echo "  (stopping the stand-in server left running, pid $(server_pid))"; kill "$(server_pid)"; failed=1; fi
 echo "screenshots in $T/shots"
