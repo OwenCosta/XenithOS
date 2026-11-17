@@ -25,7 +25,8 @@ for b in xenithos volt doom tube photos minenest; do
     mv -f "$DEST/.$b.new" "$DEST/$b"
 done
 
-# MineNest's own program, the newest release (it keeps the one here when GitHub can't be reached).
+# MineNest's own program: the release linux/minenest.sha256 pins, checked against the SHA-256 written
+# there (it keeps the one here when GitHub can't be reached).
 "$SRC/linux/get-minenest.sh" "$DEST" || echo "MineNest wasn't updated"
 # HostMC became MineNest: its program goes (its data stays, for MineNest to bring in).
 rm -f "$DEST/hostmc" "$DEST/hostmc.txt" "$DEST/hostmc.ximg"

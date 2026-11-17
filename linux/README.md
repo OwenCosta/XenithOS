@@ -155,11 +155,14 @@ MineNest (in Apps) runs Minecraft servers on the PC. It used to be HostMC; it's 
 [MineNest](https://github.com/OwenCosta/minenest), for any Windows or Linux PC, and on XenithOS the
 app is its screen, in XenithOS's look, for a controller or the mouse.
 
-- MineNest's own program runs the servers: `/usr/lib/xenithos/bin/minenest`, which install.sh and
-  update.sh fetch from MineNest's newest release on GitHub (`linux/get-minenest.sh`, checked against
-  the release's SHA256SUMS). The app starts it the first time it's needed, and talks to it on the
-  loopback with the key in its folder. Servers keep running after the app closes. `minenest help`
-  in a terminal does everything the app does.
+- MineNest's own program runs the servers: `/usr/lib/xenithos/bin/minenest`. It's the release that
+  `linux/minenest.sha256` names, kept only if it matches the SHA-256 written there (the release's own
+  SHA256SUMS isn't trusted), downloaded by `linux/get-minenest.sh` as the XenithOS user (install.sh
+  runs it with sudo -u; nothing downloaded runs as root). That file comes inside XenithOS's source,
+  whose SHA-256 is in XenithOS Cloud's signed Store list, so a new MineNest reaches PCs only through a
+  XenithOS commit that changes the version and both hashes. The app starts the program the first time
+  it's needed, and talks to it on the loopback with the key in its folder. Servers keep running after
+  the app closes. `minenest help` in a terminal does everything the app does.
 - Paper, Purpur, Fabric, NeoForge, Forge or Minecraft's own, any version and loader; mods, plugins
   and modpacks from Modrinth; backups; players; settings; playit.gg, a VPS of your own or the
   supporter relay; Bedrock players through Geyser. MineNest's README says how each works.
@@ -170,8 +173,11 @@ app is its screen, in XenithOS's look, for a controller or the mouse.
 - A server HostMC made (`~/.local/share/xenithos/hostmc/server`) is offered for bringing in on the
   Server page: MineNest copies it, world and all, and leaves HostMC's folder as it was.
 - HostMC's achievements carry on in MineNest, under the same names.
-- Update MineNest (on the Server page, when there's a newer one) updates MineNest's program by
-  itself, between XenithOS updates.
+- New MineNest versions come with XenithOS's updates. get-minenest.sh leaves `bin/minenest.managed`
+  beside the program, so the app has no Update button, and MineNest (from the version after 0.2.0)
+  leaves its own Update button and `minenest update` alone. MineNest 0.2.0's own window still offers
+  Update: it replaces only the program this account owns, until XenithOS's next update puts the pinned
+  one back.
 - On XenithOS Desktop, MineNest in the Apps menu opens MineNest's own window.
 - `linux/test-minenest.sh` tries the app in a virtual display with MineNest's program
   (`MINENEST_BIN`) and a stand-in server (`sim/minenest/java`): starting, a player joining, leaving

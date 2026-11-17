@@ -122,10 +122,6 @@ say "Installing"
 install -d /usr/lib/xenithos /usr/share/xenithos/apps "$STATE"
 install -m 755 "$SRC/linux/xenithos" "$SRC/linux/volt" "$SRC/linux/doom" "$SRC/linux/tube" "$SRC/linux/photos" \
     "$SRC/linux/minenest" /usr/lib/xenithos/
-# MineNest's own program, which runs the Minecraft servers (github.com/OwenCosta/minenest), and
-# `minenest` in a terminal too.
-"$SRC/linux/get-minenest.sh" /usr/lib/xenithos || say "MineNest wasn't downloaded; it comes with the next XenithOS update"
-if [ -x /usr/lib/xenithos/bin/minenest ]; then ln -sfn /usr/lib/xenithos/bin/minenest /usr/local/bin/minenest; fi
 # HostMC became MineNest: its program goes (its data stays, for MineNest to bring in).
 rm -f /usr/lib/xenithos/hostmc /usr/lib/xenithos/hostmc.txt /usr/lib/xenithos/hostmc.ximg /usr/share/xenithos/apps/hostmc.*
 # Each app's name, version and picture next to its program, for the Store to install it with
@@ -137,6 +133,11 @@ done
 # The programs belong to the XenithOS user, so the Store's "XenithOS update" can build a new
 # version and put it in place without sudo (linux/update.sh). They only ever run as that user.
 chown -R "$USER_NAME": /usr/lib/xenithos
+# MineNest's own program, which runs the Minecraft servers (github.com/OwenCosta/minenest): the
+# release linux/minenest.sha256 pins, checked against the SHA-256 written there. It's downloaded as
+# the XenithOS user, and nothing downloaded runs as root. `minenest` works in a terminal too.
+sudo -u "$USER_NAME" bash "$SRC/linux/get-minenest.sh" /usr/lib/xenithos     || say "MineNest wasn't downloaded; it comes with the next XenithOS update"
+if [ -x /usr/lib/xenithos/bin/minenest ]; then ln -sfn /usr/lib/xenithos/bin/minenest /usr/local/bin/minenest; fi
 install -m 755 "$SRC/linux/xenithos-session" "$SRC/linux/xenithos-console" /usr/bin/
 install -m 644 "$SRC/linux/xenithos-console.desktop" "$SRC/linux/xenithos.desktop" /usr/share/applications/
 for app in volt doom tube photos minenest; do

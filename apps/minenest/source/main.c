@@ -141,11 +141,17 @@ static void refresh(int now)
 static int running(void) { return nsrv && !strcmp(S->state, "running"); }
 static int stopped(void) { return !nsrv || !strcmp(S->state, "stopped"); }
 
-/* Whether there's a newer MineNest (MineNest asks GitHub at most every few hours). */
+/* Whether there's a newer MineNest (MineNest asks GitHub at most every few hours). On XenithOS,
+ * new versions come with XenithOS's updates instead, pinned by linux/minenest.sha256:
+ * get-minenest.sh leaves minenest.managed beside the program, and then there's no button here. */
 static void check_update(void)
 {
     struct mn_resp r;
+    char managed[700];
+    const char *e = mn_engine();
     upd_latest[0] = 0;
+    snprintf(managed, sizeof managed, "%s.managed", e ? e : "");
+    if (e && access(managed, F_OK) == 0) return;
     if (mn_call("GET", "/api/update", NULL, &r) == 200 && js_bool(js_key(r.body, "newer"))) str_of(r.body, "latest", upd_latest, sizeof upd_latest);
     mn_free(&r);
 }
