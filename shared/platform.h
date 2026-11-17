@@ -34,6 +34,35 @@ void plat_rumble(int left, int right);       /* 0..255 each */
 void plat_text_input(int on);
 int  plat_text_take(char *out, int n);
 
+/* Desktop apps (PCs). XenithOS Console's apps opened by themselves from a desktop's Apps menu
+ * (XENITHOS_DESKTOP=1, which XenithOS Desktop's console-app sets) are desktop apps: a window
+ * of their own named after the app, played with the mouse and the keyboard as they are. F11
+ * takes the window full screen and back. Everywhere else (the console, the Xbox, an app shown
+ * inside XenithOS) plat_desktop() is 0 and the rest has nothing to say.
+ *   plat_mouse()       the mouse since the last call, in the picture's coordinates
+ *                      (plat_screen_size): where it is (x and y are -1 when it's off the
+ *                      picture), the buttons held (bit 0 left, bit 1 right, bit 2 middle), the
+ *                      buttons pressed since the last call (clicks, the same bits), the wheel's
+ *                      clicks (positive away from you) and how far it moved (dx, dy)
+ *   plat_mouse_grab()  for games that turn with the mouse: the pointer is hidden and kept in
+ *                      the window, and only dx and dy count. It's let go while the window isn't
+ *                      in front.
+ *   plat_key_event()   the keyboard's own presses and releases, oldest first: 1 with *key and
+ *                      *down set, 0 when there are none. Letters and digits are their lower-case
+ *                      characters, ' ' is Space, '-' and '=' are those keys, and the rest are
+ *                      PLAT_KEY_* below. The keys also still act as the controller's buttons. */
+struct plat_mouse { int x, y, buttons, clicks, wheel, dx, dy; };
+enum {
+    PLAT_KEY_ESC = 256, PLAT_KEY_ENTER, PLAT_KEY_TAB, PLAT_KEY_BACKSPACE, PLAT_KEY_DELETE,
+    PLAT_KEY_UP, PLAT_KEY_DOWN, PLAT_KEY_LEFT, PLAT_KEY_RIGHT,
+    PLAT_KEY_SHIFT, PLAT_KEY_CTRL, PLAT_KEY_ALT, PLAT_KEY_PAUSE,
+    PLAT_KEY_F1                                  /* F1 to F12 are PLAT_KEY_F1 + 0 to 11 */
+};
+int  plat_desktop(void);
+void plat_mouse(struct plat_mouse *m);
+void plat_mouse_grab(int on);
+int  plat_key_event(int *key, int *down);
+
 #define PLAT_AUDIO_RATE  48000
 #define PLAT_AUDIO_BLOCK 512                 /* frames per submit */
 #define PLAT_AUDIO_RING_BLOCKS 32            /* the sound chip plays from a ring of this many blocks */

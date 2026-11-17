@@ -529,18 +529,7 @@ class LookPage(Page):
         self.refresh()
 
     def set_wallpaper(self, path):
-        xui.write_conf(wallpaper=path)
-        _, props = run(["xfconf-query", "-c", "xfce4-desktop", "-l"])
-        images = [p for p in props.splitlines() if p.endswith("/last-image")]
-        if not images:
-            _, screens = run(["xrandr", "--query"])
-            outputs = re.findall(r"^(\S+) connected", screens, re.M) or ["0"]
-            images = [f"/backdrop/screen0/monitor{o}/workspace0/last-image" for o in outputs]
-        for prop in images:
-            xfconf_set("xfce4-desktop", prop, "string", path)
-            xfconf_set("xfce4-desktop", prop.replace("/last-image", "/image-style"), "int", 5)
-        if have("xwallpaper"):
-            run(["xwallpaper", "--zoom", path])
+        xui.set_wallpaper(path)            # (Photos' "Use as wallpaper" does the same)
         self.refresh()
 
     def choose_picture(self, *args):

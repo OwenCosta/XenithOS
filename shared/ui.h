@@ -13,6 +13,14 @@ extern struct pad cur, prev;
 #define PRESSED(f) (cur.f && !prev.f)
 #define STICK_TH 20000
 
+/* Desktop apps (plat_desktop() in platform.h): ui_desktop is 1, and mouse is the mouse as the
+ * last ui_poll() saw it. The hints then name keys instead of the controller's buttons (A is
+ * Enter, B is Esc...), dialogs can be clicked, and leaving the app closes it. */
+extern int ui_desktop;
+extern struct plat_mouse mouse;
+int  ui_mouse_in(int x, int y, int w, int h);  /* the pointer is over that box */
+int  ui_clicked(int x, int y, int w, int h);   /* the left button went down over it this frame */
+
 extern int M;              /* side margin */
 extern int HEADER_H;       /* space the screen header takes */
 

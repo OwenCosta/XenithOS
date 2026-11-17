@@ -441,6 +441,12 @@ const char *plat_next_launch(void) { return NULL; }
 void plat_text_input(int on) { (void)on; }
 int plat_text_take(char *out, int n) { (void)out; (void)n; return 0; }
 
+/* No desktop on a console. */
+int plat_desktop(void) { return 0; }
+void plat_mouse(struct plat_mouse *m) { memset(m, 0, sizeof *m); m->x = m->y = -1; }
+void plat_mouse_grab(int on) { (void)on; }
+int plat_key_event(int *key, int *down) { (void)key; (void)down; return 0; }
+
 void plat_reboot(void)
 {
     if (hook_before) hook_before();

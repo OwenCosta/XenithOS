@@ -77,12 +77,34 @@ built with XenithOS Console, so installing one takes a moment and needs no downl
 
 **XenithOS Console's apps are desktop apps too.** Each one that's on XenithOS Console's home screen (Photos
 and Tube from the start, the others once installed here or in XenithOS Console's Store) has an entry in
-the Apps menu, under Games or Media, with an icon of its own. It opens on the desktop by itself, full
-screen as on XenithOS Console, or in a window from the entry's right-click menu, and leaving it (B, or Esc)
-closes it. It's the same program with the same data, so scores and HostMC's servers are the same in both.
-The entries follow the home screen: the desktop brings them in step each time it starts, and Settings >
-Console apps as it installs or removes one. `rootfs/usr/share/xenithos-desktop/console-menu.list` says
-which group each app goes in. Closing when left needs XenithOS Console 0.6.6 or newer.
+the Apps menu, under Games or Media, with an icon of its own. The entries follow the home screen: the
+desktop brings them in step each time it starts, and Settings > Console apps as it installs or removes
+one. `rootfs/usr/share/xenithos-desktop/console-menu.list` says which group each app goes in.
+
+VOLT, DOOM, Photos and Tube have **desktop versions**, made for the mouse and keyboard, which their entries
+open; each entry's right-click menu still has "Open the console version" (full screen, for a controller).
+The others (HostMC, for now) open as on XenithOS Console, or in a window from the right-click menu. All of
+them keep XenithOS Console's data, so scores, saves and HostMC's servers are the same in both.
+
+- **VOLT** and **DOOM** are XenithOS Console's own programs in desktop mode (`console-app` starts them
+  with `XENITHOS_DESKTOP=1`; `linux/platform_sdl.c` and `shared/ui.c` do the rest): a window of their own
+  (F11 for full screen), the mouse, and keys in the hints instead of the controller's buttons. VOLT
+  steers with the arrows or WASD, starts with Space or a click, pauses with Esc or Space (Q quits from
+  there), and its crash card's buttons can be clicked. DOOM has the usual PC controls: the mouse turns
+  and fires, WASD walks and strafes, E or Space uses, Shift runs, the number keys pick weapons, and Esc
+  is Doom's menu, which lets go of the mouse. This needs a XenithOS Console with desktop mode; an older
+  one opens them in a window as they are.
+- **Photos** (`rootfs/usr/lib/xenithos-desktop/photos.py`) shows the pictures XenithOS Console's Photos
+  shows, and a photos or pictures folder on any USB stick or drive, newest first with the folders at the
+  side. A picture opens in the window: the wheel zooms where the pointer is, dragging moves a zoomed one,
+  a double click shows it at full size, the arrows go through them, R turns one, F5 is a slideshow, F11
+  fills the screen, Delete moves it to the Trash (after asking), and "Use as wallpaper" does what Settings
+  > Look does. It's in Files' "Open With" for pictures; the PC's own picture viewer stays the default.
+- **Tube** (`rootfs/usr/lib/xenithos-desktop/tube.py`) searches YouTube and plays videos in its window,
+  through XenithOS Cloud as XenithOS Console's Tube does, signed in with the same XenithOS profile (sign
+  in on XenithOS Console first). Space pauses, Left and Right skip 10 seconds, F11 fills the screen. It
+  plays with GStreamer, and asks the Cloud for a stream made for a PC (`q=pc`); a Cloud that doesn't make
+  those sends the console's 426x240 one, which plays the same way, just less sharply.
 
 **Your own apps** go on XenithOS Console's home screen too: Settings > Console apps lists the apps on the
 PC (with a box to find one), each with an Add button, and Remove once it's there. Any app with an entry in
@@ -184,6 +206,19 @@ Console's own apps were seen in the Apps menu's Games and Media groups, VOLT and
 desktop full screen and closed when left, and the entries followed the home screen as apps were installed
 and removed.
 
+The desktop versions were tried on an installed 2.0.1 brought to 2.0.2 by Settings > Updates (which
+installed the GStreamer packages Tube needs), with XenithOS Console 0.6.8 and VOLT and DOOM built from this
+branch. VOLT and DOOM opened in windows of their own from the Apps menu, with keys in their hints: VOLT
+started with a click, paused with Esc, its "Play again" took a click and Q closed it; DOOM's game picker
+took a click, W walked, the mouse turned and fired, Esc opened Doom's menu and let the pointer go, and its
+Quit closed the window. Photos showed its grid and folders, opened a picture, zoomed with the wheel, went
+through them, turned one, made one the wallpaper, moved one to the Trash after asking, opened a single
+file the way Open With does, and ran a slideshow. Tube was tried against a stand-in for XenithOS Cloud
+serving test videos in the Cloud's console format and in a 720p H.264 PC format: search, both kinds of
+stream playing in real time, pause, skip, full screen, and a video the Cloud refuses. (The VM's own sound
+output stalls, as VirtualBox's often does, which held playback; Tube played normally with a working
+output.) Each one's "Open the console version" opened the console's.
+
 2.0.0 was installed on a real PC by its first user. Not tested here: Wi-Fi, a controller (the VM has a
 keyboard only), and sound you can hear.
 
@@ -247,9 +282,10 @@ updater is `rootfs/usr/lib/xenithos-desktop/update-helper`. In the same folder, 
 Apps menu (names, and the Security Tools groups; the groups' layout is
 `rootfs/etc/xdg/xenithos-desktop/menus/xfce-applications.menu`), `tool-terminal` is what a typed tool's
 menu entry opens, `console-apps` puts XenithOS Console's optional apps on its home screen and takes
-them off, and keeps the Apps menu's entries for XenithOS Console's apps (which `console-app` starts),
-`ownapps.py` puts any other app of the PC's on the home screen, and `app-sandboxes` sees that Mullvad
-VPN's window can open (below).
+them off, and keeps the Apps menu's entries for XenithOS Console's apps (which `console-app` starts, as
+their desktop versions or as on the console), `photos.py` and `tube.py` are the desktop versions of
+Photos and Tube, `ownapps.py` puts any other app of the PC's on the home screen, and `app-sandboxes` sees
+that Mullvad VPN's window can open (below).
 
 Mullvad VPN's window, like any app that brings Chromium's sandbox, only opens on Ubuntu 24.04 when AppArmor
 has a profile for it. Mullvad VPN's package brings one, but only puts it in place if AppArmor's own files

@@ -5,6 +5,10 @@
  *
  * D-pad / left stick steer. START pauses. After a crash: A plays again, X uploads your
  * score to XenithOS Cloud, B goes back to XenithOS.
+ *
+ * On the desktop (opened from the Apps menu, ui_desktop): the arrows or WASD steer, Space or a
+ * click starts, Space or Esc pauses and Q quits from there, and after a crash the buttons can be
+ * clicked (Enter plays again, X uploads, Esc closes the window).
  */
 #include <math.h>
 #include <stdio.h>
@@ -181,9 +185,12 @@ static void cell(int x, int y, uint32_t c, float pad)
     gfx_fill_rrect(OX + x * CELL + pad, OY + y * CELL + pad, CELL - 2 * pad, CELL - 2 * pad, CELL * 0.28f, c, 255);
 }
 
+#define CARD_W 520
+#define CARD_H 250
+
 static void overlay(const char *title, const char *big, const char *line1, const char *line2)
 {
-    int w = 520, h = 250, x = (SCR_W - w) / 2, y = OY + (GH * CELL - h) / 2;
+    int w = CARD_W, h = CARD_H, x = (SCR_W - w) / 2, y = OY + (GH * CELL - h) / 2;
     gfx_fill_rrect(OX - 8.0f, OY - 8.0f, GW * CELL + 16.0f, GH * CELL + 16.0f, 16, C_BG, 150);
     gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 18, C_SURFACE, 255);
     gfx_str_c(FONT_BODY_SB, SCR_W / 2, y + 26, C_SUB, title);
@@ -192,7 +199,40 @@ static void overlay(const char *title, const char *big, const char *line1, const
     if (line2) gfx_str_c(FONT_BODY_SB, SCR_W / 2, y + 186, C_ACCENT_HI, line2);
 }
 
-static void draw(void)
+/* On the desktop, the crash card's buttons: Play again, and Upload score when there's one to
+ * send. Where button i is: */
+#define BTN_W 200
+#define BTN_H 44
+
+static int can_upload(int uploaded)
+{
+    return cfg.server[0] && score && !uploaded;
+}
+
+static void button_box(int i, int n, int *x, int *y)
+{
+    *x = SCR_W / 2 - (n * BTN_W + (n - 1) * 16) / 2 + i * (BTN_W + 16);
+    *y = OY + (GH * CELL - CARD_H) / 2 + CARD_H - BTN_H - 24;
+}
+
+static void draw_button(int i, int n, const char *label, int primary)
+{
+    int x, y, over;
+    button_box(i, n, &x, &y);
+    over = ui_mouse_in(x, y, BTN_W, BTN_H);
+    gfx_fill_rrect((float)x, (float)y, BTN_W, BTN_H, BTN_H / 2.0f,
+                   primary ? (over ? 0xFFFFFF : C_TEXT) : (over ? C_SEL : C_SURFACE2), 255);
+    gfx_str_c(FONT_BODY_SB, x + BTN_W / 2, y + (BTN_H - gfx_line_h(FONT_BODY_SB)) / 2, primary ? C_INK : C_TEXT, label);
+}
+
+static int button_clicked(int i, int n)
+{
+    int x, y;
+    button_box(i, n, &x, &y);
+    return ui_clicked(x, y, BTN_W, BTN_H);
+}
+
+static void draw(int uploaded)
 {
     int i;
     char buf[64];
@@ -220,16 +260,28 @@ static void draw(void)
     }
 
     if (state == S_TITLE)
-        overlay("XenithOS game", "VOLT", "Grab the sparks. Don't hit the walls or yourself.", "Press A to start");
+        overlay("XenithOS game", "VOLT", "Grab the sparks. Don't hit the walls or yourself.",
+                ui_desktop ? "Press Space or click to start" : "Press A to start");
     else if (state == S_PAUSE)
-        overlay("Take a breather", "Paused", "Press START to keep going", NULL);
+        overlay("Take a breather", "Paused", ui_desktop ? "Press Space to keep going" : "Press START to keep going", NULL);
     else if (state == S_OVER) {
         snprintf(buf, sizeof buf, "%d", score);
         overlay("You crashed", buf, result_line[0] ? result_line : (score >= best && score ? "New best!" : "So close."),
-                cfg.server[0] && score && !result_line[0] ? "X uploads your score" : NULL);
+                !ui_desktop && cfg.server[0] && score && !result_line[0] ? "X uploads your score" : NULL);
+        if (ui_desktop) {
+            int n = can_upload(uploaded) ? 2 : 1;
+            draw_button(0, n, "Play again", 1);
+            if (n == 2) draw_button(1, n, "Upload score", 0);
+        }
     }
 
-    if (state == S_OVER) ui_hints(cfg.server[0] ? "A=Play again;X=Upload score;B=XenithOS" : "A=Play again;B=XenithOS");
+    /* (On the desktop, ui_hints names the keys: Enter for A, Esc for B, Q for LB.) */
+    if (ui_desktop) {
+        if (state == S_OVER) ui_hints(can_upload(uploaded) ? "A=Play again;X=Upload score;B=Close" : "A=Play again;B=Close");
+        else if (state == S_PLAY) ui_hints("Esc=Pause");
+        else if (state == S_PAUSE) ui_hints("Space=Keep going;LB=Quit");
+        else ui_hints("Space=Start;B=Close");
+    } else if (state == S_OVER) ui_hints(cfg.server[0] ? "A=Play again;X=Upload score;B=XenithOS" : "A=Play again;B=XenithOS");
     else if (state == S_PLAY) ui_hints("START=Pause");
     else ui_hints("A=Start;B=XenithOS");
 }
@@ -278,11 +330,14 @@ int main(int argc, char **argv)
 
         switch (state) {
         case S_TITLE:
-            if (PRESSED(a) || PRESSED(start)) { sfx(SFX_SELECT); new_game(); }
-            else if (PRESSED(b) || PRESSED(back)) { sfx(SFX_BACK); back_to_shell(); return 0; }
+            if (PRESSED(a) || PRESSED(start) || (ui_desktop && ui_clicked(OX, OY, GW * CELL, GH * CELL))) {
+                sfx(SFX_SELECT);
+                new_game();
+            } else if (PRESSED(b) || PRESSED(back)) { sfx(SFX_BACK); back_to_shell(); return 0; }
             break;
         case S_PLAY:
-            if (PRESSED(start)) { state = S_PAUSE; sfx(SFX_SELECT); break; }
+            /* On the desktop Space (A) and Esc (B) pause too: there's no START key to look for. */
+            if (PRESSED(start) || (ui_desktop && (PRESSED(a) || PRESSED(b)))) { state = S_PAUSE; sfx(SFX_SELECT); break; }
             read_direction();
             while (ui_ms() >= next_step && state == S_PLAY) {
                 next_step += step_ms();
@@ -295,16 +350,25 @@ int main(int argc, char **argv)
             }
             break;
         case S_PAUSE:
-            if (PRESSED(start)) { state = S_PLAY; next_step = ui_ms() + 300; sfx(SFX_SELECT); }
-            else if (PRESSED(back)) { back_to_shell(); return 0; }
+            if (PRESSED(start) ||
+                (ui_desktop && (PRESSED(a) || PRESSED(b) || ui_clicked(OX, OY, GW * CELL, GH * CELL)))) {
+                state = S_PLAY;
+                next_step = ui_ms() + 300;
+                sfx(SFX_SELECT);
+            } else if (PRESSED(back) || (ui_desktop && PRESSED(lb))) { back_to_shell(); return 0; }
             break;
-        case S_OVER:
-            if (PRESSED(a)) { sfx(SFX_SELECT); new_game(); }
-            else if (PRESSED(x) && cfg.server[0] && score && !uploaded) { sfx(SFX_SELECT); upload(); uploaded = 1; }
-            else if (PRESSED(b) || PRESSED(back)) { sfx(SFX_BACK); back_to_shell(); return 0; }
+        case S_OVER: {
+            int n = can_upload(uploaded) ? 2 : 1;
+            if (PRESSED(a) || (ui_desktop && button_clicked(0, n))) { sfx(SFX_SELECT); new_game(); }
+            else if ((PRESSED(x) || (ui_desktop && n == 2 && button_clicked(1, n))) && can_upload(uploaded)) {
+                sfx(SFX_SELECT);
+                upload();
+                uploaded = 1;
+            } else if (PRESSED(b) || PRESSED(back)) { sfx(SFX_BACK); back_to_shell(); return 0; }
             break;
         }
-        draw();
+        }
+        draw(uploaded);
         ui_end_frame();
         if (!started) { started = 1; startlog_ready("VOLT"); }
     }
