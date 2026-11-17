@@ -8,6 +8,8 @@
   "description": "Search and watch YouTube videos. Needs a XenithOS profile."},
  {"id": "photos", "kind": "app", "name": "Photos", "version": "1.2", "file": "photos.elf32",
   "description": "Your pictures on the TV, from a photos folder on your USB stick. Zoom, turn and slideshows."},
+ {"id": "music", "kind": "app", "name": "Music", "version": "1.0", "file": "music.elf32",
+  "description": "Your own MP3, OGG, FLAC and WAV songs from a music folder, by album, artist or song."},
  {"id": "freedoom1", "kind": "data", "name": "Freedoom: Phase 1", "version": "0.13.0", "file": "freedoom1.wad",
   "description": "Free game data for DOOM, laid out like the original episodes. BSD license."},
  {"id": "freedoom2", "kind": "data", "name": "Freedoom: Phase 2", "version": "0.13.0", "file": "freedoom2.wad",

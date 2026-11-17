@@ -1,0 +1,57 @@
+# MUSIC: the library's albums, an album's page, playing it (the bar along the bottom), Now
+# Playing with shuffle, repeat, seeking and the next song, then Artists and Songs while it plays,
+# pausing, and a song that won't play. Records what's heard in audio.wav.
+#   XSIM_BIN=xmusic XSIM_MUSIC=<folder of music> sim/run.sh sim/scripts/music.txt music
+wait 30
+shot albums
+press right
+wait 10
+shot albums_second
+press a
+wait 30
+shot album_page
+press a
+wait 60
+shot album_playing
+press down
+press down
+press down
+wait 10
+shot album_track_chosen
+press y
+wait 60
+shot now_playing
+press x
+wait 20
+shot now_shuffle
+press y
+wait 20
+shot now_repeat_all
+press right
+wait 30
+shot now_seeked
+press rb
+wait 60
+shot now_next
+press b
+wait 20
+press b
+wait 20
+press rb
+wait 20
+shot artists
+press rb
+wait 20
+shot songs
+press down
+press down
+press a
+wait 60
+shot songs_playing
+press x
+wait 30
+shot paused
+press x
+wait 300
+shot still_playing
+quit

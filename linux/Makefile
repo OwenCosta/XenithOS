@@ -23,8 +23,13 @@ DOOM_CFLAGS := $(OPT) -std=gnu11 -w -I../apps/doom/doomgeneric -I../shared $(SDL
 TUBE_SRC    := $(wildcard ../apps/tube/source/*.c) $(SHARED) $(PLATFORM)
 PHOTOS_SRC  := ../apps/photos/source/photos.c $(SHARED) $(PLATFORM)
 HOSTMC_SRC  := $(wildcard ../apps/hostmc/source/*.c) $(SHARED) $(PLATFORM)
+MUSIC_SRC   := $(wildcard ../apps/music/source/*.c) $(SHARED) $(PLATFORM)
 
-all: xenithos volt doom tube photos hostmc
+all: xenithos volt doom tube photos hostmc music
+
+# Music decodes with dr_mp3, dr_flac and stb_vorbis (shared/), in apps/music/source/decode.c.
+music: $(MUSIC_SRC) $(HEADERS) $(wildcard ../apps/music/source/*.h)
+	$(CC) $(CFLAGS_ALL) -I../apps/music/source $(MUSIC_SRC) -o $@ $(LIBS)
 
 tube: $(TUBE_SRC) $(HEADERS)
 	$(CC) $(CFLAGS_ALL) -I../apps/tube/source $(TUBE_SRC) -o $@ $(LIBS)
@@ -46,6 +51,6 @@ doom: $(DOOM_SRC) $(HEADERS)
 	$(CC) $(DOOM_CFLAGS) $(DOOM_SRC) -o $@ $(LIBS)
 
 clean:
-	rm -f xenithos volt doom tube photos hostmc
+	rm -f xenithos volt doom tube photos hostmc music
 
 .PHONY: all clean

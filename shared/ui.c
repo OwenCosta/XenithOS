@@ -343,9 +343,17 @@ static void draw_toast(void)
 
 /* ---------------------------------------------------------- frame pacing */
 
+static void (*frame_hook)(void);
+
+void ui_set_frame_hook(void (*fn)(void))
+{
+    frame_hook = fn;
+}
+
 void ui_end_frame(void)
 {
     uint64_t now;
+    if (frame_hook) frame_hook();
     draw_toast();
     if (fading) {
         uint64_t t = ui_ms() - fade_start;

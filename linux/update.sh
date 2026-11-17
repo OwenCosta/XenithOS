@@ -17,16 +17,16 @@ if [ ! -w "$DEST" ]; then
 fi
 
 echo "Building $(grep -o 'XENITH_VERSION "[0-9.]*"' "$SRC/shared/theme.h") in $SRC"
-make -C "$SRC/linux" -j"$(nproc)" xenithos volt doom tube photos hostmc
+make -C "$SRC/linux" -j"$(nproc)" xenithos volt doom tube photos hostmc music
 
 echo "Installing into $DEST"
-for b in xenithos volt doom tube photos hostmc; do
+for b in xenithos volt doom tube photos hostmc music; do
     install -m 755 "$SRC/linux/$b" "$DEST/.$b.new"
     mv -f "$DEST/.$b.new" "$DEST/$b"
 done
 
 # Each app's name, version and picture next to its program, for the Store to install it with.
-for app in volt doom tube photos hostmc; do
+for app in volt doom tube photos hostmc music; do
     if [ -f "$SRC/apps/$app/app.txt" ]; then install -m 644 "$SRC/apps/$app/app.txt" "$DEST/$app.txt"; fi
     if [ -f "$SRC/art/thumbs/$app.ximg" ]; then install -m 644 "$SRC/art/thumbs/$app.ximg" "$DEST/$app.ximg"; fi
 done
@@ -34,7 +34,7 @@ done
 # The apps on the home screen get their new names, versions and pictures. The rest stay off it:
 # they're installed from the Store, and one removed there stays removed.
 mkdir -p "$DATA/uda:/apps"
-for app in volt doom tube photos hostmc; do
+for app in volt doom tube photos hostmc music; do
     [ -e "$DATA/uda:/apps/$app.elf32" ] || [ -L "$DATA/uda:/apps/$app.elf32" ] || continue
     if [ -f "$DEST/$app.txt" ]; then cp "$DEST/$app.txt" "$DATA/uda:/apps/$app.txt"; fi
     if [ -f "$DEST/$app.ximg" ]; then cp "$DEST/$app.ximg" "$DATA/uda:/apps/$app.ximg"; fi

@@ -46,6 +46,9 @@ void ui_settle_input(void); /* buttons held right now don't count until let go (
 int  ui_nav_x(void);       /* -1 / +1 with key repeat; call once per frame */
 int  ui_nav_y(void);
 void ui_end_frame(void);   /* toasts, fade, present, sound, 60 fps */
+/* fn runs at the end of every frame, whatever screen, dialog or loading screen is up (Music
+ * keeps its sound fed with it). It mustn't draw. NULL turns it off. */
+void ui_set_frame_hook(void (*fn)(void));
 int  ui_frame_ms(void);    /* how long frames take to draw (not counting the wait), smoothed */
 uint64_t ui_ms(void);
 void ui_fade_in(void);

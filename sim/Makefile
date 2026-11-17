@@ -21,8 +21,14 @@ DOOMFLAGS := -O1 -g -std=gnu11 -w -fsanitize=address -fno-omit-frame-pointer -I.
 TUBE    := $(wildcard ../apps/tube/source/*.c) $(SHARED) platform_sim.c net_sim.c
 PHOTOS  := ../apps/photos/source/photos.c $(SHARED) platform_sim.c net_sim.c
 HOSTMC  := $(wildcard ../apps/hostmc/source/*.c) $(SHARED) platform_sim.c net_sim.c
+MUSIC   := $(wildcard ../apps/music/source/*.c) $(SHARED) platform_sim.c net_sim.c
 
-all: xsim xvolt xdoom xtube xphotos xhostmc
+all: xsim xvolt xdoom xtube xphotos xhostmc xmusic
+
+# Music: its decoders (dr_mp3, dr_flac, stb_vorbis) and stb_image for covers do their own careful
+# casting, so like Photos it's checked for memory errors only. MUSIC_FLAGS adds more (-I...).
+xmusic: $(MUSIC) $(HDRS) $(wildcard ../apps/music/source/*.h)
+	$(CC) $(filter-out -fsanitize=address$(comma)undefined,$(CFLAGS)) -fsanitize=address -I../apps/music/source $(MUSIC_FLAGS) $(MUSIC) -o $@ $(LDLIBS)
 
 # stb_image is checked for memory errors only (it does its own careful casting).
 xtube: $(TUBE) $(HDRS)
@@ -49,4 +55,4 @@ xdoom: $(DOOM) $(HDRS)
 	$(CC) $(DOOMFLAGS) $(DOOM) -o $@ $(LDLIBS)
 
 clean:
-	rm -f xsim xvolt xdoom xtube xphotos xhostmc
+	rm -f xsim xvolt xdoom xtube xphotos xhostmc xmusic

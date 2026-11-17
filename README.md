@@ -42,6 +42,9 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
   even the Xbox can play. Needs a XenithOS profile.
 - Photos: your pictures (JPEG, PNG, BMP, GIF) from a `photos` folder on the USB stick, or `~/Pictures` on a
   PC, as a grid of thumbnails. Full screen with zoom, turning and slideshows.
+- Music: your own songs (MP3, OGG, FLAC, WAV) from a `music` folder on the USB stick, or `~/Music` on a PC, by
+  album (with covers from a cover.jpg or inside the songs), artist or song. Shuffle, repeat, and it keeps
+  playing while you look around. See the table below.
 - HostMC (PCs and Pis): a Minecraft: Java Edition server for you and your friends, Minecraft's own or Paper.
   Start and stop it, see who's on, type commands, change its settings, back the world up, and with
   [playit.gg](https://playit.gg) turned on, let friends join from anywhere. It keeps running after you leave
@@ -57,6 +60,18 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
 | LB / RB | previous / next weapon |
 | Start | menu |
 | Hold Back | quit to XenithOS |
+
+| Music control | |
+|---|---|
+| A | open an album or artist, play a song |
+| LB / RB | Albums, Artists, Songs (in Now Playing: previous / next song) |
+| X | pause or play, from anywhere (in Now Playing: shuffle) |
+| Y | Now Playing (in Now Playing: repeat off, all, one) |
+| Left / Right | in Now Playing: back or on 10 seconds |
+| B | back |
+
+Music reads each song's tags (ID3, Vorbis comments, WAV's INFO) once and keeps them in
+`xenith/music-library.txt`, so it starts quickly next time. Folders can go four deep (`music/Artist/Album/`).
 
 ## On an Xbox 360
 
@@ -204,10 +219,11 @@ shared/avatar.c          the avatar renderer (server/web/static/avatar.js is the
 shared/startlog.c        start-up timing for System info
 shared/net_*.c           HTTP client: lwIP on the Xbox (linux/net_posix.c and sim/net_sim.c elsewhere)
 apps/volt, doom, tube,   the apps
-  photos, hostmc         (hostmc is for PCs only: it has no Xbox Makefile)
+  photos, music, hostmc  (hostmc is for PCs only: it has no Xbox Makefile)
 linux/apps_linux.c       apps from Flathub (Flatpak) and Steam's library, on PCs
 linux/kiosk.c            console mode's window manager: apps' windows over XenithOS on its own X server
 shared/picture.c         JPEG, PNG, BMP and GIF through stb_image
+shared/dr_mp3.h, dr_flac.h, stb_vorbis.h   Music's MP3, FLAC and Ogg Vorbis decoders
 server/                  XenithOS Cloud, its systemd unit, the admin helper, the website
 tools/                   font and thumbnail generators
 ```
@@ -236,6 +252,11 @@ XenithOS is licensed under the **GNU GPL v3.0**, see [LICENSE](LICENSE).
   `i_sound.c` doesn't use SDL_mixer, and `i_video.c` reports reads for the loading screen.
 - `shared/stb_image.h` is [stb_image](https://github.com/nothings/stb) 2.32 by Sean Barrett (public domain or
   MIT, see the end of the file).
+- Music's decoders, unchanged: `shared/dr_mp3.h` (0.7.5) and `shared/dr_flac.h` (0.13.5) from
+  [dr_libs](https://github.com/mackron/dr_libs) by David Reid (public domain or MIT No Attribution; dr_mp3 is
+  based on minimp3), and `shared/stb_vorbis.h`, which is `stb_vorbis.c` 1.24 from [stb](https://github.com/nothings/stb)
+  by Sean Barrett (public domain or MIT; renamed so the builds don't compile it on its own). All three as of
+  November 2026, see the end of each file.
 - Apps from Flathub and Steam aren't part of XenithOS: Flatpak downloads them from Flathub on your machine,
   under their own licenses. Sober is a VinegarHQ project, not affiliated with Roblox.
 - Freedoom (served by the Store, not included here) is BSD licensed, see [freedoom.github.io](https://freedoom.github.io).

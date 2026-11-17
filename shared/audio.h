@@ -47,14 +47,16 @@ void audio_voice_set(int handle, int gain_l, int gain_r);
 void audio_voice_stop(int handle);
 int  audio_voice_playing(int handle);
 
-/* One streamed voice for video playback: mono 48 kHz samples written as they arrive.
- * audio_stream_clock() is how many frames of it have been heard (the player's clock). */
+/* One streamed voice for video and music playback: 48 kHz frames written as they arrive, mono
+ * (Tube) or interleaved stereo (Music), up to two seconds ahead. audio_stream_clock() is how many
+ * frames of it have been heard (the player's clock); opening it again starts it afresh. */
 int  audio_stream_open(void);
 void audio_stream_close(void);
 void audio_stream_pause(int on);                    /* paused, it's silent and the clock stops */
 int  audio_stream_space(void);                       /* frames that fit right now */
 int  audio_stream_buffered(void);
 void audio_stream_write(const int16_t *mono, int frames);
+void audio_stream_write_stereo(const int16_t *lr, int frames);
 unsigned audio_stream_clock(void);
 
 #endif

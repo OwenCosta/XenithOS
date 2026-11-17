@@ -86,7 +86,7 @@ Bluetooth adapter works.
 | `~/.config/xenithos/` | the mode file and logs |
 | `~/.local/share/xenithos/hostmc/` | HostMC's Minecraft server, its world, Java and backups |
 
-XenithOS's own apps (VOLT, DOOM, Tube, Photos, and HostMC on PCs) come with it on PCs and Pis. The Store has three sections here
+XenithOS's own apps (VOLT, DOOM, Tube, Photos, Music, and HostMC on PCs) come with it on PCs and Pis. The Store has three sections here
 (LB and RB switch between them): **Apps** from Flathub, **Steam**, and **XenithOS** (updates and game data).
 
 ## Apps from Flathub, and Steam

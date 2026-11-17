@@ -42,6 +42,12 @@ More switches:
   (`sim/scripts/hostmc.txt`). It runs in real time, since the stand-in does. Without `XSIM_HOSTMC`, HostMC
   downloads Java and a real server and runs it. A server a script leaves running is stopped afterwards.
   The stand-in answers server list pings on its port (127.0.0.1 only), and `sim/hostmc/ping.py` sends one.
+- `XSIM_BIN=xmusic XSIM_MUSIC=<folder>` runs Music with that folder as the stick's `music` folder
+  (`sim/scripts/music.txt`). `sim/music/make-music.sh <folder>` makes a library to try it with, all synthesized
+  here (MP3, FLAC, Ogg and WAV at different rates, tags, covers inside the songs and beside them, accented
+  names, a compilation, a broken file); it needs ffmpeg with lame and vorbis. `sim/music/test-tones.sh` plays an
+  album of four steady tones, one per format, and checks what was heard: each at its pitch, in order, with no
+  gap or click between them.
 - Bluetooth (`XSIM_KIND=pc`, Settings > Bluetooth controllers) runs the PC's own code
   (`linux/bluetooth_linux.c`) against a stand-in for BlueZ's `bluetoothctl` (`sim/bluetooth/bluetoothctl`),
   never this PC's Bluetooth: an 8BitDo controller already paired but asleep, an Xbox controller, a DualSense

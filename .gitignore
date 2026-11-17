@@ -14,10 +14,12 @@ sim/xdoom
 sim/xtube
 sim/xphotos
 sim/xhostmc
+sim/xmusic
 linux/xenithos
 linux/volt
 linux/doom
 linux/tube
 linux/photos
 linux/hostmc
+linux/music
 desktop/out/

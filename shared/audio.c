@@ -39,8 +39,9 @@ struct cmd { int type, id, gl, gr, handle, frames, mono; const int16_t *pcm; };
 static struct cmd cmdq[NCMD];
 static volatile unsigned cmd_head, cmd_tail;
 
-/* A streamed voice (video playback): a ring of mono 48 kHz samples. The main thread writes
- * s_head, the mixer reads from s_tail; s_played counts what the mixer has taken. */
+/* A streamed voice (video and music playback): a ring of stereo 48 kHz frames, two samples each
+ * (mono is written to both). The main thread writes s_head, the mixer reads from s_tail;
+ * s_played counts what the mixer has taken. All three count frames. */
 #define SRING (RATE * 2)
 static int16_t *sring;
 static volatile unsigned s_head, s_tail, s_played;
@@ -341,9 +342,9 @@ static void mixer_step(void)
             __sync_synchronize();
             if (n > BLOCK) n = BLOCK;
             for (k = 0; k < n; k++) {
-                int v = sring[(tail + k) % SRING];
-                acc[k * 2] += v;
-                acc[k * 2 + 1] += v;
+                unsigned at = (tail + k) % SRING;
+                acc[k * 2] += sring[at * 2];
+                acc[k * 2 + 1] += sring[at * 2 + 1];
             }
             __sync_synchronize();
             s_tail = tail + n;
@@ -567,7 +568,7 @@ int audio_ready(void)
 
 int audio_stream_open(void)
 {
-    if (!sring) sring = malloc(sizeof(int16_t) * SRING);
+    if (!sring) sring = malloc(sizeof(int16_t) * 2 * SRING);
     if (!sring) return 0;
     s_open = 0;
     __sync_synchronize();
@@ -607,7 +608,25 @@ void audio_stream_write(const int16_t *mono, int frames)
     int i, room = audio_stream_space();
     if (!sring || frames <= 0) return;
     if (frames > room) frames = room;
-    for (i = 0; i < frames; i++) sring[(head + i) % SRING] = mono[i];
+    for (i = 0; i < frames; i++) {
+        unsigned at = (head + i) % SRING;
+        sring[at * 2] = sring[at * 2 + 1] = mono[i];
+    }
+    __sync_synchronize();
+    s_head = head + frames;
+}
+
+void audio_stream_write_stereo(const int16_t *lr, int frames)
+{
+    unsigned head = s_head;
+    int i, room = audio_stream_space();
+    if (!sring || frames <= 0) return;
+    if (frames > room) frames = room;
+    for (i = 0; i < frames; i++) {
+        unsigned at = (head + i) % SRING;
+        sring[at * 2] = lr[i * 2];
+        sring[at * 2 + 1] = lr[i * 2 + 1];
+    }
     __sync_synchronize();
     s_head = head + frames;
 }

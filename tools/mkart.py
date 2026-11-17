@@ -323,6 +323,22 @@ def photos():
     return img
 
 
+def music():
+    k = 4                                           # drawn 4x and scaled down, for round edges
+    img = Image.new("RGB", (W * k, H * k), BG_DARK)
+    d = ImageDraw.Draw(img)
+    # A flat record: dark grooves, the red label, the hole.
+    cx, cy, r = 58 * k, 68 * k, 34 * k
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(38, 43, 51))
+    for g in (27, 21):
+        d.ellipse([cx - g * k, cy - g * k, cx + g * k, cy + g * k], outline=(27, 31, 38), width=2 * k)
+    d.ellipse([cx - 12 * k, cy - 12 * k, cx + 12 * k, cy + 12 * k], fill=RED)
+    d.ellipse([cx - 3 * k, cy - 3 * k, cx + 3 * k, cy + 3 * k], fill=BG_DARK)
+    d.text((108 * k, 34 * k), "MUSIC", font=font("Black", 50 * k), fill=TEXT)
+    d.text((26 * k, 128 * k), "Your songs on the TV", font=font("Medium", 20 * k), fill=SUB)
+    return img.resize((W, H), Image.LANCZOS)
+
+
 def hostmc():
     img = Image.new("RGB", (W, H), BG_DARK)
     d = ImageDraw.Draw(img)
@@ -414,6 +430,7 @@ def main():
         "doom": doom(),
         "tube": tube(),
         "photos": photos(),
+        "music": music(),
         "hostmc": hostmc(),
         "freedoom1": freedoom(1, (19, 32, 26), (143, 181, 154)),
         "freedoom2": freedoom(2, (35, 20, 20), (214, 160, 143)),
