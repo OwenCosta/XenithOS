@@ -118,7 +118,9 @@ run() {
     echo "== $name"
     ran=$((ran + 1))
     log="$T/sim-$name.log"
-    env XSIM_TILED=1 XSIM_USB="$usb" UBSAN_OPTIONS=print_stacktrace=1 "$@" \
+    # The stand-in Stores here are unsigned, so the simulator acts as a build without a Store key
+    # (source/store_key.h has XenithOS Cloud's); sim/store/test-store.sh checks the signing itself.
+    env XSIM_TILED=1 XSIM_USB="$usb" XSIM_STORE_KEY="${XSIM_STORE_KEY:-none}" UBSAN_OPTIONS=print_stacktrace=1 "$@" \
         timeout -k 10 "$LIMIT" bash "$here/run.sh" "$here/scripts/$name.txt" "test-$name" ${server:+"$server"} > "$log" 2>&1
     status=$?
     problems=""

@@ -14,12 +14,13 @@
 #include "theme.h"
 #include "ui.h"
 
-enum { S_VOLUME, S_UI_SOUNDS, S_BOOT, S_CONNECT, S_CRASH, S_SHARING, S_CLOUD_SAVES, S_NETWORK, S_SYSTEM,
+/* The switches first (S_VOLUME to S_CRASH), then the rows that open something. */
+enum { S_VOLUME, S_UI_SOUNDS, S_BOOT, S_CONNECT, S_SHARING, S_CLOUD_SAVES, S_CRASH, S_NETWORK, S_SYSTEM,
        S_CONTROLLER, S_ABOUT, S_SIGN_OUT, S_COUNT };
 
 static const char *const label[S_COUNT] = {
-    "Volume", "Interface sounds", "Start-up chime", "Connect at start-up", "Send crash reports",
-    "Show friends what I'm playing", "Cloud saves on this machine", "Network", "System info", "Controller test",
+    "Volume", "Interface sounds", "Start-up chime", "Connect at start-up", "Show friends what I'm playing",
+    "Cloud saves on this machine", "Send crash reports", "Network", "System info", "Controller test",
     "About XenithOS", "Sign out",
 };
 
@@ -396,7 +397,7 @@ void screen_settings(void)
                 gfx_line(M + w - 30.0f, cy + 7.0f, M + w - 24.0f, (float)cy, 3, s ? 0xFFFFFF : C_DIM, 255);
             }
         }
-        ui_hints(rows[sel] == S_VOLUME ? "LEFT/RIGHT=Change;B=Back" : rows[sel] <= S_CLOUD_SAVES ? "A=Switch;B=Back" : "A=Open;B=Back");
+        ui_hints(rows[sel] == S_VOLUME ? "LEFT/RIGHT=Change;B=Back" : rows[sel] <= S_CRASH ? "A=Switch;B=Back" : "A=Open;B=Back");
         ui_end_frame();
     }
 }

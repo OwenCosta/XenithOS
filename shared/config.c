@@ -10,7 +10,12 @@
 #include "platform.h"
 
 struct xenith_config cfg = {.name = "PLAYER"};
-struct xenith_settings st = {80, 1, 1, 1, 0, "", 1};
+/* By name, so a setting added to the struct can't take another's default: crash reports start at
+ * "Ask first" (0), cloud saves on (1). */
+struct xenith_settings st = {
+    .volume = 80, .ui_sounds = 1, .boot_sound = 1, .auto_connect = 1, .last_inbox = 0, .last_app = "",
+    .crash_reports = 0, .cloud_saves = 1,
+};
 struct xenith_profile prof;
 
 static void trim(char *s)

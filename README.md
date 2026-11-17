@@ -38,8 +38,8 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
   the stick until XenithOS is online) and kept on your profile. Profile shows yours, the Cloud screen the ones
   just earned by anyone, and the website everyone's.
 - Avatar editor: thirteen parts in three tabs (face, hair, outfit), colour swatches, random looks
-- Settings: volume, interface sounds, start-up chime, crash reports, showing friends what you play, cloud saves
-  on this machine, network, system info (with start-up times and sound stats), controller test, about
+- Settings: volume, interface sounds, start-up chime, showing friends what you play, cloud saves on this
+  machine, crash reports, network, system info (with start-up times and sound stats), controller test, about
 - Crash reports: when XenithOS or one of its apps crashes, where it stopped is saved, and when XenithOS is back
   it asks to send a crash report to the people who make it (or sends it by itself, if Settings says to). No
   gamertag goes with one unless you add it, and nothing from your home folder.
@@ -138,7 +138,7 @@ updates all of it (ffmpeg, Deno, the yt-dlp standalone build, the plugin and the
 download against its published checksum.
 
 ```bash
-python3 server/xenith_cloud.py --selftest      # 192 checks, no network needed
+python3 server/xenith_cloud.py --selftest      # 238 checks, no network needed
 ```
 
 Profiles: passcodes are stored as salted PBKDF2 hashes and sign-in tokens as SHA-256 hashes, so the state
