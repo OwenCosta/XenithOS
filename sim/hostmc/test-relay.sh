@@ -25,7 +25,8 @@ W2="$T/data2"                    # another PC's, signed in to a profile that isn
 C="$T/cloud"                     # XenithOS Cloud's folders
 R="$T/relay"                     # the relay's (routes, authorized_keys, secret)
 S="$T/sshd"                      # the relay's sshd for tunnels
-CLOUD=28795 OC=28796 SSHPORT=22122 PLAYERS=25565 MCPORT=25577 MC2PORT=25578
+CLOUD=28795 OC=28796 SSHPORT=22122 MCPORT=25577 MC2PORT=25578
+PLAYERS=25566                    # the relay's port for players: not Minecraft's own, as on a VPS that has a server
 ME=$(id -un)
 SSHD=$(command -v sshd || echo /usr/sbin/sshd)
 failed=0
@@ -115,7 +116,7 @@ python3 -I "$repo/sim/hostmc/ocaccounts.py" "$T/members.json" "$OC" partn3r 2> "
 started $!
 ( cd "$C" && exec env XENITH_PORT=$CLOUD XENITH_STATE_DIR="$C/state" XENITH_STORE_DIR="$C/store" XENITH_WEB_DIR="$C/web" \
     XENITH_DOWNLOAD_DIR="$C" XENITH_ADMIN_KEY=k3y XENITH_RELAY_DOMAIN=mc.test XENITH_RELAY_SSH=127.0.0.1:$SSHPORT \
-    XENITH_RELAY_SECRET="$SECRET" XENITH_RELAY_USER="$ME" XENITH_RELAY_PORTS=30000-30009 \
+    XENITH_RELAY_SECRET="$SECRET" XENITH_RELAY_USER="$ME" XENITH_RELAY_PORTS=30000-30009 XENITH_RELAY_PLAYERS_PORT=$PLAYERS \
     XENITH_OCACCOUNT_URL=http://127.0.0.1:$OC XENITH_OCACCOUNT_KEY=partn3r \
     XENITH_RELAY_PATREON=https://www.patreon.com/example python3 -I "$repo/server/xenith_cloud.py" ) > "$T/cloud.log" 2>&1 &
 started $!
@@ -162,13 +163,13 @@ PINGER=$!
 run hostmc_relay.txt first "$W" "alpha|"
 wait "$PINGER" 2>/dev/null
 named() { grep -qx 'name=alpha' "$W/hostmc/relay/relay.txt" && grep -qx 'state=on' "$W/hostmc/relay/relay.txt" &&
-          grep -qx 'port=30000' "$W/hostmc/relay/relay.txt"; }
+          grep -qx 'port=30000' "$W/hostmc/relay/relay.txt" && grep -qx "address=alpha.mc.test:$PLAYERS" "$W/hostmc/relay/relay.txt"; }
 private() { [ "$(stat -c %a "$W/hostmc/relay")" = 700 ] && [ "$(stat -c %a "$W/hostmc/relay/key")" = 600 ]; }
 key_line() { grep -qxF "restrict,port-forwarding,permitlisten=\"127.0.0.1:30000\" $(cut -d' ' -f1,2 "$W/hostmc/relay/key.pub") alpha" "$R/authorized_keys"; }
 pinned() { grep -qxF "[127.0.0.1]:$SSHPORT $(cut -d' ' -f1,2 "$S/hostkey.pub")" "$W/hostmc/relay/known_hosts"; }
 checked_ok() { head -1 "$W/hostmc/relay/check.txt" 2>/dev/null | grep -qx ok; }
 both_running() { server_alive && keeper_alive; }
-check "XenithOS Cloud gave it the name typed, alpha, with port 30000 on the relay" named
+check "XenithOS Cloud gave it the name typed, alpha.mc.test:$PLAYERS, with port 30000 on the relay" named
 check "HostMC's key is its own and private (folder 700, key 600)" private
 check "the relay has the key, for port 30000 on its loopback only" key_line
 check "the relay's host key is pinned, as XenithOS Cloud gave it" pinned

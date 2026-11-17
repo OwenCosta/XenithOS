@@ -321,6 +321,7 @@ struct hm_relay {
     char tier[44], name[24], state[12], address[96], domain[64], held[100], suggest[24];
     char hostkey[100], patreon[160], account[160];
     char message[240];                          /* what XenithOS Cloud says about where they are */
+    int players_port;                           /* the relay's port for players (address has :port if not 25565) */
     long long until;                            /* a lapsed name is kept until then */
     uint64_t asked;                             /* when XenithOS Cloud was last asked (ui_ms) */
 };

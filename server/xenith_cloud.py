@@ -57,8 +57,9 @@ Accounts (form posts; errors come back as "error=<message>")
 HostMC's supporter relay (off unless XENITH_RELAY_DOMAIN is set; see Relay)
   POST /v1/relay/status               token  -> relay (on/off), step (ok, link, patreon, tier,
                                       error), message, suggest, and with a name: name, state (on,
-                                      lapsed, off), until, address, port, ssh_host, ssh_port,
-                                      ssh_user, hostkey; held (names kept for them)
+                                      lapsed, off), until, address (with :port when the relay's
+                                      players_port isn't 25565), players_port, port, ssh_host,
+                                      ssh_port, ssh_user, hostkey; held (names kept for them)
   POST /v1/relay/claim                token, name, key (HostMC's ssh-ed25519 public key) -> as status
   POST /v1/relay/release              token  -> as status
   POST /v1/relay/sync                 from the relay machine: t, hostkey, busy (ports with a
@@ -109,6 +110,8 @@ Environment
   XENITH_RELAY_SSH     host:port of the relay's SSH for tunnels, e.g. tunnel.mc.owencosta.diy:2222
   XENITH_RELAY_SECRET  shared with the relay, which signs its syncs with it
   XENITH_RELAY_USER    default hostmc: the relay's account for tunnels
+  XENITH_RELAY_PLAYERS_PORT  default 25565: the relay's port for players (another one is added to
+                     the address friends type, <name>.<domain>:<port>)
   XENITH_RELAY_PORTS   default 30000-39999: supporters' ports on the relay's loopback
   XENITH_OCACCOUNT_URL, XENITH_OCACCOUNT_KEY  where OCAccounts answers who's a supporter
                      (/api/partner/xenithos/supporter), and the key it wants for that
@@ -1241,9 +1244,11 @@ class Relay:
     loopback, kept while they have any name, and the key their HostMC logs in with."""
 
     def __init__(self, state, domain="", ssh="", secret="", user="hostmc", ports="30000-39999",
-                 ocaccount_url="", ocaccount_key="", patreon_url="", account_url=""):
+                 ocaccount_url="", ocaccount_key="", patreon_url="", account_url="", players_port=25565):
         self.state, self.lock = state, state.lock
         self.domain = domain.strip().lower().strip(".")
+        self.players_port = int_or(players_port, 0)           # the relay's port for players
+        self.at = "" if self.players_port == 25565 else f":{self.players_port}"   # what friends add to the name
         host, sep, port = ssh.strip().rpartition(":")
         self.ssh_host, self.ssh_port = (host, int_or(port, 0)) if sep else (ssh.strip(), 22)
         self.secret, self.user = secret, user or "hostmc"
@@ -1275,6 +1280,8 @@ class Relay:
             out.append("XENITH_RELAY_SECRET must be the relay's secret (its setup prints one)")
         if not 1024 < self.port_lo <= self.port_hi < 65536:
             out.append("XENITH_RELAY_PORTS must be a range such as 30000-39999")
+        if not 0 < self.players_port < 65536:
+            out.append("XENITH_RELAY_PLAYERS_PORT must be the relay's port for players, like 25565")
         return out
 
     @property
@@ -1425,7 +1432,8 @@ class Relay:
                    "patreon": self.patreon_url, "account": self.account_url}
             if n:
                 out.update({"name": name, "state": n["state"], "until": n.get("until", 0),
-                            "address": f"{name}.{self.domain}", "port": p.get("port", 0),
+                            "address": f"{name}.{self.domain}{self.at}", "players_port": self.players_port,
+                            "port": p.get("port", 0),
                             "ssh_host": self.ssh_host, "ssh_port": self.ssh_port, "ssh_user": self.user,
                             "hostkey": self.data.get("hostkey", "")})
             held = sorted(x for x, m in self.data["names"].items() if m["owner"] == who and m["state"] == "left")
@@ -2009,7 +2017,7 @@ def serve():
                       os.environ.get("XENITH_RELAY_SECRET", ""), os.environ.get("XENITH_RELAY_USER", "hostmc"),
                       os.environ.get("XENITH_RELAY_PORTS", "30000-39999"), os.environ.get("XENITH_OCACCOUNT_URL", ""),
                       os.environ.get("XENITH_OCACCOUNT_KEY", ""), os.environ.get("XENITH_RELAY_PATREON", ""),
-                      os.environ.get("XENITH_RELAY_ACCOUNT_URL", ""))
+                      os.environ.get("XENITH_RELAY_ACCOUNT_URL", ""), os.environ.get("XENITH_RELAY_PLAYERS_PORT", "25565"))
         for problem in relay.problems():
             log(problem)
         if relay.problems():
@@ -2588,7 +2596,14 @@ else:
     check("supporter relay: a name given, with what HostMC needs", code == 200 and st.get("name") == "brave-otter"
           and st.get("state") == "on" and st.get("address") == "brave-otter.mc.example.com" and st.get("port") == "30000"
           and st.get("ssh_host") == "tunnel.mc.example.com" and st.get("ssh_port") == "2222"
-          and st.get("ssh_user") == "hostmc" and st.get("hostkey") == hostkey)
+          and st.get("ssh_user") == "hostmc" and st.get("hostkey") == hostkey and st.get("players_port") == "25565")
+    relay.players_port, relay.at = 25566, ":25566"
+    st = ask("sup1")[1]
+    check("supporter relay: a players' port other than 25565 goes in the address",
+          st.get("address") == "brave-otter.mc.example.com:25566" and st.get("players_port") == "25566"
+          and Relay(state, "mc.example.com", "t.example.com:22", "s" * 40, players_port="0").problems()
+          == ["XENITH_RELAY_PLAYERS_PORT must be the relay's port for players, like 25565"])
+    relay.players_port, relay.at = 25565, ""
     check("supporter relay: the key kept as a key alone", relay.data["people"]["sup1"]["key"] == key1)
     check("supporter relay: the relay told", listing() == [f"on|brave-otter|30000|{key1}"])
     key2 = new_key()

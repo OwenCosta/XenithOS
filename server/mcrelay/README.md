@@ -38,10 +38,14 @@ they do). Passing the real address on (PROXY protocol, for Paper) could come lat
 
 Everything here is done by hand by the owner; nothing in this repository has the relay's address.
 
-1. **The relay's VPS** (Debian or Ubuntu, any small one): copy this folder over and run
-   `sudo sh setup.sh`. It says what it will do and asks first, then asks for XenithOS Cloud's address
-   (the one consoles use). At the end it prints the lines for step 2 and the secret. Run it again later to
-   update; the host key, the secret and tunnels that are up stay.
+1. **The relay's VPS** (Debian or Ubuntu, any small one, or one that does other things too): copy this
+   folder over and run `sudo sh setup.sh`. It says what it will do and asks first, then asks for XenithOS
+   Cloud's address (the one consoles use, or `http://127.0.0.1:8795` on the VPS that relays consoles).
+   At the end it prints the settings for step 2. Run it again later to update; the host key, the secret,
+   the ports and tunnels that are up stay. If another Minecraft server already has port 25565 there, it
+   says so: give the relay another, `MCRELAY_PLAYERS_PORT=25566 sh setup.sh`, and friends type
+   `<name>.mc.owencosta.diy:25566` (XenithOS Cloud's `XENITH_RELAY_PLAYERS_PORT` puts the port in the
+   address HostMC shows).
 2. **XenithOS Cloud**: give it the printed settings and the relay's secret where it keeps its others
    (`/etc/xenith-cloud.env` for the systemd service, or a Docker setup's env file), plus where OCAccounts
    answers (`XENITH_OCACCOUNT_URL`, `XENITH_OCACCOUNT_KEY`) and the Patreon page (`XENITH_RELAY_PATREON`),

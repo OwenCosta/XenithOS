@@ -652,6 +652,15 @@ static void build_vps(void)
                          "bans by name do. It carries Java Edition, not Bedrock.")->color = C_DIM;
 }
 
+/* ":25566" when the relay's port for players isn't Minecraft's own, for the names friends type. */
+static const char *relay_port_text(void)
+{
+    static char at[8];
+    if (!relay.players_port || relay.players_port == DEFAULT_PORT) return "";
+    snprintf(at, sizeof at, ":%d", relay.players_port);
+    return at;
+}
+
 /* The supporter relay, when that's the way in. */
 static void build_relay(void)
 {
@@ -702,8 +711,8 @@ static void build_internet(void)
         add(R_BUTTON, N_VPS, "Use your own server (VPS)", NULL);
         add(R_HEAD, 0, "Supporter relay", NULL);
         snprintf(text, sizeof text, "For supporters on Patreon: your server gets a name of its own for friends to type in, like "
-                                    "brave-otter-42.%s. Nothing to set up anywhere. Java Edition only.",
-                 relay.domain[0] ? relay.domain : "mc.owencosta.diy");
+                                    "brave-otter-42.%s%s. Nothing to set up anywhere. Java Edition only.",
+                 relay.domain[0] ? relay.domain : "mc.owencosta.diy", relay_port_text());
         add(R_TEXT, 0, NULL, text)->color = C_SUB;
         add(R_BUTTON, N_RELAY, "Use the supporter relay", NULL);
         break;
@@ -1181,9 +1190,9 @@ static int relay_pick_name(int changing)
         }
         opts[n++] = "Type a name";
         opts[n++] = "Cancel";
-        snprintf(body, sizeof body, "Friends type it to join, as <name>.%s. Take %s, or type your own: 3 to 20 letters, numbers and "
-                                    "hyphens, starting with a letter.%s", relay.domain, relay.suggest[0] ? relay.suggest : "a suggestion",
-                 changing ? " Your old name is kept for you for a week." : "");
+        snprintf(body, sizeof body, "Friends type it to join, as <name>.%s%s. Take %s, or type your own: 3 to 20 letters, numbers and "
+                                    "hyphens, starting with a letter.%s", relay.domain, relay_port_text(),
+                 relay.suggest[0] ? relay.suggest : "a suggestion", changing ? " Your old name is kept for you for a week." : "");
         c = ui_dialog(changing ? "A new name for your server" : "Your server's name", body, opts, n);
         if (c < 0 || c == n - 1) return 0;
         if (relay.suggest[0] && c == 0) {

@@ -187,6 +187,8 @@ and Internet (playit.gg, a VPS of your own, or the supporter relay).
     is the only one trusted (`StrictHostKeyChecking=yes`). The relay reads the name a player's game sends
     and passes them down that supporter's tunnel. Each time it comes up, HostMC checks from outside by the
     name, as with a VPS (`relay/check.txt`).
+  - When the relay's port for players isn't 25565, the address has it, like
+    `brave-otter-42.mc.owencosta.diy:25566`, and HostMC's check asks on that port.
   - Through the relay, too, every player arrives from 127.0.0.1. The relay itself is in
     [server/mcrelay](../server/mcrelay/README.md).
   - `sim/hostmc/test-relay.sh` tries all of it here: XenithOS Cloud, a stand-in OCAccounts, the relay's

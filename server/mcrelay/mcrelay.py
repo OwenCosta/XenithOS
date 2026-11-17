@@ -221,7 +221,7 @@ async def pipe(reader, writer):
 
 class Router:
     def __init__(self, routes, limit=2000, per_ip=12, rate=40, per_name=200):
-        self.path = routes
+        self.path, self.port = routes, 25565
         self.domain, self.on, self.held, self.seen = "", {}, set(), None
         self.limit, self.per_ip, self.rate, self.per_name = limit, per_ip, rate, per_name
         self.active, self.by_ip, self.by_name, self.recent = 0, {}, {}, {}
@@ -300,8 +300,9 @@ class Router:
             if name:
                 return await self.refuse(reader, writer, state, buf[used:], f"There's no server called {name} here.",
                                          "No server")
+            at = "" if self.port == 25565 else f":{self.port}"
             return await self.refuse(reader, writer, state, buf[used:],
-                                     f"Type the server's name to join, like name.{self.domain or 'example.com'}",
+                                     f"Type the server's name to join, like name.{self.domain or 'example.com'}{at}",
                                      "No server")
         if self.by_name.get(name, 0) >= self.per_name:
             return await self.refuse(reader, writer, state, buf[used:], f"{name} is full right now. Try again soon.",
@@ -366,6 +367,7 @@ async def run_router(listen, routes, limits, ready=None):
     router = Router(routes, *limits)
     router.reload()
     server = await asyncio.start_server(router.handle, listen[0], listen[1], reuse_address=True)
+    router.port = server.sockets[0].getsockname()[1]
     asyncio.get_running_loop().create_task(router.watch())
     if ready is not None:
         ready.append(server.sockets[0].getsockname()[1])

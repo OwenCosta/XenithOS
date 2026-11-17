@@ -66,6 +66,8 @@ static void parse(const char *text)
     field(text, "message", relay.message, sizeof relay.message);
     field(text, "until", v, sizeof v);
     relay.until = atoll(v);
+    field(text, "players_port", v, sizeof v);
+    relay.players_port = atoi(v) > 0 && atoi(v) < 65536 ? atoi(v) : DEFAULT_PORT;
     memset(&relay.w.cfg, 0, sizeof relay.w.cfg);
     field(text, "ssh_host", relay.w.cfg.host, sizeof relay.w.cfg.host);
     field(text, "ssh_user", relay.w.cfg.user, sizeof relay.w.cfg.user);
@@ -91,10 +93,11 @@ void relay_address(char *out, int n)
     snprintf(out, n, "%s", relay.address[0] ? relay.address : "No name yet");
 }
 
+/* The check asks by the name, on the relay's port for players, as a friend's game would. */
 static void target(char *host, int n, int *port)
 {
-    snprintf(host, n, "%s", relay.address);
-    *port = DEFAULT_PORT;
+    snprintf(host, n, "%s.%s", relay.name, relay.domain);
+    *port = relay.players_port ? relay.players_port : DEFAULT_PORT;
 }
 
 /* What the check from outside found, through the relay: "" when friends get in. The relay
