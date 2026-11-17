@@ -121,15 +121,19 @@ mkdir -p "$T/lib"
 cp "$repo/linux/hostmc" "$T/lib/hostmc"
 cp "$repo/apps/hostmc/app.txt" "$T/lib/hostmc.txt"    # its name, as /usr/lib/xenithos/hostmc.txt
 desktop_app() {
+    WID= WIDTH=0 HEIGHT=0
     XENITHOS_DESKTOP=1 XENITHOS_DATA="$T" SDL_AUDIODRIVER=dummy "$T/lib/hostmc" 2>> "$T/hostmc-desktop.log" &
     HP=$!
-    WID=$(xdotool search --sync --name '^HostMC$' | head -n 1)
+    WID=$(timeout 20 xdotool search --sync --name '^HostMC$' 2>/dev/null | head -n 1)
+    [ -n "$WID" ] || return 0
     xdotool windowfocus "$WID" > /dev/null 2>&1
     eval "$(xdotool getwindowgeometry --shell "$WID")"
-    sleep 2
+    sleep 2                       # its first frames
 }
 at() { xdotool mousemove --window "$WID" $(( $1 * WIDTH / 1280 )) $(( $2 * HEIGHT / 720 )); sleep 0.15; }
 click() { at "$1" "$2"; xdotool click 1; sleep 0.6; }
+typed_motd() { grep -qx 'motd=Typed on a desktop' "$T/hostmc/server/server.properties" 2>/dev/null; }
+said() { grep -q '\[Server\] Hello from xdotool' "$T/hostmc/server/console.log" 2>/dev/null; }
 desktop_app
 check "its window is named HostMC" "[ -n \"$WID\" ]"
 check "a window, not the whole screen (${WIDTH}x${HEIGHT} of 1280x720)" "[ \"$WIDTH\" -lt 1280 ] && [ \"$WIDTH\" -ge 640 ]"
@@ -138,23 +142,22 @@ click 500 160                     # the message of the day: the text box
 shot desktop_text_box
 xdotool type --delay 40 "Typed on a desktop"
 xdotool key Return
-sleep 0.8
+wait_for 10 typed_motd
 shot desktop_settings
-check "the message typed in the text box is the server's (server.properties)" \
-      "grep -qx 'motd=Typed on a desktop' '$T/hostmc/server/server.properties'"
+check "the message typed in the text box is the server's (server.properties)" typed_motd
 click 190 140                     # Server
 click 450 270                     # Start the server
-sleep 8
+wait_for 30 joined
+sleep 1
 shot desktop_running
 check "a click started the server" server_alive
 click 190 196                     # Console: its command line takes the typing
 sleep 0.5
 xdotool type --delay 40 "say Hello from xdotool"
 xdotool key Return
-sleep 1.5
+wait_for 10 said
 shot desktop_console
-check "a command typed on the console's command line reached the server" \
-      "grep -q '\\[Server\\] Hello from xdotool' '$T/hostmc/server/console.log'"
+check "a command typed on the console's command line reached the server" said
 pid=$(server_pid)
 kill -TERM "$HP"                  # as closing the window does (SDL's quit)
 wait "$HP" 2>/dev/null
@@ -163,18 +166,20 @@ desktop_app
 check "HostMC opened again found it" "[ \"\$(server_pid)\" = \"$pid\" ] && server_alive"
 click 190 140                     # Server
 click 450 270                     # Stop the server
-sleep 4
+wait_for 20 eval '! server_alive'
+sleep 1
 shot desktop_stopped
 check "a click stopped it" "! server_alive"
 xdotool key Escape
 sleep 0.3
 xdotool key Escape                # back to the menu, then close
-sleep 1
+wait_for 10 eval "! kill -0 $HP 2>/dev/null"
 check "Esc from the menu closed HostMC" "! kill -0 $HP 2>/dev/null"
 kill "$HP" 2>/dev/null; wait "$HP" 2>/dev/null
 
 kill "$XV" 2>/dev/null; wait "$XV" 2>/dev/null
 if server_alive; then echo "  (stopping the stand-in server left running, pid $(server_pid))"; kill "$(server_pid)"; failed=1; fi
 if [ "$failed" != 0 ] && [ -s "$T/xenithos.log" ]; then echo "XenithOS's log (HostMC's too):"; tail -n 40 "$T/xenithos.log"; fi
+if [ "$failed" != 0 ] && [ -s "$T/hostmc-desktop.log" ]; then echo "HostMC's log as a desktop app:"; tail -n 40 "$T/hostmc-desktop.log"; fi
 echo "screenshots in $T/shots"
 exit $failed

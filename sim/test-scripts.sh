@@ -172,6 +172,9 @@ elif wanted doom; then
     skip doom "DOOM needs a WAD: XSIM_WAD=path/to/freedoom1.wad"
 fi
 run hostmc "" XSIM_BIN=xhostmc XSIM_KIND=pc XSIM_THREAD=1 XSIM_HOSTMC=1 XSIM_TYPE="say Hello from HostMC|"
+# HostMC as a desktop app (its own window on XenithOS Desktop): the mouse, the keyboard's keys and typing.
+run hostmc_desktop "" XSIM_BIN=xhostmc XSIM_KIND=pc XSIM_THREAD=1 XSIM_HOSTMC=1 XSIM_DESKTOP=1 XSIM_W=1280 XSIM_H=720 \
+    XSIM_CLIPBOARD=vps.example.com
 
 online=0
 for s in online feedback gallery store_pc store_steam store_route tube store_local; do wanted "$s" && online=1; done

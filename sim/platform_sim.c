@@ -350,8 +350,10 @@ void plat_init(void)
     load_script(s);
     last_frame = calloc((size_t)W * H, 4);
     if (getenv("XSIM_TILED") && !strcmp(getenv("XSIM_TILED"), "1")) {
+        /* As big as the tiled layout is: whole 32x32 tiles, so 720 rows take 736. A picture that
+         * fills all 1280x720 (a desktop app's, XSIM_W/XSIM_H) reaches into the last half tile. */
         int fw = 1280, fh = 720;
-        uint32_t *fake = calloc((size_t)fw * fh, 4);
+        uint32_t *fake = calloc((size_t)(((fw + 31) >> 5) << 5) * (((fh + 31) >> 5) << 5), 4);
         tiled_init(&tfb, fake, fw, fh, (fw - W) / 2, (fh - H) / 2, W, H);
         tiled_on = 1;
     }
