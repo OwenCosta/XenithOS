@@ -170,8 +170,12 @@ static void draw(int sel, int first)
     y += (gfx_line_h(FONT_SMALL) + 3) * gfx_wrap(FONT_SMALL, rx + pad, y, rw - 2 * pad, 3, C_SUB,
         "If a save changes on two machines before they match up, XenithOS asks which one to keep. Nothing is "
         "replaced without asking.", 5) + 14;
-    gfx_wrap(FONT_SMALL, rx + pad, y, rw - 2 * pad, 3, C_SUB,
-        "Deleting here leaves the copies on your machines.", 3);
+    {
+        /* The last one only where it fits above this machine's line (with bigger text it doesn't) */
+        static const char gone[] = "Deleting here leaves the copies on your machines.";
+        if (y + gfx_wrap_lines(FONT_SMALL, rw - 2 * pad, gone, 3) * (gfx_line_h(FONT_SMALL) + 3) <= top + h - pad - 30)
+            gfx_wrap(FONT_SMALL, rx + pad, y, rw - 2 * pad, 3, C_SUB, gone, 3);
+    }
     snprintf(line, sizeof line, st.cloud_saves ? "On for this %s" : "Off for this %s, in Settings",
              plat_kind() == PLAT_XBOX ? "Xbox" : "PC");
     gfx_circle(rx + pad + 5.0f, top + h - pad - 11.0f, 4, st.cloud_saves ? C_OK : C_DIM, 255);

@@ -223,7 +223,7 @@ static void draw_detail(int x, int y, int w, int h, int sel)
             int bw = w - 2 * pad - 44, font = FONT_SMALL, lines = 2, bh, k;
             for (k = 0; k < 3; k++)
                 if (gfx_str_w(sizes[k], p->mc) <= bw) { font = sizes[k]; lines = 1; break; }
-            bh = 132 + lines * (gfx_line_h(font) + 2);
+            bh = 132 + lines * (gfx_line_h(font) + 2) + 2 * gfx_line_grow(FONT_SMALL);   /* the two lines under it */
             gfx_fill_rrect((float)(x + pad), (float)ty, (float)(w - 2 * pad), (float)bh, 12, C_SURFACE2, 255);
             icon_draw(ICON_SERVER, x + pad + 34.0f, ty + 36.0f, 34, C_SUB, C_SURFACE2);
             gfx_str(FONT_BODY_SB, x + pad + 64, ty + 20, C_TEXT, "Their Minecraft server");
