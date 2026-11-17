@@ -59,3 +59,23 @@ One command per line; each controller poll is one frame.
 | `quit` | stop and write audio.wav |
 
 Buttons: `up down left right a b x y lb rb lt rt start back guide ls rs`.
+
+## All the scripts at once
+
+`sim/test-scripts.sh` runs every script with the switches its header gives it and `XSIM_TILED=1`, as CI does,
+and fails on an AddressSanitizer or UBSan report, a tiled framebuffer check that isn't 0 wrong pixels, or a run
+that doesn't finish. `sim/test-scripts.sh boot tour` runs only those.
+
+- It needs no Xbox build: the USB stick is a stand-in for `usb/` (XenithOS and the apps as empty files, with
+  their `app.txt` files and thumbnails). `XSIM_USB=usb` uses the real one; `sim/run.sh` takes `XSIM_USB` too.
+- Scripts that go online get XenithOS Clouds of their own on spare ports: one with a stand-in Store (the items
+  in `server/store.example.json`, at this version of XenithOS so no update is waiting, with stand-in files)
+  and the Flathub and Steam lists in `sim/store/`, and one with only those lists, for `store_pc.txt` and
+  `store_steam.txt`. It also checks what those scripts leave on the server: the profile `online.txt` makes,
+  the report `feedback.txt` sends, and the home-network route `store_route.txt` takes.
+- `doom.txt` needs a WAD (`XSIM_WAD=path/to/freedoom1.wad`), and Tube's script asks YouTube only where the
+  machine has yt-dlp and ffmpeg (without them it shows Tube turned off). Scripts whose header names one of
+  the `sim/hostmc/test-*.sh` tests are left to that test. A new script runs with no switches until it's
+  given some in `sim/test-scripts.sh`.
+- Screenshots and each run's log go to `sim/out/test-<name>/`. `XSIM_LIMIT` is how long a run may take
+  (900 s).

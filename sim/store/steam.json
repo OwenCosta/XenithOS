@@ -1,0 +1,13 @@
+[
+ {"id": "tf2", "name": "Team Fortress 2", "appid": 440, "free": true, "description": "Class-based team shooter."},
+ {"id": "cs2", "name": "Counter-Strike 2", "appid": 730, "free": true, "description": "Five against five, attack and defend."},
+ {"id": "dota2", "name": "Dota 2", "appid": 570, "free": true, "description": "Two teams of five heroes."},
+ {"id": "warframe", "name": "Warframe", "appid": 230410, "free": true, "description": "Space ninjas, together."},
+ {"id": "pathofexile", "name": "Path of Exile", "appid": 238960, "free": true, "description": "A dark action role-playing game."},
+ {"id": "brawlhalla", "name": "Brawlhalla", "appid": 291550, "free": true, "description": "A platform fighter for up to eight."},
+ {"id": "unturned", "name": "Unturned", "appid": 304930, "free": true, "description": "Survive and build with friends."},
+ {"id": "terraria", "name": "Terraria", "appid": 105600, "free": false, "description": "Dig, fight, explore and build."},
+ {"id": "stardew", "name": "Stardew Valley", "appid": 413150, "free": false, "description": "A farm of your own."},
+ {"id": "hollowknight", "name": "Hollow Knight", "appid": 367520, "free": false, "description": "A kingdom of insects, under the ground."},
+ {"id": "portal2", "name": "Portal 2", "appid": 620, "free": false, "description": "Puzzles with a portal gun, alone or with a friend."}
+]
