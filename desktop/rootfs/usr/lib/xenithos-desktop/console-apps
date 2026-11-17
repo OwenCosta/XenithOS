@@ -1,0 +1,169 @@
+#!/bin/bash
+# XenithOS Console's apps that you install yourself on XenithOS Desktop. The ones named in
+# /usr/share/xenithos-desktop/console-apps.list are on the PC already (built with XenithOS
+# Console), but only show on XenithOS Console's home screen once you've installed them in
+# Settings > Console apps.
+#
+#   console-apps list            a line for each: app|1 or 0 (installed)|its name|what it is
+#   console-apps install APP     puts it on XenithOS Console's home screen
+#   console-apps remove APP      takes it off again; what you made with it stays
+#   console-apps sync            makes the home screen match what you chose. The session runs it
+#                                before XenithOS Console starts, and Settings after it updates
+#                                XenithOS Console, whose own update puts every app back.
+#   console-apps menu            makes the desktop's Apps menu match the home screen (below).
+#                                The desktop runs it as it starts; the three above do it too.
+#
+# An app on the home screen is three files in XenithOS Console's apps folder: APP.elf32 (a link
+# to the program), APP.ximg (its picture) and APP.txt (its name and version). What you chose is
+# in ~/.config/xenithos/console-apps, a name on each line.
+#
+# The Apps menu: every app of XenithOS Console's that's on its home screen (the ones that come
+# installed, and the ones you installed here or in XenithOS Console's Store) also has an entry in
+# the desktop's Apps menu, and opens on the desktop by itself. The entries are files of yours,
+# ~/.local/share/applications/xenithos-app-APP.desktop; console-menu.list says which group each
+# app goes in.
+set -u
+LIST=/usr/share/xenithos-desktop/console-apps.list
+LIB=${XENITHOS_LIB:-/usr/lib/xenithos}
+SHARE=/usr/share/xenithos/apps
+DATA=${XENITHOS_DATA:-$HOME/.local/share/xenithos}
+APPS="$DATA/uda:/apps"
+KEPT="$DATA/optional-apps"      # the picture and name of an app that isn't installed, for when it is
+CHOSEN="${XDG_CONFIG_HOME:-$HOME/.config}/xenithos/console-apps"
+MENU="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+MENU_LIST=/usr/share/xenithos-desktop/console-menu.list
+ICONS=/usr/share/icons/XenithOS/scalable/apps
+
+optional() { sed -n 's/^\([a-z0-9][a-z0-9_-]*\)\([[:space:]].*\)\{0,1\}$/\1/p' "$LIST" 2>/dev/null; }
+is_optional() { optional | grep -qx -- "$1"; }
+about() { sed -n "s/^$1[[:space:]]\{1,\}//p" "$LIST" 2>/dev/null | head -n 1; }
+chosen() { grep -qx -- "$1" "$CHOSEN" 2>/dev/null; }
+title() {
+    local name="" f
+    for f in "$APPS/$1.txt" "$KEPT/$1.txt" "$LIB/$1.txt" "$SHARE/$1.txt"; do
+        [ -f "$f" ] && name=$(sed -n 's/^name=//p' "$f" | head -n 1 | tr -d '\r')
+        [ -n "$name" ] && break
+    done
+    echo "${name:-$1}"
+}
+
+# Onto the home screen.
+put() {
+    local app=$1 ext
+    [ -x "$LIB/$app" ] || return 1
+    mkdir -p "$APPS"
+    for ext in ximg txt; do
+        [ -f "$APPS/$app.$ext" ] && continue
+        if [ -f "$KEPT/$app.$ext" ]; then cp "$KEPT/$app.$ext" "$APPS/$app.$ext"
+        elif [ -f "$SHARE/$app.$ext" ]; then cp "$SHARE/$app.$ext" "$APPS/$app.$ext"; fi
+    done
+    [ -e "$APPS/$app.elf32" ] || ln -s "$LIB/$app" "$APPS/$app.elf32"
+}
+
+# Off the home screen. Its picture and name are kept (XenithOS Console's updates bring newer
+# ones than the system came with).
+take() {
+    local app=$1 ext
+    for ext in ximg txt; do
+        if [ -f "$APPS/$app.$ext" ]; then
+            mkdir -p "$KEPT"
+            mv -f "$APPS/$app.$ext" "$KEPT/$app.$ext"
+        fi
+    done
+    if [ -L "$APPS/$app.elf32" ]; then rm -f "$APPS/$app.elf32"; fi
+}
+
+# The Apps menu's entry for an app, as text.
+entry() {
+    local app=$1 kinds words icon=xenithos
+    kinds=$(sed -n "s/^$app[[:space:]]\{1,\}\([^[:space:]]\{1,\}\).*/\1/p" "$MENU_LIST" 2>/dev/null | head -n 1)
+    words=$(sed -n "s/^$app[[:space:]]\{1,\}[^[:space:]]\{1,\}[[:space:]]\{1,\}//p" "$MENU_LIST" 2>/dev/null | head -n 1)
+    if [ -f "$ICONS/xenithos-app-$app.svg" ]; then icon=xenithos-app-$app; fi
+    echo "[Desktop Entry]"
+    echo "Type=Application"
+    echo "Name=$(title "$app")"
+    if [ -n "$words" ]; then echo "Comment=$words"; fi
+    echo "Exec=/usr/lib/xenithos-desktop/console-app $app"
+    echo "Icon=$icon"
+    echo "Categories=${kinds:-Game;}"
+    echo "StartupWMClass=$app"
+    echo "Actions=window;"
+    echo
+    echo "[Desktop Action window]"
+    echo "Name=Open in a window"
+    echo "Exec=/usr/lib/xenithos-desktop/console-app $app --window"
+}
+
+# Makes the Apps menu match the home screen: an entry for each of XenithOS Console's apps that's
+# on it, none for the rest. It goes by the home screen itself, so it's right whoever changed
+# that: this tool, or XenithOS Console's Store.
+menu() {
+    local f app file
+    [ -d "$APPS" ] || return 0         # XenithOS Console hasn't been set up for this account
+    mkdir -p "$MENU" 2>/dev/null || return 0
+    for f in "$LIB"/*; do
+        app=${f##*/}
+        case "$app" in xenithos|*.*) continue ;; esac     # XenithOS Console itself; names and pictures
+        [ -f "$f" ] && [ -x "$f" ] || continue
+        file="$MENU/xenithos-app-$app.desktop"
+        if [ -e "$APPS/$app.elf32" ]; then
+            entry "$app" > "$file.new"
+            if cmp -s "$file.new" "$file"; then rm -f "$file.new"; else mv -f "$file.new" "$file"; fi
+        else
+            rm -f "$file"
+        fi
+    done
+    for file in "$MENU"/xenithos-app-*.desktop; do         # apps that have left the PC since
+        [ -f "$file" ] || continue
+        app=${file##*/xenithos-app-}
+        [ -x "$LIB/${app%.desktop}" ] || rm -f "$file"
+    done
+    return 0
+}
+
+need_app() {
+    if ! is_optional "${1:-}"; then
+        echo "${1:-That} isn't one of the apps you install yourself." >&2
+        exit 2
+    fi
+}
+
+case "${1:-}" in
+    list)
+        for app in $(optional); do
+            [ -x "$LIB/$app" ] || continue
+            printf '%s|%s|%s|%s\n' "$app" "$(chosen "$app" && echo 1 || echo 0)" "$(title "$app")" "$(about "$app")"
+        done
+        ;;
+    install)
+        need_app "${2:-}"
+        [ -x "$LIB/$2" ] || { echo "$(title "$2") isn't on this PC yet. Settings > Updates brings it." >&2; exit 1; }
+        mkdir -p "$(dirname "$CHOSEN")"
+        chosen "$2" || echo "$2" >> "$CHOSEN"
+        put "$2" || { echo "$(title "$2") couldn't be put on the home screen." >&2; exit 1; }
+        menu
+        ;;
+    remove)
+        need_app "${2:-}"
+        if [ -f "$CHOSEN" ]; then
+            grep -vx -- "$2" "$CHOSEN" > "$CHOSEN.new" || true
+            mv -f "$CHOSEN.new" "$CHOSEN"
+        fi
+        take "$2"
+        menu
+        ;;
+    sync)
+        [ -d "$APPS" ] || exit 0        # XenithOS Console hasn't been set up for this account
+        for app in $(optional); do
+            if chosen "$app"; then put "$app" || true; else take "$app"; fi
+        done
+        menu
+        ;;
+    menu)
+        menu
+        ;;
+    *)
+        sed -n '2,/^set -u/p' "$0" | grep '^#' | cut -c3- >&2
+        exit 2
+        ;;
+esac

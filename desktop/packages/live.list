@@ -1,0 +1,13 @@
+# Only on the ISO: what the live system (the USB stick) and the installer need. The installer
+# takes user-setup, with the rest of the live system, off the PC it installs on.
+
+## The live system: live-config makes its account with user-setup.
+user-setup
+
+## The installer
+gdisk
+parted
+dosfstools
+e2fsprogs
+squashfs-tools
+xkb-data

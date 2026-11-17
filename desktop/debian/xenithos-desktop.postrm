@@ -1,0 +1,17 @@
+#!/bin/sh
+# xenithos-desktop: taken off for good (purge): hand back the files it stood in for.
+set -e
+if [ "$1" = purge ]; then
+    for name in xfce-shapes xfce-x; do
+        stock=/usr/share/backgrounds/xfce/$name.svg
+        if [ -n "$(dpkg-divert --list "$stock")" ]; then
+            rm -f "$stock"
+            dpkg-divert --quiet --local --rename --remove "$stock" 2>/dev/null || true
+        fi
+    done
+    rm -f /usr/lib/os-release
+    dpkg-divert --quiet --local --rename --remove /usr/lib/os-release 2>/dev/null || true
+    rm -rf /var/lib/xenithos-desktop /usr/share/xenithos-desktop/overrides
+    rm -f /usr/share/themes/XenithOS/gtk-3.0/adwaita-xenithos.css
+fi
+exit 0

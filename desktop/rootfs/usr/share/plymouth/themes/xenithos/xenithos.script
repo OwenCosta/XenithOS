@@ -1,0 +1,28 @@
+# XenithOS's start-up screen: the wallpaper (the logo on near-black), scaled to cover the screen
+# the same way the desktop scales it, so start-up, the moment before the desktop and the desktop
+# itself are one picture that never moves. background.png is drawn by desktop/art/make-art.py.
+
+Window.SetBackgroundTopColor(0.027, 0.031, 0.039);
+Window.SetBackgroundBottomColor(0.027, 0.031, 0.039);
+
+picture = Image("background.png");
+ratio_x = Window.GetWidth() / picture.GetWidth();
+ratio_y = Window.GetHeight() / picture.GetHeight();
+if (ratio_x > ratio_y) ratio = ratio_x; else ratio = ratio_y;
+scaled = picture.Scale(picture.GetWidth() * ratio, picture.GetHeight() * ratio);
+background = Sprite(scaled);
+background.SetX(Window.GetX() + Window.GetWidth() / 2 - scaled.GetWidth() / 2);
+background.SetY(Window.GetY() + Window.GetHeight() / 2 - scaled.GetHeight() / 2);
+background.SetZ(-10);
+
+# Messages and questions (finishing an update, a disk check) as plain text under the logo.
+message = Sprite();
+message.SetZ(3);
+fun message_callback (text)
+{
+    message_image = Image.Text(text, 0.75, 0.78, 0.82);
+    message.SetImage(message_image);
+    message.SetX(Window.GetX() + Window.GetWidth() / 2 - message_image.GetWidth() / 2);
+    message.SetY(Window.GetY() + Window.GetHeight() * 0.82);
+}
+Plymouth.SetMessageFunction(message_callback);

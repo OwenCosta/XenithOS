@@ -1,0 +1,22 @@
+#!/bin/sh
+# live-build's own 9000-remove-gnome-icon-cache deletes every icon theme's index to keep an ISO
+# small (about 15 MB here). Without the indexes each program reads through tens of thousands of
+# icon files as it starts: slower to open, and about 80 MB more memory in every one of them
+# (measured: the panel 88 MB against 9, the network icon 171 against 12, near 1 GB for a desktop
+# doing nothing). So the indexes are made again here, after that hook.
+set -e
+made=0
+for theme in /usr/share/icons/*/; do
+    [ -f "${theme}index.theme" ] || continue
+    if gtk-update-icon-cache -q -f "$theme" 2>/dev/null; then
+        made=$((made + 1))
+    else
+        echo "no icon index for $theme"
+    fi
+done
+echo "icon indexes made: $made"
+# The two the desktop uses most.
+for theme in Papirus-Dark hicolor; do
+    [ ! -d "/usr/share/icons/$theme" ] || [ -s "/usr/share/icons/$theme/icon-theme.cache" ] \
+        || { echo "the icon index of $theme is missing" >&2; exit 1; }
+done

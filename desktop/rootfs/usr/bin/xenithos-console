@@ -1,0 +1,30 @@
+#!/bin/bash
+# "Return to XenithOS Console": leaves the desktop for XenithOS Console (the full-screen console
+# XenithOS, for a controller). Its power menu, "Switch to desktop mode", comes back.
+#
+#   xenithos-console          asks first if apps are open on the desktop (they will close)
+#   xenithos-console --now    doesn't ask
+CONF="$HOME/.config/xenithos"
+mkdir -p "$CONF"
+
+# Windows of apps open on the desktop (not the panel or the desktop itself).
+open_windows() {
+    local id n=0
+    for id in $(xprop -root _NET_CLIENT_LIST 2>/dev/null | sed 's/.*# //; s/,/ /g'); do
+        if xprop -id "$id" _NET_WM_WINDOW_TYPE 2>/dev/null | grep -qE 'NORMAL|DIALOG|not found'; then n=$((n + 1)); fi
+    done
+    echo "$n"
+}
+
+if [ "${1:-}" != --now ] && [ "$(open_windows)" -gt 0 ]; then
+    /usr/lib/xenithos-desktop/ask "Switch to XenithOS Console?" \
+        "The apps open on the desktop will close. Save anything you're working on first." \
+        "Switch" "Not now" || exit 0
+fi
+
+echo console > "$CONF/mode"
+if pgrep -u "$(id -u)" -x xfce4-session >/dev/null 2>&1; then
+    exec xfce4-session-logout --logout --fast
+fi
+# Not in XenithOS Desktop's own session: end whatever desktop this is.
+pkill -u "$(id -u)" -x xfce4-session || pkill -u "$(id -u)" -x Xorg

@@ -1,0 +1,11 @@
+# XenithOS Desktop: web links and pages open in Brave (your own choice, in Settings or the app
+# itself, is kept in ~/.config/mimeapps.list and comes first).
+[Default Applications]
+x-scheme-handler/http=brave-browser.desktop
+x-scheme-handler/https=brave-browser.desktop
+x-scheme-handler/about=brave-browser.desktop
+x-scheme-handler/unknown=brave-browser.desktop
+text/html=brave-browser.desktop
+application/xhtml+xml=brave-browser.desktop
+application/pdf=org.gnome.Evince.desktop
+inode/directory=thunar.desktop

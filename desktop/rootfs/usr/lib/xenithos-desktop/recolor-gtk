@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""Makes XenithOS's GTK theme from GTK's own dark theme (Adwaita), colour for colour.
+
+    recolor-gtk [OUT.css]     (default /usr/share/themes/XenithOS/gtk-3.0/adwaita-xenithos.css)
+
+GTK 3 keeps its dark theme inside the library. This takes it out (with glib's gresource tool),
+swaps Adwaita's warm greys for XenithOS's near-black and cool greys, turns its blue into a
+neutral grey (so red stays XenithOS's one colour: gtk.css puts it on what's switched on), and
+gives destructive buttons XenithOS's red. Every state is covered, focused or not, because the
+whole stylesheet is recoloured rather than patched. hooks/0200-desktop runs it as the ISO is
+built; gtk.css imports the result and adds XenithOS's own touches.
+"""
+import re
+import subprocess
+import sys
+
+LIB = "/usr/lib/x86_64-linux-gnu/libgtk-3.so.0"
+RESOURCE = "/org/gtk/libgtk/theme/Adwaita/gtk-contained-dark.css"
+OUT = sys.argv[1] if len(sys.argv) > 1 else "/usr/share/themes/XenithOS/gtk-3.0/adwaita-xenithos.css"
+
+# Adwaita dark's greys (by their shade, 0-255) -> XenithOS's. Borders, darker than the
+# background in Adwaita, become XenithOS's quiet edges, lighter than the cards.
+GREYS = [
+    (0x00, 0x000000), (0x02, 0x020203), (0x07, 0x050608), (0x11, 0x1d2128), (0x14, 0x1d2128),
+    (0x1b, 0x262b33), (0x1e, 0x2c323c), (0x20, 0x1d2128), (0x22, 0x0b0d10), (0x23, 0x0b0d10),
+    (0x25, 0x20242c), (0x26, 0x12151a), (0x28, 0x0b0d10), (0x2a, 0x232832), (0x2b, 0x15181d),
+    (0x2d, 0x0b0d10), (0x2e, 0x0d0f12), (0x2f, 0x12151a), (0x30, 0x0d0f12), (0x31, 0x12151a),
+    (0x32, 0x101317), (0x35, 0x12151a), (0x37, 0x232832), (0x3a, 0x262b33), (0x3c, 0x2c323c),
+    (0x40, 0x2c323c), (0x42, 0x2c323c), (0x44, 0x3a404a), (0x4e, 0x3a404a), (0x54, 0x4b525c),
+    (0x5a, 0x5d6570), (0x5b, 0x5d6570), (0x60, 0x5d6570), (0x63, 0x6b7380), (0x6c, 0x6b7380),
+    (0x74, 0x7a828e), (0x7e, 0x7a828e), (0x87, 0x8b93a0), (0x91, 0x8b93a0), (0xa4, 0xa4abb6),
+    (0xbe, 0xb9bfc8), (0xc8, 0xc4c9d1), (0xd6, 0xc4c9d1), (0xda, 0xd5d9df), (0xee, 0xf1f3f6),
+    (0xf7, 0xf7f8fa), (0xff, 0xffffff),
+]
+
+
+def rgb(c):
+    return (c >> 16) & 255, (c >> 8) & 255, c & 255
+
+
+def grey(v):
+    """A shade of Adwaita's grey as XenithOS's, between the nearest two known shades."""
+    for (a, ca), (b, cb) in zip(GREYS, GREYS[1:]):
+        if a <= v <= b:
+            t = 0 if b == a else (v - a) / (b - a)
+            return tuple(round(x + (y - x) * t) for x, y in zip(rgb(ca), rgb(cb)))
+    return rgb(GREYS[-1][1])
+
+
+def recolor(r, g, b):
+    if max(r, g, b) - min(r, g, b) <= 8:                      # grey
+        return grey((r + g + b) / 3)
+    if b > r + 25 and b >= g:                                 # Adwaita's blue: a grey as light
+        return grey(0.2126 * r + 0.7152 * g + 0.0722 * b)
+    if r > g + 60 and r > b + 40 and g < 100:                 # red (destructive, errors)
+        for floor, ours in ((190, (229, 9, 20)), (160, (192, 8, 17)), (120, (143, 6, 16)), (60, (92, 4, 9))):
+            if r >= floor:
+                return ours
+        return (26, 0, 2)
+    return r, g, b                                            # greens, orange, pinks stay
+
+
+def hex_sub(m):
+    h = m.group(1)
+    if len(h) == 3:
+        h = "".join(ch * 2 for ch in h)
+    return "#%02x%02x%02x" % recolor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
+def rgba_sub(m):
+    r, g, b = (int(m.group(i)) for i in (2, 3, 4))
+    nr, ng, nb = recolor(r, g, b)
+    alpha = m.group(5)
+    return f"{m.group(1)}({nr}, {ng}, {nb}{alpha or ''})"
+
+
+def main():
+    css = subprocess.run(["gresource", "extract", LIB, RESOURCE], check=True, capture_output=True, text=True).stdout
+    # Its pictures (the tick in a checkbox, say) stay inside GTK: point to them there.
+    base = RESOURCE.rsplit("/", 1)[0]
+    css = re.sub(r"""url\((["']?)(?!resource:|file:|/)""", lambda m: f"url({m.group(1)}resource://{base}/", css)
+    css = re.sub(r"#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b", hex_sub, css)
+    css = re.sub(r"\b(rgba?)\(\s*(\d+),\s*(\d+),\s*(\d+)(,\s*[\d.]+)?\s*\)", rgba_sub, css)
+    with open(OUT, "w") as f:
+        f.write("/* GTK's dark theme (Adwaita) in XenithOS's colours: made by recolor-gtk, don't edit. */\n")
+        f.write(css)
+    print(f"recolor-gtk: wrote {OUT}")
+
+
+if __name__ == "__main__":
+    main()

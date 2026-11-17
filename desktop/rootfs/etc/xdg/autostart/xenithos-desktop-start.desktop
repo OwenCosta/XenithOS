@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=XenithOS desktop launchers
+Comment=Puts XenithOS's launchers on the desktop
+Exec=/usr/lib/xenithos-desktop/desktop-start
+OnlyShowIn=XFCE;
+NoDisplay=true
+X-XFCE-Autostart-Override=true

@@ -1,0 +1,57 @@
+#!/bin/bash
+# Runs as the XenithOS account each time its session starts (from xsession), before the desktop
+# or XenithOS Console. It keeps the account's own files in step with XenithOS Desktop's updates:
+# things an update can't change from outside, because they live in the home folder. Each numbered
+# step runs once (~/.config/xenithos/migrated holds the last one done).
+CONF="$HOME/.config/xenithos"
+DATA="$HOME/.local/share/xenithos"
+DONE_FILE="$CONF/migrated"
+mkdir -p "$CONF"
+last=$(cat "$DONE_FILE" 2>/dev/null)
+case "$last" in ''|*[!0-9]*) last=0 ;; esac
+[ -f "$CONF/desktop-launchers" ] || [ "$last" != 0 ] || last=new      # a brand-new account: nothing to bring forward
+
+# Every start: XenithOS Console knows where XenithOS Cloud is. The address comes with XenithOS
+# Desktop (/usr/share/xenithos/config.txt); an account made before it did has none.
+CFG="$DATA/uda:/xenith/config.txt"
+if [ -f /usr/share/xenithos/config.txt ] && ! grep -q '^server=.' "$CFG" 2>/dev/null; then
+    mkdir -p "$DATA/uda:/xenith"
+    server=$(grep -m 1 '^server=.' /usr/share/xenithos/config.txt)
+    if [ -n "$server" ]; then
+        { [ -f "$CFG" ] && grep -v '^server=' "$CFG"; echo "$server"; } > "$CFG.new"
+        grep -q '^name=' "$CFG.new" || echo "name=$(cat /etc/hostname 2>/dev/null || echo XenithOS)" >> "$CFG.new"
+        mv -f "$CFG.new" "$CFG"
+        echo "$(date '+%F %T') added XenithOS Cloud's address to $CFG"
+    fi
+fi
+
+# Every start: PC Settings (Wi-Fi, sound, updates) is on XenithOS Console's home screen.
+if [ -d "$DATA/uda:/apps" ] && [ -f /usr/share/xenithos-desktop/pc-settings.app ]; then
+    for ext in app ximg; do
+        src=/usr/share/xenithos-desktop/pc-settings.$ext
+        [ -f "$src" ] && ! cmp -s "$src" "$DATA/uda:/apps/pc-settings.$ext" && cp "$src" "$DATA/uda:/apps/pc-settings.$ext"
+    done
+fi
+
+step() { [ "$last" != new ] && [ "$last" -lt "$1" ]; }
+
+# 1 (XenithOS Desktop 1.1): the PC starts in the desktop, the Apps menu and panel take their new
+# settings (Brave, Settings, "Return to XenithOS Console"), and the desktop gets its new launchers.
+if step 1; then
+    echo "$(date '+%F %T') step 1: XenithOS Desktop 1.1"
+    for p in /plugins/plugin-1 /plugins/plugin-2; do
+        xfconf-query -c xfce4-panel -p "$p" -r -R 2>/dev/null
+    done
+    rm -f "$CONF/desktop-launchers" "$CONF/desktop-shortcut" "$CONF/volume-set"
+    DESK=$(xdg-user-dir DESKTOP 2>/dev/null)
+    [ -n "$DESK" ] && [ "$DESK" != "$HOME" ] || DESK="$HOME/Desktop"
+    # The first version's launchers, as it wrote them (ones the person changed are left alone).
+    old="$DESK/xenithos-console.desktop"
+    if [ -f "$old" ] && grep -q '^Name=Return to XenithOS$' "$old"; then rm -f "$old"; fi
+    old="$DESK/firefox.desktop"
+    if [ -f "$old" ] && grep -q '^Exec=firefox-esr %u$' "$old" && command -v brave-browser >/dev/null; then rm -f "$old"; fi
+fi
+
+[ "$last" = new ] && last=0
+[ "$last" -ge 1 ] || echo 1 > "$DONE_FILE"
+exit 0

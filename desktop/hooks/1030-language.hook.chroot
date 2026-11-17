@@ -1,0 +1,12 @@
+#!/bin/sh
+# The system's language: English (US) for now; the installer sets the keyboard and time zone.
+# Its number (1030) puts this right after live-build's own 1020-create-locales-files, which
+# writes a bare "C.UTF-8" there whatever was set before: dates, sorting and paper size would
+# follow no country at all.
+set -e
+sed -i 's/^# *\(en_US.UTF-8 UTF-8\)/\1/' /etc/locale.gen
+locale-gen
+locale -a | grep -qix 'en_US\.utf-\?8' || { echo "en_US.UTF-8 wasn't generated" >&2; exit 1; }
+# On Ubuntu 24.04 this file is a link to /etc/locale.conf; writing through it keeps the link.
+printf 'LANG=en_US.UTF-8\n' > /etc/default/locale
+grep -qx 'LANG=en_US.UTF-8' /etc/default/locale || { echo "the language didn't get set" >&2; exit 1; }

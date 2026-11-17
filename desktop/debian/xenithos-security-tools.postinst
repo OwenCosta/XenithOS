@@ -1,0 +1,17 @@
+#!/bin/sh
+# xenithos-security-tools: the first time it's installed, the tools whose packages set a service
+# to start with the PC don't start by themselves (start one when you want it, for example:
+# sudo systemctl start tor). hooks/0200-desktop.hook.chroot checks the ISO for it.
+set -e
+if [ "$1" = configure ] && [ -z "$2" ]; then
+    for unit in tor.service bettercap.service; do
+        systemctl disable "$unit" >/dev/null 2>&1 || true
+        if [ -d /run/systemd/system ]; then systemctl stop "$unit" >/dev/null 2>&1 || true; fi
+    done
+fi
+# The Apps menu's Security Tools group is made from this package's list of tools
+# (/usr/share/xenithos-desktop/security-tools.list), now that the tools are in place.
+if [ "$1" = configure ] && [ -f /usr/lib/xenithos-desktop/desktop-entries ]; then
+    python3 /usr/lib/xenithos-desktop/desktop-entries >/dev/null 2>&1 || true
+fi
+exit 0

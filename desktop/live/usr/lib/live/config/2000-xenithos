@@ -1,0 +1,87 @@
+#!/bin/sh
+
+. /usr/lib/live/config.sh
+
+# XenithOS Desktop's live system (the USB stick). Its account starts XenithOS on the first
+# console like an installed one, with "Install XenithOS Desktop" on XenithOS's home screen and on
+# the desktop. Started from the boot menu's "Install XenithOS Desktop" (xenithos.install), the
+# installer opens first. A live-config component: it runs once as the live system starts.
+
+Cmdline ()
+{
+	for _PARAMETER in ${LIVE_CONFIG_CMDLINE}
+	do
+		case "${_PARAMETER}" in
+			live-config.username=*|username=*)
+				LIVE_USERNAME="${_PARAMETER#*username=}"
+				;;
+			xenithos.install)
+				XENITHOS_INSTALL="true"
+				;;
+		esac
+	done
+}
+
+Init ()
+{
+	if component_was_executed "xenithos"
+	then
+		exit 0
+	fi
+
+	echo -n " xenithos"
+}
+
+Config ()
+{
+	# Names on the internet are looked up through systemd-resolved, which wants
+	# /etc/resolv.conf to point at its own file. The ISO's build leaves an empty file there.
+	if [ -x /usr/lib/systemd/systemd-resolved ] && [ ! -s /etc/resolv.conf ]
+	then
+		ln -sf ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+	fi
+
+	# Ubuntu doesn't load AppArmor's profiles on a live system, yet its kernel still refuses
+	# programs their own user namespaces unless a profile allows it. With no profiles loaded
+	# that's a refusal for all of them, and Brave can't start. So the live system, and only it,
+	# drops that rule (now, and again when the system reads its settings). An installed PC
+	# loads the profiles and keeps the rule.
+	if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]
+	then
+		echo "kernel.apparmor_restrict_unprivileged_userns = 0" > /etc/sysctl.d/99-xenithos-live.conf
+		sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
+	fi
+
+	_HOME="$(getent passwd "${LIVE_USERNAME}" | cut -d: -f6)"
+	if [ -z "${_HOME}" ]
+	then
+		exit 0
+	fi
+
+	# live-config's own "start a desktop on the first console" would come before XenithOS
+	# (the boot menu's nox11autologin already stops it).
+	rm -f /etc/profile.d/zz-live-config_xinit.sh
+
+	/usr/lib/xenithos-desktop/setup-user --live "${LIVE_USERNAME}"
+
+	# The installer on XenithOS's home screen. The desktop gets it from desktop-start.
+	_APPS="${_HOME}/.local/share/xenithos/uda:/apps"
+	cp /usr/share/xenithos-desktop/xenithos-install.app "${_APPS}/xenithos-install.app"
+	if [ -f /usr/share/xenithos-desktop/xenithos-install.ximg ]
+	then
+		cp /usr/share/xenithos-desktop/xenithos-install.ximg "${_APPS}/xenithos-install.ximg"
+	fi
+
+	if [ "${XENITHOS_INSTALL}" = "true" ]
+	then
+		touch "${_HOME}/.config/xenithos/install-first"
+	fi
+	chown -R "${LIVE_USERNAME}": "${_HOME}/.local" "${_HOME}/.config"
+
+	# Creating state file
+	touch /var/lib/live/config/xenithos
+}
+
+Cmdline
+Init
+Config

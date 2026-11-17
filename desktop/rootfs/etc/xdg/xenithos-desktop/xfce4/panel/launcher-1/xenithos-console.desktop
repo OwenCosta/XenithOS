@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Return to XenithOS Console
+Comment=Leave the desktop for XenithOS Console, the full-screen XenithOS for a controller
+Exec=/usr/bin/xenithos-console
+Icon=xenithos-mark
+Terminal=false
+Categories=Game;System;
+Keywords=console;xenithos;games;controller;

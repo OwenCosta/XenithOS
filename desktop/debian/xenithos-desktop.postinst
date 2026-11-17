@@ -1,0 +1,169 @@
+#!/bin/sh
+# xenithos-desktop: after its files are in place. Everything here can run again and again (it
+# runs on every update), and works both on a running PC and while the ISO is being built.
+set -e
+LIB=/usr/lib/xenithos-desktop
+SHARE=/usr/share/xenithos-desktop
+STATE=/var/lib/xenithos-desktop
+
+entries() { python3 "$LIB/desktop-entries" >/dev/null 2>&1 || true; }
+# Mullvad VPN's window needs its AppArmor profile to open, and its own package can miss putting
+# it in place (see the file).
+sandboxes() { "$LIB/app-sandboxes" || echo "xenithos-desktop: couldn't put Mullvad VPN's AppArmor profile in place" >&2; }
+
+# Another package added or changed an app's menu entry, or GTK itself: bring ours up to date.
+# (An app that has just been installed is one that added its entry.)
+if [ "$1" = triggered ]; then
+    entries
+    "$LIB/recolor-gtk" >/dev/null 2>&1 || true
+    sandboxes
+    exit 0
+fi
+[ "$1" = configure ] || exit 0
+mkdir -p "$STATE"
+sandboxes
+
+# The GTK theme: GTK's own dark theme, recoloured with XenithOS's colours.
+"$LIB/recolor-gtk" >/dev/null 2>&1 || echo "xenithos-desktop: couldn't recolour the GTK theme" >&2
+
+# The icons: Papirus's flat icons with grey folders, and XenithOS's own.
+THEME=/usr/share/icons/XenithOS
+for size in 16x16 22x22 24x24 32x32 48x48 64x64; do
+    mkdir -p "$THEME/$size/places"
+    for f in /usr/share/icons/Papirus/$size/places/folder-grey*.svg /usr/share/icons/Papirus/$size/places/user-grey*.svg; do
+        [ -e "$f" ] || continue
+        ln -sf "$f" "$THEME/$size/places/$(basename "$f" | sed 's/-grey//')"
+    done
+    if [ -e "$THEME/$size/places/folder.svg" ]; then
+        ln -sf folder.svg "$THEME/$size/places/inode-directory.svg"
+        ln -sf folder.svg "$THEME/$size/places/folder-remote.svg"
+    fi
+    if [ -e "$THEME/$size/places/folder-public.svg" ]; then ln -sf folder-public.svg "$THEME/$size/places/folder-publicshare.svg"; fi
+    if [ -e "$THEME/$size/places/user-home.svg" ]; then ln -sf user-home.svg "$THEME/$size/places/folder-home.svg"; fi
+done
+gtk-update-icon-cache -q -f "$THEME" 2>/dev/null || true
+
+# The wallpaper. XFCE shows its own stock picture on any screen it has no setting for, and
+# screens are named differently on every PC, so that file becomes XenithOS's wallpaper. Which
+# file it is depends on XFCE's version: xfce-shapes.svg for 4.18 (Ubuntu 24.04's), xfce-x.svg
+# for 4.20. XFCE's own picture steps aside as xfce-<name>.stock.svg.
+if [ -e /usr/share/backgrounds/xfce ] || mkdir -p /usr/share/backgrounds/xfce; then
+    for name in xfce-shapes xfce-x; do
+        stock=/usr/share/backgrounds/xfce/$name.svg
+        if [ -z "$(dpkg-divert --list "$stock")" ]; then
+            dpkg-divert --quiet --local --rename --add \
+                --divert "/usr/share/backgrounds/xfce/$name.stock.svg" "$stock"
+        fi
+        ln -sf ../xenithos/wallpaper.png "$stock"
+    done
+fi
+
+# The system's name: XenithOS Desktop wherever programs ask what this is. The system's own file
+# steps aside (kept as os-release.base, where its updates will go), without a moment in which
+# there's no os-release at all.
+if [ -z "$(dpkg-divert --list /usr/lib/os-release)" ]; then
+    dpkg-divert --quiet --local --no-rename --add --divert /usr/lib/os-release.base /usr/lib/os-release
+    [ -e /usr/lib/os-release.base ] || cp -a /usr/lib/os-release /usr/lib/os-release.base
+fi
+cp "$SHARE/os-release" /usr/lib/os-release.xenithos
+mv -f /usr/lib/os-release.xenithos /usr/lib/os-release
+# /etc/os-release is a link to that file. While an ISO is built there's a copy of the base
+# system's own in its place (live-build puts it there), and the PC would go by that system's name
+# and version until the base system's next update: so it's made a link again, in one step.
+if [ "$(readlink /etc/os-release 2>/dev/null)" != ../usr/lib/os-release ]; then
+    ln -sfn ../usr/lib/os-release /etc/os-release.xenithos
+    mv -fT /etc/os-release.xenithos /etc/os-release
+fi
+cp "$SHARE/issue" /etc/issue
+printf 'XenithOS Desktop\n' > /etc/issue.net
+: > /etc/motd
+# What Ubuntu prints when someone logs in on a text console: its notice in XenithOS Desktop's
+# name, and neither its pointers to Ubuntu's help pages nor its news from Canonical.
+if grep -qi ubuntu /etc/legal 2>/dev/null; then
+    cat > /etc/legal <<'EOF'
+
+XenithOS Desktop comes with ABSOLUTELY NO WARRANTY, to the extent permitted by
+applicable law. Each program's own terms are in /usr/share/doc/*/copyright.
+
+EOF
+fi
+for f in /etc/update-motd.d/10-help-text /etc/update-motd.d/50-motd-news; do
+    if [ -f "$f" ]; then chmod -x "$f"; fi
+done
+systemctl disable motd-news.timer >/dev/null 2>&1 || true
+# Ubuntu names the system in /etc/lsb-release too, which a few programs read for themselves.
+if [ -f /etc/lsb-release ]; then
+    (
+        . "$SHARE/os-release"
+        printf 'DISTRIB_ID=XenithOS\nDISTRIB_RELEASE=%s\nDISTRIB_CODENAME=%s\nDISTRIB_DESCRIPTION="%s"\n' \
+            "$VERSION_ID" "$VERSION_CODENAME" "$PRETTY_NAME" > /etc/lsb-release.xenithos
+    )
+    mv -f /etc/lsb-release.xenithos /etc/lsb-release
+fi
+
+# The start-up screen. Rebuilding the start-up files takes a while, so only when it changed.
+sum=$(cat /usr/share/plymouth/themes/xenithos/* 2>/dev/null | sha256sum | cut -d' ' -f1)
+if [ "$(cat "$STATE/plymouth.sum" 2>/dev/null)" != "$sum" ]; then
+    if command -v plymouth-set-default-theme >/dev/null 2>&1; then
+        plymouth-set-default-theme xenithos 2>/dev/null || true
+    else
+        # Ubuntu has no such command: there the start-up screen is one of its "alternatives".
+        update-alternatives --install /usr/share/plymouth/themes/default.plymouth default.plymouth \
+            /usr/share/plymouth/themes/xenithos/xenithos.plymouth 200 >/dev/null 2>&1 || true
+        update-alternatives --set default.plymouth \
+            /usr/share/plymouth/themes/xenithos/xenithos.plymouth >/dev/null 2>&1 || true
+    fi
+    if ls /boot/initrd.img-* >/dev/null 2>&1; then update-initramfs -u >/dev/null 2>&1 || true; fi
+    echo "$sum" > "$STATE/plymouth.sum"
+fi
+
+glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true
+# Programs opened as the administrator don't get the session's settings folders, so root is given
+# the look directly, unless it has settings of its own.
+if [ ! -e /root/.config/gtk-3.0/settings.ini ]; then
+    install -D -m 644 /etc/xdg/xenithos-desktop/gtk-3.0/settings.ini /root/.config/gtk-3.0/settings.ini 2>/dev/null || true
+fi
+chmod 440 /etc/sudoers.d/xenithos-desktop
+visudo -cf /etc/sudoers.d/xenithos-desktop >/dev/null 2>&1 || rm -f /etc/sudoers.d/xenithos-desktop
+entries
+
+# The first XenithOS Desktop copied its desktop defaults over XFCE's own folder. They live in
+# /etc/xdg/xenithos-desktop now (read first), so the old copies go, unless a package owns them.
+OLD=/etc/xdg/xfce4/xfconf/xfce-perchannel-xml
+for f in "$OLD/xfce4-panel.xml" "$OLD/xfwm4.xml" "$OLD/xfce4-desktop.xml" "$OLD/xfce4-terminal.xml" \
+         /etc/xdg/xfce4/panel/launcher-1/xenithos-console.desktop \
+         "$SHARE/launchers/firefox.desktop"; do
+    if [ -f "$f" ] && ! dpkg -S "$f" >/dev/null 2>&1; then rm -f "$f"; fi
+done
+rmdir /etc/xdg/xfce4/panel/launcher-1 2>/dev/null || true
+
+# No login screen: the first console logs the XenithOS account in and starts the session.
+systemctl set-default multi-user.target >/dev/null 2>&1 || true
+systemctl enable xenithos-update-check.timer xenithos-update-recover.service >/dev/null 2>&1 || true
+if [ -d /run/systemd/system ]; then
+    # On a running PC (not while the ISO is built, which needs it): the first ISO's build left "no
+    # recommended packages" switched on for good; an installed PC should install apps the usual way.
+    rm -f /etc/apt/apt.conf.d/00recommends
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl start xenithos-update-check.timer >/dev/null 2>&1 || true
+fi
+
+# The XenithOS account (the one the first console logs in by itself): nothing printed on the way
+# to the desktop, and the groups its apps need.
+AUTO=/etc/systemd/system/getty@tty1.service.d/xenithos-autologin.conf
+if [ -f "$AUTO" ]; then
+    user=$(sed -n 's/.*--autologin \([^ ]*\).*/\1/p' "$AUTO" | head -n 1)
+    if [ -n "$user" ] && id "$user" >/dev/null 2>&1; then
+        "$LIB/setup-user" --login-only "$user" >/dev/null 2>&1 || true
+    fi
+fi
+
+# The boot menu's settings changed? Then GRUB's menu is made again.
+if [ -f /boot/grub/grub.cfg ] && command -v update-grub >/dev/null 2>&1; then
+    sum=$(cat /etc/default/grub.d/xenithos.cfg /etc/grub.d/06_xenithos_look "$SHARE/os-release" 2>/dev/null | sha256sum | cut -d' ' -f1)
+    if [ "$(cat "$STATE/grub.sum" 2>/dev/null)" != "$sum" ]; then
+        update-grub >/dev/null 2>&1 || true
+        echo "$sum" > "$STATE/grub.sum"
+    fi
+fi
+exit 0

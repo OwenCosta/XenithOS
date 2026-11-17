@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=XenithOS
+Description=XenithOS's logo on near-black while the PC starts and stops
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/xenithos
+ScriptFile=/usr/share/plymouth/themes/xenithos/xenithos.script

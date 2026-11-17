@@ -1,0 +1,67 @@
+#!/bin/sh
+# Builds XenithOS Console and its apps from the source build.sh put in /usr/src/xenithos, and
+# installs the programs where linux/install.sh does. Which programs there are comes from
+# linux/Makefile's "all" (XenithOS itself, then its apps), so an app added there comes along by
+# itself. The session scripts and menu entries are XenithOS Desktop's own (the xenithos-desktop
+# package), not linux/'s: here the PC starts in the desktop. The account XenithOS runs as doesn't
+# exist yet: the live session (usr/lib/live/config/2000-xenithos) and the installer set it up
+# with /usr/lib/xenithos-desktop/setup-user, which reads the list of apps that come on the home
+# screen from /usr/share/xenithos/apps.list.
+set -e
+SRC=/usr/src/xenithos
+PROGRAMS=$(sed -n 's/^all:[[:space:]]*//p' "$SRC/linux/Makefile")
+case " $PROGRAMS " in
+    *" xenithos "*) ;;
+    *) echo "linux/Makefile's all: doesn't list xenithos ($PROGRAMS)" >&2; exit 1 ;;
+esac
+
+# shellcheck disable=SC2086
+make -C "$SRC/linux" -j"$(nproc)" $PROGRAMS
+
+# The apps people install themselves (Settings > Console apps) are built and put in place like
+# the rest, but left out of apps.list, so they aren't on a new account's home screen.
+OPTIONAL=$(sed -n 's/^\([a-z0-9][a-z0-9_-]*\).*/\1/p' /usr/share/xenithos-desktop/console-apps.list 2>/dev/null | tr '\n' ' ')
+
+install -d /usr/lib/xenithos /usr/share/xenithos/apps
+: > /usr/share/xenithos/apps.list
+for p in $PROGRAMS; do
+    install -m 755 "$SRC/linux/$p" /usr/lib/xenithos/
+    [ "$p" = xenithos ] && continue
+    case " $OPTIONAL " in
+        *" $p "*) ;;
+        *) echo "$p" >> /usr/share/xenithos/apps.list ;;
+    esac
+    # Its name and picture: for a new account's home screen, and next to the program, where
+    # XenithOS Console's Store looks first when it installs an app (linux/install.sh puts them
+    # there too, and XenithOS Console's own updates keep those current).
+    if [ -f "$SRC/art/thumbs/$p.ximg" ]; then
+        install -m 644 "$SRC/art/thumbs/$p.ximg" /usr/share/xenithos/apps/
+        install -m 644 "$SRC/art/thumbs/$p.ximg" /usr/lib/xenithos/
+    fi
+    if [ -f "$SRC/apps/$p/app.txt" ]; then
+        install -m 644 "$SRC/apps/$p/app.txt" "/usr/share/xenithos/apps/$p.txt"
+        install -m 644 "$SRC/apps/$p/app.txt" "/usr/lib/xenithos/$p.txt"
+    fi
+done
+
+# Each program is started once, with no screen and no sound, and has to be still running five
+# seconds later, when timeout ends it (that's the 137). One that stops by itself as it starts
+# would do the same on every PC. Ubuntu's compiler adds checks (_FORTIFY_SOURCE) that end a
+# program on mistakes other compilers let through, which is how HostMC came to open on nobody's
+# PC in 2.0.0: it built without a word and aborted in its first second.
+for p in $PROGRAMS; do
+    try=$(mktemp -d)
+    mkdir -p "$try/data/uda:/apps" "$try/data/uda:/xenith"
+    code=0
+    HOME="$try" XENITHOS_DATA="$try/data" XDG_RUNTIME_DIR="$try" SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy \
+        timeout -s KILL 5 "/usr/lib/xenithos/$p" > "$try/said" 2>&1 || code=$?
+    if [ "$code" != 137 ]; then
+        echo "$p stopped by itself as it started (exit $code). It said:" >&2
+        tail -n 5 "$try/said" >&2
+        exit 1
+    fi
+    rm -rf "$try"
+done
+echo "start-up test: $PROGRAMS all started"
+
+rm -rf "$SRC"

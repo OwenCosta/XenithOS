@@ -1,0 +1,88 @@
+#!/bin/sh
+# What the ISO sets that isn't in XenithOS Desktop's packages (their own set-up, the look
+# included, is in desktop/debian/xenithos-desktop.postinst, which has already run by now).
+set -e
+
+# (The system's language is set in hooks/1030-language.hook.chroot, after live-build's own hook
+# that would undo it.)
+
+# The virus scanner doesn't fetch its list of viruses on the live system (a few hundred MB,
+# which would sit in memory there); the installer switches it on for the PC it installs on.
+systemctl disable clamav-freshclam.service >/dev/null 2>&1 || true
+
+# The package sources the build added for itself are gone by the time the ISO is made; what
+# stays are the xenithos-archive package's, checked here so a missing one fails the build.
+for f in brave-browser-release.sources mullvad.sources; do
+    [ -f "/etc/apt/sources.list.d/$f" ] || { echo "missing /etc/apt/sources.list.d/$f" >&2; exit 1; }
+done
+[ -x /usr/bin/brave-browser ] && [ -x /usr/bin/mullvad ] || { echo "Brave or Mullvad VPN didn't install" >&2; exit 1; }
+[ -x /usr/bin/xenithos-session ] && [ -f /usr/share/themes/XenithOS/gtk-3.0/adwaita-xenithos.css ] \
+    || { echo "the xenithos-desktop package didn't set itself up" >&2; exit 1; }
+
+# Mullvad VPN's window, and any other app that brings Chromium's sandbox, only opens on an
+# installed PC with an AppArmor profile in place. Mullvad VPN's own set-up skips its profile
+# while an ISO is built, which is how 2.0.0's Mullvad VPN didn't open: put in place here, and
+# the build stops if it, or another such app's, is missing.
+/usr/lib/xenithos-desktop/app-sandboxes --check
+cmp -s "/opt/Mullvad VPN/resources/apparmor_mullvad" /etc/apparmor.d/mullvad \
+    || { echo "Mullvad VPN's AppArmor profile isn't in place: its window wouldn't open on an installed PC" >&2; exit 1; }
+
+# The Apps menu, once more now that every package is in place, and checked: Security Tools has
+# its groups, and the tools in them their entries.
+python3 /usr/lib/xenithos-desktop/desktop-entries
+groups=$(grep -c '<Directory>' /usr/share/xenithos-desktop/overrides/menus/xenithos-security.menu || true)
+tools=$(grep -l 'X-XenithOS-Security' /usr/share/xenithos-desktop/overrides/applications/*.desktop 2>/dev/null | wc -l)
+[ "$groups" -ge 6 ] && [ "$tools" -ge 60 ] \
+    || { echo "the Apps menu's Security Tools came out short ($groups groups, $tools tools)" >&2; exit 1; }
+
+# XenithOS Console's apps that people install themselves are on the system but not in the list
+# of apps a new account starts with (hooks/0100-xenithos).
+for app in $(sed -n 's/^\([a-z0-9][a-z0-9_-]*\).*/\1/p' /usr/share/xenithos-desktop/console-apps.list); do
+    [ -x "/usr/lib/xenithos/$app" ] || { echo "console-apps.list names $app, which XenithOS Console's source doesn't build" >&2; exit 1; }
+    ! grep -qx "$app" /usr/share/xenithos/apps.list || { echo "$app is in apps.list though it's one people install themselves" >&2; exit 1; }
+done
+
+# XenithOS Console's apps are in the desktop's Apps menu too (console-apps makes the entries).
+# The list that sorts them there names apps that exist, and each of those has its icon. (An app
+# XenithOS Console gains later still gets an entry: under Games, with the logo, until it's named.)
+for app in $(sed -n 's/^\([a-z0-9][a-z0-9_-]*\)[[:space:]].*/\1/p' /usr/share/xenithos-desktop/console-menu.list); do
+    [ -x "/usr/lib/xenithos/$app" ] || { echo "console-menu.list names $app, which XenithOS Console's source doesn't build" >&2; exit 1; }
+    [ -f "/usr/share/icons/XenithOS/scalable/apps/xenithos-app-$app.svg" ] \
+        || { echo "$app has no icon for the Apps menu (desktop/art/make-art.py draws them)" >&2; exit 1; }
+done
+for app in $(cat /usr/share/xenithos/apps.list) $(sed -n 's/^\([a-z0-9][a-z0-9_-]*\).*/\1/p' /usr/share/xenithos-desktop/console-apps.list); do
+    grep -q "^$app[[:space:]]" /usr/share/xenithos-desktop/console-menu.list \
+        || echo "note: $app isn't in console-menu.list; the Apps menu puts it under Games with the logo for an icon"
+done
+
+# What systemd-resolved kept of the build's own name servers as it installed: not for the ISO.
+rm -f /etc/.resolv.conf.systemd-resolved.bak
+
+# Ubuntu's own extras that aren't XenithOS Desktop's to show: the Ubuntu Pro client (its notes
+# in apt's output, and the news it fetches from Canonical whenever the package lists are
+# refreshed), with the package that only exists to bring it and the rest of Ubuntu's base in.
+# dpkg, not apt: it refuses if anything else needs them, and then they stay.
+state() { dpkg-query -W -f='${db:Status-Abbrev}' "$1" 2>/dev/null | cut -c1-2; }
+pro=""
+for p in ubuntu-minimal ubuntu-pro-client-l10n ubuntu-pro-client ubuntu-advantage-tools; do
+    if [ "$(state "$p")" = ii ]; then pro="$pro $p"; fi
+done
+if [ -n "$pro" ]; then
+    # shellcheck disable=SC2086
+    dpkg --purge $pro || echo "kept$pro: another package needs them"
+fi
+
+# The system goes by its own name wherever programs ask (the xenithos-desktop package sets it).
+[ "$(. /etc/os-release && echo "$ID")" = xenithos ] \
+    || { echo "/etc/os-release isn't XenithOS Desktop's: $(ls -l /etc/os-release)" >&2; exit 1; }
+rm -f /etc/os-release.debootstrap
+
+# None of the tools starts by itself with the PC (the xenithos-security-tools package sees to it).
+for unit in tor.service bettercap.service; do
+    if ls /etc/systemd/system/*.wants/"$unit" >/dev/null 2>&1; then
+        echo "$unit is set to start with the PC" >&2
+        exit 1
+    fi
+done
+
+fc-cache -f >/dev/null 2>&1 || true

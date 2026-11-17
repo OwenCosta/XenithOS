@@ -1,0 +1,84 @@
+#!/bin/bash
+# Makes NAME the XenithOS account, the way linux/install.sh does: XenithOS Console's data folder
+# with its apps, the groups it needs for the screen, controllers and sound, the programs in
+# /usr/lib/xenithos made NAME's (so they can be updated without sudo), and the first console
+# logging NAME in by itself and starting XenithOS Desktop's session (/usr/bin/xenithos-session),
+# with nothing printed on the way.
+#
+#   setup-user NAME                (as root; the installer runs it inside the new system)
+#   setup-user --live NAME         the live system's account: it already logs in by itself
+#   setup-user --login-only NAME   only the quiet automatic login and the groups (updates use it)
+set -euo pipefail
+
+LIVE=0 LOGIN_ONLY=0
+case "${1:-}" in
+    --live) LIVE=1; shift ;;
+    --login-only) LOGIN_ONLY=1; shift ;;
+esac
+USER_NAME=${1:?usage: setup-user [--live|--login-only] NAME}
+id "$USER_NAME" >/dev/null 2>&1 || { echo "setup-user: there's no user called $USER_NAME" >&2; exit 1; }
+
+HOME_DIR=$(getent passwd "$USER_NAME" | cut -d: -f6)
+DATA="$HOME_DIR/.local/share/xenithos"
+PROFILE="$HOME_DIR/.profile"
+MARK_BEGIN="# >>> XenithOS console session >>>"
+MARK_END="# <<< XenithOS console session <<<"
+GETTY_DIR=/etc/systemd/system/getty@tty1.service.d
+MACHINE=$(cat /etc/hostname 2>/dev/null || hostname)
+
+for g in video render input audio netdev plugdev bluetooth wireshark; do
+    if getent group "$g" >/dev/null; then usermod -aG "$g" "$USER_NAME"; fi
+done
+
+# Logged in by itself on the first console, which starts the session, without a word on the
+# screen: no "login:" line, no system name, no last-login or message of the day. The live
+# system's own automatic login (live-config) already does the logging in.
+if [ "$LIVE" = 0 ]; then
+    mkdir -p "$GETTY_DIR"
+    cat > "$GETTY_DIR/xenithos-autologin.conf" <<EOF
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --skip-login --nonewline --noissue --autologin $USER_NAME %I \$TERM
+EOF
+fi
+touch "$HOME_DIR/.hushlogin"
+chown -h "$USER_NAME": "$HOME_DIR/.hushlogin"
+[ "$LOGIN_ONLY" = 1 ] && exit 0
+
+# XenithOS Console's data folder, laid out like the Xbox's USB stick, with XenithOS's own apps in
+# it (the ones hooks/0100-xenithos built and listed in apps.list; the apps people install
+# themselves, in Settings > Console apps, aren't in that list).
+APPS=$(cat /usr/share/xenithos/apps.list 2>/dev/null || echo tube photos)
+mkdir -p "$DATA/uda:/apps" "$DATA/uda:/xenith" "$HOME_DIR/.config/xenithos"
+for app in $APPS; do
+    ln -sfn "/usr/lib/xenithos/$app" "$DATA/uda:/apps/$app.elf32"
+    for ext in ximg txt; do
+        if [ -f "/usr/share/xenithos/apps/$app.$ext" ]; then
+            cp "/usr/share/xenithos/apps/$app.$ext" "$DATA/uda:/apps/$app.$ext"
+        fi
+    done
+done
+# Settings for this PC, on XenithOS Console's home screen (Wi-Fi, sound, updates).
+if [ -f /usr/share/xenithos-desktop/pc-settings.app ]; then
+    cp /usr/share/xenithos-desktop/pc-settings.app "$DATA/uda:/apps/pc-settings.app"
+    if [ -f /usr/share/xenithos-desktop/pc-settings.ximg ]; then
+        cp /usr/share/xenithos-desktop/pc-settings.ximg "$DATA/uda:/apps/pc-settings.ximg"
+    fi
+fi
+# XenithOS Cloud's address, which comes with XenithOS Desktop, and this machine's name.
+if [ -f /usr/share/xenithos/config.txt ] && [ ! -f "$DATA/uda:/xenith/config.txt" ]; then
+    { grep '^server=' /usr/share/xenithos/config.txt || true; printf 'name=%s\n' "$MACHINE"; } > "$DATA/uda:/xenith/config.txt"
+fi
+chown -R "$USER_NAME": /usr/lib/xenithos
+
+touch "$PROFILE"
+sed -i "/$MARK_BEGIN/,/$MARK_END/d" "$PROFILE"
+cat >> "$PROFILE" <<EOF
+$MARK_BEGIN
+if [ -z "\$DISPLAY" ] && [ -z "\$WAYLAND_DISPLAY" ] && [ "\$(tty)" = /dev/tty1 ]; then
+    exec /usr/bin/xenithos-session
+fi
+$MARK_END
+EOF
+
+chown -R -h "$USER_NAME": "$HOME_DIR/.local" "$HOME_DIR/.config" "$PROFILE"

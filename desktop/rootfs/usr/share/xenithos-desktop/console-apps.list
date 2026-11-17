@@ -1,0 +1,9 @@
+# XenithOS Console's own apps that don't come installed on XenithOS Desktop. They're built into
+# the system like the rest, and Settings > Console apps puts them on XenithOS Console's home
+# screen, or takes them off again. An app of XenithOS Console's that isn't named here comes
+# ready on the home screen.
+#
+#   app      what Settings says about it
+hostmc   Your own Minecraft server, run from this PC
+doom     The classic shooter. Its levels (Freedoom) come from XenithOS Console's Store
+volt     A light-trail game with a leaderboard on XenithOS Cloud

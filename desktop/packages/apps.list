@@ -1,0 +1,21 @@
+# The apps XenithOS Desktop comes with (the xenithos-desktop-apps package). Brave and Mullvad VPN
+# come from their makers' own package sources, which the xenithos-archive package sets up, so
+# they update with everything else.
+
+## The browser, and the VPN
+brave-browser
+mullvad-vpn
+
+## Everyday apps
+mousepad
+ristretto
+xarchiver
+evince
+vlc
+galculator
+xfce4-screenshooter
+xfce4-taskmanager
+gnome-disk-utility
+pavucontrol
+blueman
+network-manager-openvpn-gnome

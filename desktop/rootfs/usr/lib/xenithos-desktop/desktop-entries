@@ -1,0 +1,275 @@
+#!/usr/bin/env python3
+"""Keeps the Apps menu XenithOS Desktop's own.
+
+Names: "Files" for Thunar, "Terminal", "Text Editor" and so on, and entries that only repeat
+others are hidden.
+
+Security Tools: the tools XenithOS Desktop comes with get a group of their own in the Apps menu,
+split into smaller groups, from /usr/share/xenithos-desktop/security-tools.list (see the top of
+that file). A tool with a window keeps its own menu entry, moved into its group. A tool that's
+used by typing gets an entry that opens a terminal on it; what the entry says about the tool is
+its package's own one-line description, read from this PC, so it's right for the version that's
+installed.
+
+How: the menu reads /usr/share/xenithos-desktop/overrides before /usr/share (XDG_DATA_DIRS, set
+in /etc/profile.d/xenithos-desktop.sh), so a copy of an app's entry there, changed, is the one
+shown, and the apps' own files stay as their packages installed them. The groups themselves are
+in /etc/xdg/xenithos-desktop/menus/xfce-applications.menu, which pulls in the Security Tools part
+written here. This runs when XenithOS Desktop is installed or updated and whenever a package adds
+or changes an app's entry (a dpkg trigger), so none of it goes stale.
+"""
+import glob
+import os
+import re
+from xml.sax.saxutils import escape
+
+APPS = "/usr/share/applications"
+OVERRIDES = "/usr/share/xenithos-desktop/overrides"
+OUT = os.path.join(OVERRIDES, "applications")
+GROUPS_OUT = os.path.join(OVERRIDES, "desktop-directories")
+SECURITY_MENU = os.path.join(OVERRIDES, "menus", "xenithos-security.menu")
+SECURITY_LIST = "/usr/share/xenithos-desktop/security-tools.list"
+TOOL_TERMINAL = "/usr/lib/xenithos-desktop/tool-terminal"
+DPKG = "/var/lib/dpkg"
+OURS = "xenithos-tool-"         # the entries made here for tools without one
+GROUP = "xenithos-sec-"         # the groups made here
+
+# entry file -> new name, or None to hide it
+NAMES = {
+    "thunar.desktop": "Files",
+    "xfce4-terminal.desktop": "Terminal",
+    "org.xfce.mousepad.desktop": "Text Editor",
+    "org.xfce.ristretto.desktop": "Image Viewer",
+    "xarchiver.desktop": "Archives",
+    "pavucontrol.desktop": "Sound Mixer",
+    "org.pulseaudio.pavucontrol.desktop": "Sound Mixer",
+    "nm-connection-editor.desktop": "Network Connections",
+    "blueman-manager.desktop": "Bluetooth",
+    "xfce-settings-manager.desktop": "Advanced Settings",
+    "xfce4-session-logout.desktop": "Turn Off or Restart",
+    "org.gnome.Evince.desktop": "Documents",
+    "vlc.desktop": "VLC",
+    "galculator.desktop": "Calculator",
+    "lstopo.desktop": None,
+    "xfce4-about.desktop": None,
+    "xfce4-file-manager.desktop": None,
+    "xfce4-web-browser.desktop": None,
+    "xfce4-mail-reader.desktop": None,
+    "xfce4-terminal-emulator.desktop": None,
+    "thunar-bulk-rename.desktop": None,
+    "thunar-settings.desktop": None,
+    "thunar-volman-settings.desktop": None,
+    "xfce4-terminal-settings.desktop": None,
+    "org.xfce.mousepad-settings.desktop": None,
+}
+
+
+def read(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def write(path, text):
+    """Writes a file if it isn't that already."""
+    if read(path) == text:
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+def rewrite(text, name, categories=None):
+    """An entry's text with its name changed (None hides it) and, if given, its categories."""
+    out, group, named, hidden, sorted_in = [], "", False, False, False
+    for line in text.splitlines():
+        if line.startswith("["):
+            if group == "[Desktop Entry]":
+                if name is None and not hidden:
+                    out.append("NoDisplay=true")
+                    hidden = True
+                if categories and not sorted_in:
+                    out.append(f"Categories={categories}")
+                    sorted_in = True
+            group = line.strip()
+        if group == "[Desktop Entry]":
+            if name is not False and re.match(r"Name(\[[^\]]*\])?=", line):
+                if name is None:
+                    out.append(line)
+                elif not named and line.startswith("Name="):
+                    out.append(f"Name={name}")
+                    named = True
+                continue
+            if name is None and line.startswith("NoDisplay="):
+                continue
+            if categories and line.startswith("Categories="):
+                if not sorted_in:
+                    out.append(f"Categories={categories}")
+                    sorted_in = True
+                continue
+        out.append(line)
+    if name is None and not hidden:
+        out.append("NoDisplay=true")
+    if categories and not sorted_in:
+        out.append(f"Categories={categories}")
+    return "\n".join(out) + "\n"
+
+
+def value(text, key):
+    """A key's value in an entry's [Desktop Entry] part, or ""."""
+    group = ""
+    for line in text.splitlines():
+        if line.startswith("["):
+            group = line.strip()
+        elif group == "[Desktop Entry]" and line.startswith(key + "="):
+            return line.split("=", 1)[1].strip()
+    return ""
+
+
+# ---------------------------------------------------------------- the security tools
+
+def security_groups():
+    """The list's groups: [(id, name, about, icon, [(package, name in the menu or "")])]."""
+    groups = []
+    for line in (read(SECURITY_LIST) or "").splitlines():
+        line = line.strip()
+        head = re.match(r"##\s*(.+?)\s*(?:\{([\w.-]+)\})?$", line)
+        if head:
+            name, _, about = head.group(1).partition(":")
+            ident = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+            if ident:
+                groups.append((ident, name.strip(), about.strip(), head.group(2) or "applications-other", []))
+        elif line and not line.startswith("#") and groups:
+            fields = line.split(None, 1)
+            groups[-1][4].append((fields[0], fields[1].strip() if len(fields) > 1 else ""))
+    return groups
+
+
+def package_files(package):
+    """The files a package put on this PC, or None if it isn't installed."""
+    found = None
+    for path in [os.path.join(DPKG, "info", package + ".list")] + glob.glob(os.path.join(DPKG, "info", package + ":*.list")):
+        text = read(path)
+        if text is not None:
+            found = (found or []) + text.splitlines()
+    return found
+
+
+def installed_packages():
+    """What dpkg knows of each installed package: {name: (its one-line description, what it needs)}."""
+    out, package, installed, needs = {}, "", False, []
+    for line in (read(os.path.join(DPKG, "status")) or "").splitlines():
+        if line.startswith("Package: "):
+            package, installed, needs = line[9:].strip(), False, []
+        elif line.startswith("Status: "):
+            installed = line.split()[-1] == "installed"
+        elif line.startswith("Depends: "):
+            needs = [re.split(r"[ (:|]", item.strip(), maxsplit=1)[0] for item in line[9:].split(",")]
+        elif line.startswith("Description: ") and installed:
+            out[package] = (line[13:].strip(), needs)
+    return out
+
+
+def tool_files(package, known):
+    """A tool's files. A package that only points at the real one (keepassxc at keepassxc-full)
+    counts as that one."""
+    files = package_files(package)
+    if files is None:
+        return None
+    for other in known.get(package, ("", []))[1]:
+        if other.startswith(package + "-") and other in known:
+            files += package_files(other) or []
+    return files
+
+
+def security_tools(wanted):
+    """Sorts the security tools into their groups. Adds the entries it makes to wanted."""
+    groups = security_groups()
+    known = installed_packages()
+    menus = []
+    for ident, name, words, icon, tools in groups:
+        category = f"X-XenithOS-Security;X-XenithOS-Security-{ident};"
+        filled = False
+        for package, shown in tools:
+            files = tool_files(package, known)
+            if files is None:
+                continue
+            summary = known.get(package, ("", []))[0]
+            # its own entries in the Apps menu, if it has any that show
+            own = 0
+            for path in files:
+                if os.path.dirname(path) != APPS or not path.endswith(".desktop"):
+                    continue
+                text = read(path)
+                if text is None or value(text, "NoDisplay").lower() == "true" or value(text, "Type") not in ("", "Application"):
+                    continue
+                entry = os.path.basename(path)
+                write(os.path.join(OUT, entry), rewrite(text, NAMES.get(entry, False), category))
+                wanted.add(entry)
+                own += 1
+            if own:
+                filled = True
+                continue
+            # none: an entry that opens a terminal on it
+            commands = sorted({os.path.basename(f) for f in files
+                               if re.match(r"/(usr/)?s?bin/[^/]+$", f) and os.path.isfile(f) and os.access(f, os.X_OK)})
+            if not commands:
+                continue
+            label = shown or (package if package in commands else commands[0] if len(commands) == 1 else package)
+            entry = f"{OURS}{package}.desktop"
+            write(os.path.join(OUT, entry),
+                  "[Desktop Entry]\nType=Application\n"
+                  f"Name={label}\n"
+                  + (f"Comment={summary}\n" if summary else "")
+                  + f"Exec={TOOL_TERMINAL} {package}\n"
+                  "Icon=utilities-terminal\nTerminal=false\nStartupNotify=false\n"
+                  f"Categories={category}\n")
+            wanted.add(entry)
+            filled = True
+        group_file = f"{GROUP}{ident}.directory"
+        if filled:
+            write(os.path.join(GROUPS_OUT, group_file),
+                  f"[Desktop Entry]\nVersion=1.0\nType=Directory\nName={name}\n"
+                  + (f"Comment={words[:1].upper() + words[1:]}\n" if words else "") + f"Icon={icon}\n")
+            menus.append((ident, name, group_file))
+
+    # the groups that went out of use
+    if os.path.isdir(GROUPS_OUT):
+        keep = {group_file for _, _, group_file in menus}
+        for entry in os.listdir(GROUPS_OUT):
+            if entry.startswith(GROUP) and entry not in keep:
+                os.remove(os.path.join(GROUPS_OUT, entry))
+
+    # the part of the menu that Security Tools is made of
+    parts = ['<!DOCTYPE Menu PUBLIC "-//freedesktop//DTD Menu 1.0//EN"',
+             '  "http://www.freedesktop.org/standards/menu-spec/1.0/menu.dtd">',
+             "<!-- Written by /usr/lib/xenithos-desktop/desktop-entries from security-tools.list. -->",
+             "<Menu>", "    <Name>Security Tools</Name>"]
+    for ident, name, group_file in menus:
+        parts += ["    <Menu>", f"        <Name>{escape(name)}</Name>", f"        <Directory>{group_file}</Directory>",
+                  f"        <Include><Category>X-XenithOS-Security-{ident}</Category></Include>", "    </Menu>"]
+    parts += ["</Menu>", ""]
+    write(SECURITY_MENU, "\n".join(parts))
+
+
+def main():
+    os.makedirs(OUT, exist_ok=True)
+    wanted = set()
+    security_tools(wanted)
+    for entry, name in NAMES.items():
+        if entry in wanted:                     # a security tool: named above, with its group
+            continue
+        text = read(os.path.join(APPS, entry))
+        if text is None:
+            continue
+        wanted.add(entry)
+        write(os.path.join(OUT, entry), rewrite(text, name))
+    for entry in os.listdir(OUT):
+        if entry not in wanted:
+            os.remove(os.path.join(OUT, entry))
+
+
+if __name__ == "__main__":
+    main()

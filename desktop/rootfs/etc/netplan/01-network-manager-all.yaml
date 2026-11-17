@@ -1,0 +1,5 @@
+# XenithOS Desktop: NetworkManager looks after all of this PC's connections (Settings > Wi-Fi,
+# and the network icon in the panel).
+network:
+  version: 2
+  renderer: NetworkManager
