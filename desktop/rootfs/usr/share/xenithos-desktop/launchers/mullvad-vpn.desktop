@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Mullvad VPN
+Comment=Connect to the VPN, so the network you're on can't see what you do online
+Exec="/opt/Mullvad VPN/mullvad-vpn" %U
+Icon=mullvad-vpn
+Terminal=false
+Categories=Network;
+StartupWMClass=Mullvad VPN
