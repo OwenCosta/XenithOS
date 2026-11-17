@@ -36,6 +36,7 @@
 #include "icons.h"
 #include "keyboard.h"
 #include "mn.h"
+#include "net.h"
 #include "platform.h"
 #include "social.h"
 #include "startlog.h"
@@ -1521,9 +1522,13 @@ static const char *subtitle(void)
  * internet can reach it, the address they type. HostMC's achievements carry on here. */
 static void share_poll(void)
 {
-    static int start, online, join;
+    static int start, online, join, looked;
     const char *addr = nsrv && running() && S->pub[0] ? S->pub : "";
     int any = 0, i;
+    if (!looked) {                      /* a PC's network is simply there: this notices it, as HostMC did */
+        looked = 1;
+        if (!net_is_up()) net_up();
+    }
     social_tick("minenest", addr);
     if (!prof.signed_in) return;
     for (i = 0; i < nsrv; i++) {
