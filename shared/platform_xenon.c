@@ -1,11 +1,15 @@
 /* platform.h on a real Xbox 360, through libxenon. */
+#include <ctype.h>
 #include <fcntl.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
 
+#include <console/console.h>
+#include <xenon_uart/xenon_uart.h>
 #include <xenos/xenos.h>
 #include <input/input.h>
 #include <usb/usbmain.h>
@@ -20,11 +24,16 @@
 #include <xenon_sound/sound.h>
 #include <pci/io.h>
 
+#include "crash.h"
 #include "handoff.h"
 #include "platform.h"
+#include "startlog.h"
+#include "theme.h"
 #include "tiled.h"
 
 int bdev_enum(int handle, const char **name);
+static volatile int crash_pending;               /* crashes, at the end of this file */
+static void crash_finish(void);
 extern int xenos_is_hdmi;          /* libxenon: xenon_sound_init turns on HDMI sound when set */
 
 /* ------------------------------------------------------------------ video */
@@ -113,6 +122,7 @@ static void flush_lines(void *addr, int bytes)
 
 void plat_present(const uint32_t *px)
 {
+    if (crash_pending) crash_finish();           /* the sound mixer's thread crashed */
     tiled_present(&tfb, px, flush_lines);
 }
 
@@ -136,6 +146,7 @@ static int seen_pad;
 void plat_poll(struct pad *p)
 {
     struct controller_data_s c;
+    if (crash_pending) crash_finish();
     usb_do_poll();
     memset(&c, 0, sizeof c);
     if (get_controller_data(&c, 0)) seen_pad = 1;   /* 1 means new data arrived */
@@ -464,3 +475,202 @@ void plat_power_off(void)
 int plat_can_exit_to_loader(void) { return 1; }
 int plat_has_desktop(void) { return 0; }
 void plat_switch_to_desktop(void) { }
+
+/* ---------------------------------------------------------------- crashes
+ *
+ * libxenon sends every exception it can't deal with (a bad pointer, an illegal instruction, a
+ * trap) to crashdump(): its own shows the registers on a blue screen and waits for a key on the
+ * serial port, which nobody playing has. This crashdump() takes its place (libxenon keeps its own
+ * in a file of its own, c_except.o, which the linker then leaves out). It:
+ *   saves a crash file (crash.h) for XenithOS to send next time it starts: the program, the
+ *   version, the exception, the registers, the stack as addresses and the start-up steps it got
+ *   through. The addresses are the program's own: xenon-addr2line -e xenith.elf (or the app's
+ *   .elf, unstripped, from the same build) turns them into functions and lines;
+ *   puts the same on the serial port, for anyone with a cable;
+ *   says on the screen what happened: A restarts the console, B turns it off, X goes back to XeLL.
+ * It runs on the thread that crashed, with its registers in context (libxenon's layout: r0 to r31,
+ * then lr, ctr, cr, xer, srr0 (where it stopped), srr1, dar (the address it used), pir (the
+ * thread)). The sound mixer has a thread of its own: if that's the one, the main thread is still
+ * running and may be in the middle of using the USB stick, so the crash waits in memory until the
+ * main thread's next frame or controller read (crash_pending). A crash in here (a broken USB
+ * stack, say) comes back in here once more, and then only the screen is shown. */
+static char crash_text[4096], crash_program[40];
+static int crash_len;
+static volatile int crash_depth, crash_saving;
+
+static void crash_add(const char *fmt, ...)
+{
+    va_list ap;
+    int n;
+    if (crash_len >= (int)sizeof crash_text - 1) return;
+    va_start(ap, fmt);
+    n = vsnprintf(crash_text + crash_len, sizeof crash_text - crash_len, fmt, ap);
+    va_end(ap);
+    if (n > 0) crash_len += n < (int)sizeof crash_text - crash_len ? n : (int)sizeof crash_text - 1 - crash_len;
+}
+
+static const char *exception_name(uint32_t vector)
+{
+    switch (vector) {
+    case 0: return "segfault";                        /* a page fault: a bad pointer */
+    case 0x200: return "machine check";
+    case 0x300: return "data storage";
+    case 0x380: return "data segment";
+    case 0x400: return "instruction storage";
+    case 0x480: return "instruction segment";
+    case 0x600: return "alignment";
+    case 0x700: return "program";                     /* an illegal instruction or a trap */
+    case 0x800: return "floating point";
+    case 0x900: return "decrementer";
+    case 0xC00: return "system call";
+    case 0xD00: return "trace";
+    case 0xF00: return "performance monitor";
+    case 0x1300: return "instruction breakpoint";
+    case 0x1700: return "thermal";
+    }
+    return "exception";
+}
+
+/* Code and stack live in the RAM libxenon maps at 0x80000000 (app.lds); nothing else is read. */
+static int crash_addr_ok(uint32_t a)
+{
+    return a >= 0x80000000u && a < 0xa0000000u && !(a & 3);
+}
+
+static void crash_build(uint32_t vector, const uint64_t *ctx)
+{
+    const char *self = handoff_self(), *b = strrchr(self, '/'), *steps[16];
+    uint64_t at[16], now = plat_time_us();
+    uint32_t sp = (uint32_t)ctx[1], lr = (uint32_t)ctx[32];
+    int i, n, nsteps;
+    char *p;
+
+    /* "uda:/apps/volt.elf32" is volt; XeLL starting xenon.elf gives no path: XenithOS itself. */
+    if (!b) b = strchr(self, ':');
+    snprintf(crash_program, sizeof crash_program, "%s", b ? b + 1 : self);
+    if ((p = strchr(crash_program, '.'))) *p = 0;
+    for (p = crash_program; *p; p++) *p = isalnum((unsigned char)*p) ? (char)tolower((unsigned char)*p) : '-';
+    if (!crash_program[0] || !strcmp(crash_program, "xenon")) snprintf(crash_program, sizeof crash_program, "xenithos");
+
+    crash_len = 0;
+    crash_add("# XenithOS crash report\nprogram=%s\nversion=%s\nmachine=xenon\nexception=%s\nvector=0x%x\n",
+              crash_program, XENITH_VERSION, exception_name(vector), (unsigned)vector);
+    crash_add("pc=0x%08x\nlr=0x%08x\naddress=0x%08x\nthread=%d\nmsr=0x%016llx\n", (unsigned)ctx[36], (unsigned)lr,
+              (unsigned)ctx[38], (int)ctx[39], (unsigned long long)ctx[37]);
+    nsteps = startlog_steps(steps, at, 16);
+    if (nsteps) {
+        uint64_t up = now > at[0] ? now - at[0] : 0;
+        crash_add("seconds=%u.%02u\n", (unsigned)(up / 1000000), (unsigned)(up % 1000000 / 10000));
+    }
+    for (i = 0; i < nsteps; i++) {
+        uint64_t t = at[i] - at[0];
+        crash_add("step=%s %u.%02u\n", steps[i], (unsigned)(t / 1000000), (unsigned)(t % 1000000 / 10000));
+    }
+    for (i = 0; i < 32; i++) crash_add("r%d=0x%016llx\n", i, (unsigned long long)ctx[i]);
+    crash_add("ctr=0x%016llx\ncr=0x%08x\nxer=0x%016llx\n", (unsigned long long)ctx[33], (unsigned)ctx[34],
+              (unsigned long long)ctx[35]);
+    /* The stack: where it stopped, lr (the caller, if the function hadn't saved it yet), then the
+     * back chain. 32-bit PowerPC frames start with a pointer to the caller's frame, and the word
+     * after that holds the return address of the call the caller made. */
+    crash_add("frame=0x%08x\n", (unsigned)ctx[36]);
+    if (crash_addr_ok(lr)) crash_add("frame=0x%08x\n", (unsigned)lr);
+    for (n = 0; n < 24 && crash_addr_ok(sp); n++) {
+        uint32_t up = *(volatile uint32_t *)(uintptr_t)sp, ret;
+        if (!crash_addr_ok(up) || up <= sp) break;
+        ret = *(volatile uint32_t *)(uintptr_t)(up + 4);
+        if (crash_addr_ok(ret)) crash_add("frame=0x%08x\n", (unsigned)ret);
+        sp = up;
+    }
+}
+
+static int crash_save(void)
+{
+    char path[96];
+    FILE *f;
+    mkdir("uda:/xenith", 0777);
+    mkdir(CRASH_DIR, 0777);
+    snprintf(path, sizeof path, CRASH_DIR "/%s.txt", crash_program);
+    f = fopen(path, "w");
+    if (!f) return 0;
+    fwrite(crash_text, 1, crash_len, f);
+    return fclose(f) == 0;
+}
+
+static void crash_print(const char *s)
+{
+    for (; *s; s++) console_putch(*s);
+}
+
+/* The controller is only read when that hasn't crashed already (can_poll); without it, the power
+ * button is the way out. */
+static void crash_screen(int saved, int can_poll)
+{
+    static const char *const ids[] = {"xenithos", "volt", "doom", "tube", "photos"};
+    static const char *const names[] = {"XenithOS", "VOLT", "DOOM", "Tube", "Photos"};
+    const char *name = "The app";
+    struct controller_data_s c;
+    char line[120];
+    int i, let_go = 0;
+
+    for (i = 0; i < (int)(sizeof ids / sizeof ids[0]); i++)
+        if (!strcmp(crash_program, ids[i])) name = names[i];
+    if (can_poll)
+        for (i = 0; i < crash_len; i++) putch((unsigned char)crash_text[i]);    /* the serial port */
+
+    if (!xenos_is_initialized()) xenos_init(VIDEO_MODE_AUTO);
+    console_set_colors(0x0a080700, 0xffffff00);       /* XenithOS's near-black, white text */
+    console_init();
+    console_clrscr();
+    snprintf(line, sizeof line, "\n\n\n   %s stopped working.\n\n", name);
+    crash_print(line);
+    crash_print(saved ? "   What happened is saved on your USB stick. When XenithOS starts again it can\n"
+                        "   send a crash report to the people who make it, so it can be fixed.\n\n\n"
+                      : "   What happened couldn't be saved this time.\n\n\n");
+    if (!can_poll) {
+        crash_print("   Hold the power button to turn the console off.\n");
+        for (;;) mdelay(100);
+    }
+    crash_print("   A   Restart the console\n   B   Turn it off\n   X   Go back to XeLL\n");
+
+    for (;;) {                                        /* buttons held as it crashed don't count */
+        memset(&c, 0, sizeof c);
+        usb_do_poll();
+        get_controller_data(&c, 0);
+        if (!c.a && !c.b && !c.x) let_go = 1;
+        else if (let_go && c.a) { xenon_smc_power_reboot(); for (;;) mdelay(100); }
+        else if (let_go && c.b) { xenon_smc_power_shutdown(); for (;;) mdelay(100); }
+        else if (let_go && c.x) exit(0);
+        mdelay(20);
+    }
+}
+
+static void crash_finish(void)
+{
+    int saved = 0;
+    crash_pending = 0;
+    plat_audio_stop();                                /* or the chip loops its last block */
+    if (crash_len && !crash_saving) {
+        crash_saving = 1;                             /* if saving crashes, not again */
+        saved = crash_save();
+    }
+    crash_screen(saved, crash_depth < 3);
+}
+
+void crashdump(uint32_t exception, uint64_t *context);
+
+void crashdump(uint32_t exception, uint64_t *context)
+{
+    int depth = ++crash_depth;
+    if (depth > 4) for (;;) udelay(1000);              /* even the screen crashes: stop here */
+    if (context[39] != 0) {                           /* not the main thread: it takes over */
+        if (depth == 1) {
+            crash_build(exception, context);
+            __sync_synchronize();
+            crash_pending = 1;
+            __sync_synchronize();
+        }
+        for (;;) udelay(1000);
+    }
+    if (depth == 1) crash_build(exception, context);
+    crash_finish();
+}

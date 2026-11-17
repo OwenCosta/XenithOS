@@ -37,6 +37,17 @@ Public
   GET  /download/config.txt           a config with this server's address
   GET  /download/xenithos-source.tar.gz, /install.sh   for PCs and Raspberry Pis
 
+Crash reports (from XenithOS when it or an app crashed, source/crash_report.c)
+  POST /v1/crash                      program, version, platform, what, where, report (the crash
+                                      file), and token only when the person added their gamertag
+                                      -> ok, id. Kept like feedback (and the report as
+                                      crashes/<id>.txt in the state folder), and passed on to
+                                      Discord the first time each kind of crash comes in a day
+                                      (feedback-webhooks.txt: "crash=<webhook>", else bug's)
+  GET  /v1/crash                      admin: id|time|program|version|platform|what|where|from|kind,
+                                      newest first (kind: the same crash has the same one)
+  GET  /v1/crash/<id>                 admin: that report
+
 Tube (YouTube; needs a signed-in profile)
   POST /v1/tube/search                token, q          -> id|title|channel|seconds
   GET  /v1/tube/thumb/<id>.jpg
@@ -208,7 +219,10 @@ def feedback_hooks(state_dir):
                     hooks[key] = url
     except OSError:
         return {}
-    return {kind: hooks.get(kind) or hooks.get("all") for kind in FEEDBACK_KINDS if hooks.get(kind) or hooks.get("all")}
+    found = {kind: hooks.get(kind) or hooks.get("all") for kind in FEEDBACK_KINDS if hooks.get(kind) or hooks.get("all")}
+    if hooks.get("crash") or found.get("bug"):          # crash reports: their own, else the bug reports'
+        found["crash"] = hooks.get("crash") or found["bug"]
+    return found
 
 
 def send_feedback(hook, kind, text, who, version, platform):
@@ -225,6 +239,60 @@ def send_feedback(hook, kind, text, who, version, platform):
         urllib.request.urlopen(req, timeout=15).close()
     except (OSError, ValueError) as e:
         log(f"feedback: Discord didn't take it: {e}")
+
+
+# ---------------------------------------------------------------------- crash reports
+
+# From XenithOS when it or one of its apps crashed (source/crash_report.c, shared/crash.h): sent by
+# themselves once the person set Settings > Send crash reports to "Always", or when they said yes.
+# Each one's details are kept in the state like feedback, and the report itself (the crash file:
+# where it stopped and the stack) as crashes/<id>.txt beside state.json, so that stays small. One
+# goes on to Discord the first time its kind of crash comes in each day, so a crash on every start
+# doesn't flood the channel. The sender's IP address isn't kept, and a gamertag only comes with one
+# when the person chose to add it.
+CRASH_KEEP = 300
+CRASH_MAX_BODY = 48 * 1024           # the report form-encoded, up to 3 bytes a character
+CRASH_TEXT_MAX = 12000
+CRASH_POST_EVERY = 24 * 3600
+CRASH_PROGRAM_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+
+
+def clean_report(text, limit=CRASH_TEXT_MAX):
+    """Lines of printable ASCII (tabs as spaces), cut at a line once it's over limit."""
+    lines = ["".join(ch if 32 <= ord(ch) < 127 else "    " if ch == "\t" else "?" for ch in line).rstrip()
+             for line in str(text).replace("\r", "").split("\n")]
+    out = "\n".join(lines).strip("\n")
+    if len(out) > limit:
+        out = out[:limit].rsplit("\n", 1)[0]
+    return out
+
+
+def crash_kind(program, version, what, where):
+    """The same crash from any machine: program, version, what and where, without the addresses,
+    which change from one start to the next."""
+    where = re.sub(r"0x[0-9a-fA-F]+", "", where)
+    return hashlib.sha256(f"{program}|{version}|{what}|{where}".encode()).hexdigest()[:12]
+
+
+def send_crash(hook, entry, text):
+    """Posts one to Discord: what and where, and the report's stack in names when it has them."""
+    where_part = text.split("--- where\n", 1)[1].split("\n--- ", 1)[0] if "--- where\n" in text else ""
+    shown = (where_part.strip() or text)[:1500].replace("```", "'''")
+    payload = {"username": "XenithOS crash reports", "allowed_mentions": {"parse": []},
+               "embeds": [{"title": f"{entry['program']} crashed", "color": 0xE50914,
+                           "description": f"**{entry['what']}**\n{entry['where']}\n```\n{shown}\n```",
+                           "fields": [{"name": "From", "value": entry["from"], "inline": True},
+                                      {"name": "XenithOS", "value": f"{entry['version']} on {entry['platform']}",
+                                       "inline": True},
+                                      {"name": "Report", "value": f"#{entry['id']} (GET /v1/crash/{entry['id']})",
+                                       "inline": True}],
+                           "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(entry["t"]))}]}
+    req = urllib.request.Request(hook, data=json.dumps(payload).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", "User-Agent": "XenithOS-Cloud/1"})
+    try:
+        urllib.request.urlopen(req, timeout=15).close()
+    except (OSError, ValueError) as e:
+        log(f"crash report: Discord didn't take it: {e}")
 
 
 def check_gamertag(name):
@@ -318,6 +386,45 @@ class State:
                          "version": version, "platform": platform})
             del kept[:-FEEDBACK_KEEP]
             self.save()
+
+    # -------------------------------------------------------------- crash reports
+    def add_crash(self, entry, text):
+        """Keeps one (entry: program, version, platform, what, where, from, kind) and its report.
+        Returns the entry with its id and time, and whether it's the first of its kind today."""
+        folder = os.path.join(os.path.dirname(self.path), "crashes")
+        with self.lock:
+            cid = self.data.get("crash_next", 1)
+            self.data["crash_next"] = cid + 1
+            entry = dict(entry, id=cid, t=int(time.time()))
+            os.makedirs(folder, exist_ok=True)
+            with open(os.path.join(folder, f"{cid}.txt"), "w", encoding="ascii") as f:
+                f.write(text + "\n")
+            kept = self.data.setdefault("crashes", [])
+            kept.append(entry)
+            for old in kept[:-CRASH_KEEP]:
+                try:
+                    os.remove(os.path.join(folder, f"{old['id']}.txt"))
+                except OSError:
+                    pass
+            del kept[:-CRASH_KEEP]
+            posted = self.data.setdefault("crash_posted", {})
+            for kind in [k for k, t in posted.items() if entry["t"] - t >= CRASH_POST_EVERY]:
+                del posted[kind]
+            first = entry["kind"] not in posted
+            if first:
+                posted[entry["kind"]] = entry["t"]
+            self.save()
+            return entry, first
+
+    def crash_report(self, cid):
+        """The report kept as crashes/<cid>.txt, or None."""
+        if not str(cid).isdigit():
+            return None
+        try:
+            with open(os.path.join(os.path.dirname(self.path), "crashes", f"{int(cid)}.txt"), encoding="ascii") as f:
+                return f.read()
+        except (OSError, ValueError):
+            return None
 
     # -------------------------------------------------------------- inbox, motd
     def set_motd(self, text):
@@ -1411,6 +1518,8 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
     logins = RateLimit(LOGIN_PER_10MIN, 600)
     feedback_by_ip = RateLimit(30, 3600)          # consoles reached through the relay share an address
     feedback_by_name = RateLimit(6, 3600)
+    crashes_by_ip = RateLimit(30, 3600)
+    crashes_all = RateLimit(600, 3600)            # however many come in, the disk only fills so fast
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "XenithOS-Cloud/" + VERSION
@@ -1450,9 +1559,9 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
             key = store.key
             return self.reply(200, body, ctype, cache, {STORE_SIG_HEADER: key.header(name, body)} if key else None)
 
-        def body(self):
+        def body(self, limit=MAX_BODY):
             n = int(self.headers.get("Content-Length") or 0)
-            if n < 0 or n > MAX_BODY:
+            if n < 0 or n > limit:
                 return None
             return self.rfile.read(n).decode("utf-8", "replace")
 
@@ -1500,6 +1609,18 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
             if parts == ["v1", "news"]:
                 return self.reply(200, "".join(f"{m['id']}|{m['t']}|{m['text']}\n"
                                                for m in state.data["inbox"]))
+
+            if parts[:2] == ["v1", "crash"] and len(parts) <= 3:
+                if not self.is_admin():
+                    return self.error(401, "Admin key required.")
+                if len(parts) == 2:
+                    return self.reply(200, "".join(
+                        f"{c['id']}|{c['t']}|{c['program']}|{c['version']}|{c['platform']}|{c['what']}|{c['where']}|"
+                        f"{c['from']}|{c['kind']}\n" for c in reversed(state.data.get("crashes", []))), cache="no-store")
+                text = state.crash_report(parts[2])
+                if text is None:
+                    return self.error(404, "No such crash report.")
+                return self.reply(200, text, cache="no-store")
 
             if parts == ["v1", "feedback"]:
                 if not self.is_admin():
@@ -1645,7 +1766,7 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
         # -------------------------------------------------------------- POST
         def do_POST(self):
             parts = [p for p in urlparse(self.path).path.split("/") if p]
-            body = self.body()
+            body = self.body(CRASH_MAX_BODY if parts == ["v1", "crash"] else MAX_BODY)
             if body is None:
                 return self.error(413, "Too large.")
             form = {k: v[0] for k, v in parse_qs(body, keep_blank_values=True).items()}
@@ -1675,6 +1796,27 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 if err:
                     return self.error(429 if "15 minutes" in err else 401, err)
                 return self.session_reply(*result)
+
+            if parts == ["v1", "crash"]:
+                program = form.get("program", "").strip().lower()
+                if not CRASH_PROGRAM_RE.match(program):
+                    return self.error(400, "Say which program crashed.")
+                text = clean_report(form.get("report", ""))
+                if len(text) < 20:
+                    return self.error(400, "That crash report is empty.")
+                if not crashes_by_ip.allow(ip) or not crashes_all.allow("all"):
+                    return self.error(429, "That's a lot of crash reports at once. Try again in a while.")
+                acc = state.by_token(form.get("token", ""))
+                entry = {"program": program, "version": clean(form.get("version", ""), 16) or "?",
+                         "platform": clean(form.get("platform", ""), 32) or "?",
+                         "what": clean(form.get("what", ""), 80) or "?", "where": clean(form.get("where", ""), 200),
+                         "from": acc["name"] if acc else "Anonymous"}
+                entry["kind"] = crash_kind(program, entry["version"], entry["what"], entry["where"])
+                entry, first = state.add_crash(entry, text)
+                hook = feedback_hooks(os.path.dirname(state.path)).get("crash")
+                if hook and first:
+                    threading.Thread(target=send_crash, args=(hook, entry, text), daemon=True).start()
+                return self.reply(200, kv({"ok": 1, "id": entry["id"]}))
 
             if parts == ["v1", "feedback"]:
                 kind, text = form.get("kind", ""), clean(form.get("text", ""), 1000)
@@ -2322,7 +2464,60 @@ else:
         f.write("# feedback\nbug=https://discord.com/api/webhooks/1/abc_D-e\nhttps://discord.com/api/webhooks/2/xyz\n"
                 "idea=https://example.com/not-discord\n")
     check("webhooks: one for bugs, one line for the rest", feedback_hooks(hooks_dir) ==
-          {"bug": "https://discord.com/api/webhooks/1/abc_D-e", "idea": "https://discord.com/api/webhooks/2/xyz"})
+          {"bug": "https://discord.com/api/webhooks/1/abc_D-e", "idea": "https://discord.com/api/webhooks/2/xyz",
+           "crash": "https://discord.com/api/webhooks/1/abc_D-e"})
+
+    # Crash reports: kept like feedback, the report itself beside state.json, read back by the admin
+    from urllib.parse import urlencode as form_encode
+    report = ("# XenithOS crash report\nprogram=hostmc\nversion=0.6.8\nsignal=SIGABRT\ncode=-6 raised\tby it\x01\n"
+              "frame=0x55d0c0001234 program+0x1234\n--- where\n0x1233: main at apps/hostmc/source/main.c:1349\n"
+              "--- trace\nlibc.so.6(__chk_fail+0x10) [0x7f00]\n")
+    crash = {"program": "hostmc", "version": "0.6.8", "platform": "PC, x86_64", "report": report,
+             "what": "SIGABRT, a buffer overflow check|x", "where": "main at apps/hostmc/source/main.c:1349"}
+    check("crash report needs a program", req("POST", "/v1/crash", form_encode(dict(crash, program="../x")))[0] == 400)
+    check("crash report needs a report", req("POST", "/v1/crash", form_encode(dict(crash, report="x")))[0] == 400)
+    code, body = req("POST", "/v1/crash", form_encode(crash))
+    check("a crash report is taken", code == 200 and kvparse(body) == {"ok": "1", "id": "1"})
+    code, body = req("POST", "/v1/crash", form_encode(dict(crash, token=token, report=report + "x" * 13000)))
+    check("a crash report longer than other posts is taken, with the gamertag added",
+          code == 200 and kvparse(body).get("id") == "2")
+    check("a crash report too big is refused",
+          req("POST", "/v1/crash", form_encode(dict(crash, report="y" * CRASH_MAX_BODY)))[0] == 413)
+    check("crash list needs admin", req("GET", "/v1/crash")[0] == 401 and req("GET", "/v1/crash/1")[0] == 401)
+    code, body = req("GET", "/v1/crash", key="k3y")
+    rows = [line.split("|") for line in body.decode().splitlines()]
+    check("crash list: newest first, from who, the same kind",
+          code == 200 and len(rows) == 2 and all(len(r) == 9 for r in rows) and [r[0] for r in rows] == ["2", "1"]
+          and rows[0][7] == "Tuber" and rows[1][7] == "Anonymous" and rows[0][8] == rows[1][8]
+          and rows[1][2:7] == ["hostmc", "0.6.8", "PC, x86_64", "SIGABRT, a buffer overflow check x",
+                               "main at apps/hostmc/source/main.c:1349"])
+    code, body = req("GET", "/v1/crash/1", key="k3y")
+    check("crash report read back, cleaned", code == 200 and body.decode() ==
+          report.replace("\t", "    ").replace("\x01", "?").strip("\n") + "\n")
+    code, body = req("GET", "/v1/crash/2", key="k3y")
+    check("crash report cut at a line", code == 200 and len(body) <= CRASH_TEXT_MAX + 1 and body.endswith(b"0x7f00]\n"))
+    check("crash report unknown id", req("GET", "/v1/crash/99", key="k3y")[0] == 404
+          and req("GET", "/v1/crash/..%2Fstate.json", key="k3y")[0] == 404 and req("GET", "/v1/crash/a", key="k3y")[0] == 404)
+    check("crash reports kept beside the state, not in it", "__chk_fail" not in json.dumps(state.data)
+          and os.path.isfile(os.path.join(tmp, "state", "crashes", "1.txt")))
+    check("crash kind leaves the addresses out",
+          crash_kind("volt", "1", "SIGSEGV", "pc 0x1234") == crash_kind("volt", "1", "SIGSEGV", "pc 0xbeef")
+          and crash_kind("volt", "1", "SIGSEGV", "x") != crash_kind("volt", "1", "SIGFPE", "x"))
+    crash_state = State(os.path.join(tmp, "crash-state"))
+    kept_before = CRASH_KEEP
+    globals()["CRASH_KEEP"] = 2
+    firsts = [crash_state.add_crash({"program": "volt", "kind": k}, "text")[1] for k in ("a", "a", "b")]
+    globals()["CRASH_KEEP"] = kept_before
+    check("crash reports: each kind goes to Discord once a day", firsts == [True, False, True])
+    check("crash reports: the oldest go, report and all", [c["id"] for c in crash_state.data["crashes"]] == [2, 3]
+          and sorted(os.listdir(os.path.join(tmp, "crash-state", "crashes"))) == ["2.txt", "3.txt"])
+    crash_state.data["crash_posted"]["a"] -= CRASH_POST_EVERY
+    check("crash reports: the next day, again", crash_state.add_crash({"program": "volt", "kind": "a"}, "text")[1])
+    with open(os.path.join(hooks_dir, "feedback-webhooks.txt"), "a") as f:
+        f.write("crash=https://discord.com/api/webhooks/3/crash\n")
+    check("webhooks: crash reports' own", feedback_hooks(hooks_dir).get("crash") == "https://discord.com/api/webhooks/3/crash")
+    statuses = [req("POST", "/v1/crash", form_encode(crash))[0] for _ in range(30)]
+    check("crash reports: rate limited", statuses[:28] == [200] * 28 and statuses[-1] == 429)
     hello = kvparse(req("GET", "/v1/hello?name=Owen&ver=0.5")[1])
     check("hello has players and online", int(hello.get("players", "0")) >= 1 and int(hello.get("online", "0")) >= 1
           and int(hello.get("now", "0")) > 0)

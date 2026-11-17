@@ -30,6 +30,7 @@ struct xenith_settings {
     int auto_connect;         /* connect to the network after boot */
     int last_inbox;           /* newest inbox message already shown */
     char last_app[96];        /* most recently launched app */
+    int crash_reports;        /* 0/1: send crash reports without asking (crash.h); off at first */
 };
 
 struct xenith_profile {

@@ -14,10 +14,10 @@
 #include "theme.h"
 #include "ui.h"
 
-enum { S_VOLUME, S_UI_SOUNDS, S_BOOT, S_CONNECT, S_NETWORK, S_SYSTEM, S_CONTROLLER, S_ABOUT, S_SIGN_OUT, S_COUNT };
+enum { S_VOLUME, S_UI_SOUNDS, S_BOOT, S_CONNECT, S_CRASH, S_NETWORK, S_SYSTEM, S_CONTROLLER, S_ABOUT, S_SIGN_OUT, S_COUNT };
 
 static const char *const label[S_COUNT] = {
-    "Volume", "Interface sounds", "Start-up chime", "Connect at start-up",
+    "Volume", "Interface sounds", "Start-up chime", "Connect at start-up", "Send crash reports",
     "Network", "System info", "Controller test", "About XenithOS", "Sign out",
 };
 
@@ -29,6 +29,7 @@ static void value_of(int i, char *out, int n)
     case S_UI_SOUNDS: snprintf(out, n, st.ui_sounds ? "On" : "Off"); break;
     case S_BOOT: snprintf(out, n, st.boot_sound ? "On" : "Off"); break;
     case S_CONNECT: snprintf(out, n, st.auto_connect ? "On" : "Off"); break;
+    case S_CRASH: snprintf(out, n, st.crash_reports ? "Always" : "Ask first"); break;
     case S_NETWORK: snprintf(out, n, net_is_up() ? net_ip() : "Not connected"); break;
     }
 }
@@ -269,6 +270,25 @@ void screen_settings(void)
                 sfx(SFX_SELECT);
                 changed = 1;
                 break;
+            case S_CRASH:
+                /* "Ask first" (as it starts out): XenithOS asks before sending each one
+                 * (source/crash_report.c). Turning it to "Always" says what goes first. */
+                sfx(SFX_SELECT);
+                if (st.crash_reports) {
+                    st.crash_reports = 0;
+                    changed = 1;
+                } else {
+                    if (ui_confirm("Send crash reports without asking?",
+                                   "When XenithOS or one of its apps crashes, a report of where it stopped goes to the "
+                                   "people who make XenithOS, so it can be fixed. It has the version, the app and what "
+                                   "it was doing. Never your gamertag, and nothing from your files.",
+                                   "Always send them", "Keep asking")) {
+                        st.crash_reports = 1;
+                        changed = 1;
+                    }
+                    ui_fade_in();
+                }
+                break;
             default:
                 if (!PRESSED(a)) break;
                 sfx(SFX_SELECT);
@@ -311,7 +331,7 @@ void screen_settings(void)
                 gfx_line(M + w - 30.0f, cy + 7.0f, M + w - 24.0f, (float)cy, 3, s ? 0xFFFFFF : C_DIM, 255);
             }
         }
-        ui_hints(sel == S_VOLUME ? "LEFT/RIGHT=Change;B=Back" : sel <= S_CONNECT ? "A=Switch;B=Back" : "A=Open;B=Back");
+        ui_hints(sel == S_VOLUME ? "LEFT/RIGHT=Change;B=Back" : sel <= S_CRASH ? "A=Switch;B=Back" : "A=Open;B=Back");
         ui_end_frame();
     }
 }

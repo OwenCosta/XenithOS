@@ -169,6 +169,7 @@ static void on_settings(const char *k, const char *v)
     else if (!strcmp(k, "auto_connect")) st.auto_connect = atoi(v) != 0;
     else if (!strcmp(k, "last_inbox")) st.last_inbox = atoi(v);
     else if (!strcmp(k, "last_app")) snprintf(st.last_app, sizeof st.last_app, "%s", v);
+    else if (!strcmp(k, "crash_reports")) st.crash_reports = atoi(v) != 0;
 }
 
 void settings_load(void)
@@ -188,6 +189,7 @@ void settings_save(void)
     if (!f) return;
     fprintf(f, "# Written by XenithOS\nvolume=%d\nui_sounds=%d\nboot_sound=%d\nauto_connect=%d\nlast_inbox=%d\nlast_app=%s\n",
             st.volume, st.ui_sounds, st.boot_sound, st.auto_connect, st.last_inbox, st.last_app);
+    fprintf(f, "crash_reports=%d\n", st.crash_reports);
     fclose(f);
 }
 
