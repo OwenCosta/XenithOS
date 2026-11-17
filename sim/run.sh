@@ -3,13 +3,15 @@
 #
 #   sim/run.sh <script.txt> <name> [server]
 #
-# Uses usb/ (made by build.sh) as the USB stick. Screenshots and audio.wav end up in
-# sim/out/<name>/. Pass a server ("127.0.0.1:8795") to test the online screens.
+# Uses usb/ (made by build.sh) as the USB stick, or the folder XSIM_USB names. Screenshots and
+# audio.wav end up in sim/out/<name>/. Pass a server ("127.0.0.1:8795") to test the online screens.
 set -e
 here="$(cd "$(dirname "$0")" && pwd)"
 script="$(realpath "$1")"
 name="$2"
 server="${3:-}"
+usb="${XSIM_USB:-$here/../usb}"
+[ -d "$usb" ] || { echo "no $usb: run build.sh first (sim/test-scripts.sh stages a stand-in without it)" >&2; exit 2; }
 
 work="$HOME/.xsim/$name"
 # XSIM_KEEP=1: the same stick as the last run with this name (a console used again), else a fresh one
@@ -18,7 +20,7 @@ if [ "$XSIM_KEEP" = 1 ] && [ -d "$work/uda:" ]; then
 else
     rm -rf "$work"
     mkdir -p "$work/uda:"
-    cp -r "$here/../usb/." "$work/uda:/"
+    cp -r "$usb/." "$work/uda:/"
 fi
 mkdir -p "$work/uda:/xenith"
 # XSIM_UDA: a folder of files to put on the stick as well (saves, say)

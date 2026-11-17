@@ -242,6 +242,25 @@ check the Xbox's tiled framebuffer code, run the sound mixer on a real thread, a
 sim/run.sh sim/scripts/tour.txt tour          # offline screens -> sim/out/tour/
 ```
 
+## Checks
+
+GitHub runs these on every push to a branch and every pull request (`.github/workflows/ci.yml`), and they work
+the same on a PC:
+
+```bash
+make -C linux                                 # the PC version, as Ubuntu 24.04 and Debian 12 build it
+sim/test-scripts.sh                           # every simulator script: ASan, UBSan, the tiled framebuffer
+python3 server/xenith_cloud.py --selftest     # and server/xenith-relay.py --selftest
+linux/test-hostmc.sh                          # HostMC on a PC, in a virtual display
+sim/hostmc/test-vps.sh                        # HostMC's own-VPS route, with a private sshd
+./build.sh                                    # the Xbox 360 build
+```
+
+Compiler warnings show on the commit or pull request without failing the build. Ubuntu's gcc builds with
+`_FORTIFY_SOURCE=3`, so a buffer that's too small for a call like `realpath` stops the program in the HostMC
+test as it would on a real PC. The Xbox toolchain is built once from the libxenon commit named in the workflow
+and kept in GitHub's cache; a new commit there, or a week without any run, builds it again (about an hour).
+
 ## Layout
 
 ```
