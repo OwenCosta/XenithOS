@@ -66,8 +66,8 @@ Admin (header X-Xenith-Key: <XENITH_ADMIN_KEY>)
 Command line
   xenith_cloud.py store-key new <file>   make the Store's signing key; prints its public half
   xenith_cloud.py store-key show <file>  the public half of a key file
-  xenith_cloud.py store-key check <host:port> [public key]   check a running server's Store
-                                      signatures (default: the keys in source/store_key.h)
+  xenith_cloud.py store-key check <host:port or URL> [public key]   check a running server's
+                                      Store signatures (default: the keys in source/store_key.h)
   xenith_cloud.py send "text"         message the console inbox (through the running server)
   xenith_cloud.py motd "text"         set the message of the day
   xenith_cloud.py --selftest          built-in tests (no network, temp dir)
@@ -1288,7 +1288,7 @@ def store_sig_good(values, name, body, keys):
 
 
 def store_key_command(args):
-    """xenith_cloud.py store-key new <file> | show <file> | check <host:port> [public key]"""
+    """xenith_cloud.py store-key new <file> | show <file> | check <host:port or URL> [public key]"""
     def tell(public):
         print(f"Public half: {public}  (key id {public[:16]})\n"
               f"For source/store_key.h, the line inside store_keys[]:\n    \"{public}\",")
@@ -1324,10 +1324,11 @@ def store_key_command(args):
             return 2
         routes, bad, first = ["/v1/store", "/v1/store/needs", "/v1/store/flathub", "/v1/store/steam",
                               "/v1/store/all", "/v1/store/all?pc=1"], 0, ""
+        base = (args[1] if args[1].startswith(("http://", "https://")) else "http://" + args[1]).rstrip("/")
         while routes:
             route = routes.pop(0)
             try:
-                with urllib.request.urlopen(f"http://{args[1]}{route}", timeout=20) as r:
+                with urllib.request.urlopen(base + route, timeout=20) as r:
                     body, values = r.read(), r.headers.get_all(STORE_SIG_HEADER) or []
             except urllib.error.HTTPError as e:
                 if "/icon/" in route and e.code == 404:
@@ -2110,8 +2111,9 @@ else:
     with contextlib.redirect_stdout(io.StringIO()) as said:
         addr = f"127.0.0.1:{httpd.server_address[1]}"
         checked = store_key_command(["check", addr, pub.hex()]) == 0 and store_key_command(["check", addr, "ab" * 32]) == 1
-    check("store-key check: passes a signed server, fails with another key",
-          checked and said.getvalue().count("PASS /v1/store") == 7 and "FAIL /v1/store:" in said.getvalue())
+        as_url = store_key_command(["check", f"http://{addr}/", pub.hex()]) == 0
+    check("store-key check: passes a signed server, fails with another key, takes a URL too",
+          checked and as_url and said.getvalue().count("PASS /v1/store") == 14 and "FAIL /v1/store:" in said.getvalue())
 
     # The key file: made private, never overwritten, kept out of what the server serves
     key_dir = os.path.join(tmp, "keys")
