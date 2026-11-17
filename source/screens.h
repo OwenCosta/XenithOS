@@ -24,6 +24,21 @@ extern int nfriend_rows;
 int  friends_fetch(void);                   /* 200, or why not */
 void friend_status(const struct friend_row *p, char *out, int n, uint32_t *color);
 
+/* cloud_saves.c: saves and settings that follow the profile (shared/cloudsave.h) */
+struct cloud_entry {                        /* a file in XenithOS Cloud's listing */
+    char app[20], name[52], sha[65], from[28], label[28];
+    int rev, size, age, gone;               /* age: seconds since it came; gone: deleted */
+};
+#define CLOUD_LIST_MAX 96
+extern struct cloud_entry cloud_list[CLOUD_LIST_MAX];
+extern int ncloud_list;
+extern long cloud_used, cloud_limit;
+int  cloud_saves_on(void);                  /* signed in, and on for this machine (Settings) */
+int  cloud_saves_list(const char *app);     /* XenithOS Cloud's listing (NULL: every app); the status */
+int  cloud_saves_sync(const char *app_id, int ask);   /* NULL: every app. ask: about clashes */
+const char *cloud_saves_problem(void);
+void screen_saves(void);                    /* Profile, Cloud saves: what's kept, deleting it */
+
 /* cloud_api.c: talking to XenithOS Cloud */
 int  cloud_ready(const char *title);        /* server set and network up, or explains why not */
 int  cloud_post(const char *path, const char *form, struct http_resp *r);

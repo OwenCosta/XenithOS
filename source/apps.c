@@ -7,6 +7,7 @@
 
 #include "apps.h"
 #include "audio.h"
+#include "cloudsave.h"
 #include "config.h"
 #include "icons.h"
 #include "img.h"
@@ -179,6 +180,12 @@ void app_launch(const struct app *a)
         snprintf(st.last_app, sizeof st.last_app, "%s", a->path);
         settings_save();
         sfx(SFX_LAUNCH);
+        if (cloud_app_find(a->id) && cloud_saves_on() && net_is_up()) {
+            /* Its saves as they are on XenithOS Cloud, asking about any that changed in two places */
+            ui_busy_begin("Getting your saves", a->name);
+            cloud_saves_sync(a->id, 1);
+            ui_busy_end();
+        }
         cloud_playing(a->id);           /* friends see it until XenithOS is back */
         startlog_launching(a->name);
         /* The apps open with a loading screen laid out like this one, and on the Xbox the screen
@@ -197,7 +204,13 @@ void app_launch(const struct app *a)
             return;
         }
         /* On a PC it ran as its own program and has quit, or was left running. Switch game in
-         * the guide chose what's next. */
+         * the guide chose what's next. What it saved goes up (on the Xbox, XenithOS does that
+         * when it starts again). */
+        if (cloud_app_find(a->id) && cloud_saves_on() && net_is_up() && !(plat_running() && !strcmp(plat_running(), a->path))) {
+            ui_busy_begin("Putting your saves on XenithOS Cloud", a->name);
+            cloud_saves_sync(a->id, 0);
+            ui_busy_end();
+        }
         next = plat_next_launch();
         a = next ? app_by_path(next) : NULL;
         if (!a && !plat_running()) cloud_playing(NULL);

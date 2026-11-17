@@ -9,7 +9,7 @@
 #include "net.h"
 
 struct xenith_config cfg = {.name = "PLAYER"};
-struct xenith_settings st = {80, 1, 1, 1, 0, ""};
+struct xenith_settings st = {80, 1, 1, 1, 0, "", 1};
 struct xenith_profile prof;
 
 static void trim(char *s)
@@ -126,6 +126,7 @@ static void on_settings(const char *k, const char *v)
     else if (!strcmp(k, "auto_connect")) st.auto_connect = atoi(v) != 0;
     else if (!strcmp(k, "last_inbox")) st.last_inbox = atoi(v);
     else if (!strcmp(k, "last_app")) snprintf(st.last_app, sizeof st.last_app, "%s", v);
+    else if (!strcmp(k, "cloud_saves")) st.cloud_saves = atoi(v) != 0;
 }
 
 void settings_load(void)
@@ -143,8 +144,9 @@ void settings_save(void)
 {
     FILE *f = open_write(XENITH_SETTINGS_PATH);
     if (!f) return;
-    fprintf(f, "# Written by XenithOS\nvolume=%d\nui_sounds=%d\nboot_sound=%d\nauto_connect=%d\nlast_inbox=%d\nlast_app=%s\n",
-            st.volume, st.ui_sounds, st.boot_sound, st.auto_connect, st.last_inbox, st.last_app);
+    fprintf(f, "# Written by XenithOS\nvolume=%d\nui_sounds=%d\nboot_sound=%d\nauto_connect=%d\nlast_inbox=%d\nlast_app=%s\n"
+               "cloud_saves=%d\n",
+            st.volume, st.ui_sounds, st.boot_sound, st.auto_connect, st.last_inbox, st.last_app, st.cloud_saves);
     fclose(f);
 }
 

@@ -1,0 +1,21 @@
+# Cloud saves, the first console (signed in as Saver), whose stick has DOOM saves from before
+# profiles had their own folder: they go into the profile's folder and up to XenithOS Cloud when
+# XenithOS starts. Then Profile, Cloud saves. Part of sim/social/test-saves.sh.
+wait 260
+press right
+press right
+press right
+press right
+press a
+wait 40
+press down
+wait 10
+shot sa_profile
+press a
+wait 40
+shot sa_cloud_saves
+press b
+wait 20
+press b
+wait 20
+quit

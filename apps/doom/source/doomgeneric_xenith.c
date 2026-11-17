@@ -22,6 +22,7 @@
 
 #include "audio.h"
 #include "../../../shared/config.h"     /* doomgeneric has a config.h of its own */
+#include "cloudsave.h"
 #include "gfx.h"
 #include "handoff.h"
 #include "platform.h"
@@ -216,6 +217,26 @@ static const struct { const char *file, *name; } games[] = {
 #define NGAMES ((int)(sizeof games / sizeof *games))
 #define CHOICE_FILE "uda:/doom/iwad.txt"
 
+/* Where DOOM keeps its settings and saves (m_config.c asks): the signed-in profile's own folder,
+ * uda:/doom/profiles/<gamertag>/, which XenithOS keeps in step with the profile's cloud saves
+ * before DOOM starts and after it closes, so two people on one console never mix saves. A
+ * guest uses uda:/doom/ as before. */
+static char config_dir[96] = "uda:/doom/";
+
+const char *DG_ConfigDir(void)
+{
+    return config_dir;
+}
+
+static void use_profile_folder(void)
+{
+    const struct cloud_app *a = cloud_app_find("doom");
+    profile_load();
+    if (a) profile_folder_start(a);          /* the first time: what's in uda:/doom/ comes along */
+    profile_folder("uda:/doom/", config_dir, sizeof config_dir);
+    make_folders(config_dir);
+}
+
 static char found_path[NGAMES][96];
 static int found_game[NGAMES], nfound;
 
@@ -357,6 +378,7 @@ int main(int argc, char **argv)
     snprintf(wad, sizeof wad, "%s", found_path[pick]);
 
     mkdir("uda:/doom", 0777);
+    use_profile_folder();
     atexit(back_to_xenith);       /* Doom's Quit, and its fatal errors, return to XenithOS */
 
     doomgeneric_Create(3, args);

@@ -305,6 +305,7 @@ void cloud_sync(int quiet)
         http_free(&r);
     }
     check_in(1);
+    cloud_saves_sync(NULL, 0);              /* saves and settings, both ways; clashes wait for the app */
     toast_next();
 }
 

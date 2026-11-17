@@ -56,6 +56,17 @@ Friends (form posts with a profile's token; see Friends)
   POST /v1/friends/remove             token, name  (a friend, a request to you, or your own)
   POST /v1/friends/sharing            token, on  (show friends what you play and your server)
 
+Cloud saves (a profile's saves and settings, the same on every machine; see CloudSaves)
+  POST /v1/saves                      token[, app]  -> used, limit, files_limit, then
+                                      file=app|name|rev|size|sha256|seconds since|from|label
+                                      and gone=app|name|rev|seconds since (deleted)
+  POST /v1/saves/get                  token, app, name  -> "rev=&size=&sha256=" line, then the file
+  POST /v1/saves/put                  a form line (token, app, name, base: the revision the copy
+                                      was last in step with, force, from, label), "\n", the file
+                                      -> rev, size, sha256; 409 with rev (and sha256, from, label,
+                                      or gone) when it changed elsewhere since base
+  POST /v1/saves/delete               token, app[, name], or all=1  -> deleted
+
 Accounts (form posts; errors come back as "error=<message>")
   POST /v1/accounts/create            name, pin, avatar   -> name, token, avatar, joined
   POST /v1/accounts/login             name, pin           -> name, token, avatar, joined
@@ -756,6 +767,128 @@ class Friends:
             return 200, "", {"now": now, "name": other.get("name", name)}
 
 
+# ---------------------------------------------------------------------- cloud saves
+
+# DOOM's saves and apps' settings follow a profile between machines. Each file is kept as it came,
+# in the state folder (saves/<the profile's folder>/<app>/<name>); state.json has its revision,
+# size, SHA-256, when it came, the machine it came from and a label (a DOOM save's name). A machine
+# says which revision its copy was last in step with, and a change based on an older one is
+# refused (409) instead of replacing what another machine sent: XenithOS on that machine asks
+# which one to keep. Deleting leaves a marker with the next revision, so a machine that still has
+# a copy keeps it without sending it back.
+SAVES_LIMIT = 4 * 1024 * 1024    # one profile's files together
+SAVE_MAX = 512 * 1024            # one file
+SAVE_FILES_MAX = 64              # one profile's files
+SAVE_GONE_KEEP = 200             # deletion markers kept for each profile
+SAVE_PUTS_PER_MIN = 30           # uploads, per profile
+SAVE_GETS_PER_MIN = 120          # downloads, per profile
+SAVE_APP_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,15}$")
+SAVE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,47}$")
+
+
+class CloudSaves:
+    def __init__(self, state):
+        self.state = state
+        self.dir = os.path.join(os.path.dirname(state.path), "saves")
+        self.puts = RateLimit(SAVE_PUTS_PER_MIN, 60)
+        self.gets = RateLimit(SAVE_GETS_PER_MIN, 60)
+        self.clock = time.time
+
+    @staticmethod
+    def valid(app, name):
+        return bool(SAVE_APP_RE.match(app or "") and SAVE_NAME_RE.match(name or ""))
+
+    def path(self, acc, app, name):
+        """Where a profile's file is kept: a folder named by a random id, not the gamertag."""
+        with self.state.lock:
+            if not acc.get("id"):
+                acc["id"] = secrets.token_hex(8)
+                self.state.save()
+            return os.path.join(self.dir, acc["id"], app, name)
+
+    @staticmethod
+    def used(acc, leaving_out=None):
+        return sum(m["size"] for k, m in acc.get("saves", {}).items() if not m.get("gone") and k != leaving_out)
+
+    def listing(self, acc, app=""):
+        """used, limit and files_limit, then a line for each file:
+        file=app|name|rev|size|sha256|seconds since|from|label, and for each deletion marker
+        gone=app|name|rev|seconds since."""
+        now = self.clock()
+        with self.state.lock:
+            lines = [f"used={self.used(acc)}\nlimit={SAVES_LIMIT}\nfiles_limit={SAVE_FILES_MAX}\n"]
+            for key, m in sorted(acc.get("saves", {}).items()):
+                a, n = key.split("/", 1)
+                if app and a != app:
+                    continue
+                age = max(0, int(now - m["t"]))
+                if m.get("gone"):
+                    lines.append(f"gone={a}|{n}|{m['rev']}|{age}\n")
+                else:
+                    lines.append(f"file={a}|{n}|{m['rev']}|{m['size']}|{m['sha256']}|{age}|{m['from']}|{m['label']}\n")
+        return "".join(lines)
+
+    def get(self, acc, app, name):
+        """(metadata, bytes), or None."""
+        with self.state.lock:
+            m = acc.get("saves", {}).get(f"{app}/{name}")
+            if not m or m.get("gone"):
+                return None
+            try:
+                with open(self.path(acc, app, name), "rb") as f:
+                    return dict(m), f.read(SAVE_MAX + 1)
+            except OSError:
+                return None
+
+    def put(self, acc, app, name, data, base, force=False, sent_from="", label=""):
+        """(status, message, metadata). base: the revision the machine's copy was last in step
+        with, 0 if it never had one. force: replace whatever is there (the player chose it)."""
+        key = f"{app}/{name}"
+        with self.state.lock:
+            saves = acc.setdefault("saves", {})
+            cur = saves.get(key)
+            rev = cur["rev"] if cur else 0
+            if not force and base != rev:
+                return 409, "That changed on another machine since this one last had it.", cur
+            if sum(1 for k, m in saves.items() if not m.get("gone") and k != key) >= SAVE_FILES_MAX:
+                return 413, f"XenithOS Cloud keeps {SAVE_FILES_MAX} files for each profile. Delete some in Profile.", cur
+            if self.used(acc, key) + len(data) > SAVES_LIMIT:
+                return 413, (f"Your cloud saves are full: {SAVES_LIMIT // 1048576} MB is the most. "
+                             "Delete some in Profile, Cloud saves."), cur
+            path = self.path(acc, app, name)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = f"{path}.{secrets.token_hex(4)}.part"
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, path)
+            saves[key] = {"rev": rev + 1, "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+                          "t": int(self.clock()), "from": clean(sent_from, 24), "label": clean(label, 24)}
+            self.state.save()
+            return 200, "", saves[key]
+
+    def delete(self, acc, app="", name=""):
+        """Deletes one file (app and name), an app's files (app), or all of them. Returns how many."""
+        now, n = int(self.clock()), 0
+        with self.state.lock:
+            saves = acc.get("saves", {})
+            for key, m in list(saves.items()):
+                a, nm = key.split("/", 1)
+                if m.get("gone") or (app and a != app) or (name and nm != name):
+                    continue
+                try:
+                    os.remove(self.path(acc, a, nm))
+                except OSError:
+                    pass
+                saves[key] = {"rev": m["rev"] + 1, "gone": True, "t": now}
+                n += 1
+            gone = sorted((m["t"], k) for k, m in saves.items() if m.get("gone"))
+            for _, k in gone[:max(0, len(gone) - SAVE_GONE_KEEP)]:
+                del saves[k]
+            if n:
+                self.state.save()
+        return n
+
+
 # ---------------------------------------------------------------------- stats
 
 
@@ -1318,6 +1451,7 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
     feedback_by_ip = RateLimit(30, 3600)          # consoles reached through the relay share an address
     feedback_by_name = RateLimit(6, 3600)
     friends = Friends(state, store)
+    saves = CloudSaves(state)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "XenithOS-Cloud/" + VERSION
@@ -1536,6 +1670,8 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
         # -------------------------------------------------------------- POST
         def do_POST(self):
             parts = [p for p in urlparse(self.path).path.split("/") if p]
+            if parts == ["v1", "saves", "put"]:         # a file, bigger than a form
+                return self.saves_put()
             body = self.body()
             if body is None:
                 return self.error(413, "Too large.")
@@ -1586,6 +1722,9 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
 
             if parts == ["v1", "hello"] or parts[:2] == ["v1", "friends"]:
                 return self.friends_post(parts, form, ip)
+
+            if parts[:2] == ["v1", "saves"]:
+                return self.saves_post(parts, form)
 
             if parts in (["v1", "tube", "search"], ["v1", "tube", "start"]):
                 if not tube or not tube.available():
@@ -1715,7 +1854,65 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 return self.reply(200, kv({"ok": 1, **extra}))
             return self.error(404, "Not found.")
 
+        # ---------------------------------------------------------- cloud saves
+        def saves_post(self, parts, form):
+            acc = state.by_token(form.get("token", ""))
+            if not acc:
+                return self.error(401, "Your sign-in expired. Sign in again.")
+            app, name = form.get("app", ""), form.get("name", "")
+            if parts == ["v1", "saves"]:
+                if app and not SAVE_APP_RE.match(app):
+                    return self.error(400, "That isn't an app.")
+                return self.reply(200, saves.listing(acc, app), cache="no-store")
+            if parts == ["v1", "saves", "get"]:
+                if not saves.valid(app, name):
+                    return self.error(400, "That isn't a cloud save.")
+                if not saves.gets.allow(acc["name"].lower()):
+                    return self.error(429, "That's a lot of downloading. Wait a minute.")
+                found = saves.get(acc, app, name)
+                if not found:
+                    return self.error(404, "That isn't on XenithOS Cloud.")
+                m, data = found
+                head = f"rev={m['rev']}&size={len(data)}&sha256={m['sha256']}\n".encode()
+                return self.reply(200, head + data, "application/octet-stream", "no-store")
+            if parts == ["v1", "saves", "delete"]:
+                if form.get("all") == "1":
+                    return self.reply(200, kv({"deleted": saves.delete(acc)}))
+                if not SAVE_APP_RE.match(app) or (name and not saves.valid(app, name)):
+                    return self.error(400, "That isn't a cloud save.")
+                return self.reply(200, kv({"deleted": saves.delete(acc, app, name)}))
+            return self.error(404, "Not found.")
+
+        def saves_put(self):
+            """The body is a form line (token, app, name, base, force, from, label), a newline, then
+            the file as it is."""
+            n = int_or(self.headers.get("Content-Length"), -1)
+            if n < 0 or n > SAVE_MAX + 1024:
+                return self.error(413, f"A cloud save can be {SAVE_MAX // 1024} KB at most.")
+            head, sep, data = self.rfile.read(n).partition(b"\n")
+            if not sep or len(head) > 1024:
+                return self.error(400, "That isn't a cloud save.")
+            form = {k: v[0] for k, v in parse_qs(head.decode("utf-8", "replace"), keep_blank_values=True).items()}
+            acc = state.by_token(form.get("token", ""))
+            if not acc:
+                return self.error(401, "Your sign-in expired. Sign in again.")
+            app, name = form.get("app", ""), form.get("name", "")
+            if not saves.valid(app, name):
+                return self.error(400, "That isn't a cloud save.")
+            if len(data) > SAVE_MAX:
+                return self.error(413, f"A cloud save can be {SAVE_MAX // 1024} KB at most.")
+            if not saves.puts.allow(acc["name"].lower()):
+                return self.error(429, "That's a lot of saving at once. Wait a minute.")
+            code, message, m = saves.put(acc, app, name, data, int_or(form.get("base"), -1), form.get("force") == "1",
+                                         form.get("from", ""), form.get("label", ""))
+            if code == 200:
+                return self.reply(200, kv({"rev": m["rev"], "size": m["size"], "sha256": m["sha256"]}))
+            now = {"rev": m["rev"], "gone": 1} if m and m.get("gone") else \
+                  {"rev": m["rev"], "sha256": m["sha256"], "from": m["from"], "label": m["label"]} if m else {"rev": 0}
+            return self.reply(code, kv({"error": message, **now}))
+
     Handler.friends = friends                     # for the self-test
+    Handler.saves = saves
     return Handler
 
 
@@ -1916,6 +2113,90 @@ def selftest_friends(req, kvparse, check, state, friends):
     sent = [post("/v1/friends/add", ta, f"&name=Pal{i}")[0] for i in range(len(pals))]
     check("friends: only so many requests an hour", sent[:ASKS_PER_HOUR - 2] == [200] * (ASKS_PER_HOUR - 2)
           and sent[-1] == 429)
+
+
+def selftest_saves(base, kvparse, check, state):
+    """Cloud saves, for selftest(). Files are sent as they are, so this posts bytes itself."""
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    def call(path, data):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(base + path, data=data, method="POST")) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    def post(path, **form):
+        return call(path, urllib.parse.urlencode(form).encode())
+
+    def put(token, app, name, data, **extra):
+        head = urllib.parse.urlencode({"token": token, "app": app, "name": name, "from": "Xbox 360", **extra})
+        return call("/v1/saves/put", head.encode() + b"\n" + data)
+
+    def listing(token, **extra):
+        lines = post("/v1/saves", token=token, **extra)[1].decode().splitlines()
+        rows = lambda kind: {r.split("|")[1]: r.split("|") for r in (x[5:] for x in lines if x.startswith(kind))}
+        return kvparse("\n".join(x for x in lines if "|" not in x).encode()), rows("file="), rows("gone=")
+
+    (acc, ta), _ = state.create("Saver", "1357", "1202001000")
+    (_, tb), _ = state.create("Other", "1357", "1202001000")
+    save = b"BEFORE BOSS" + bytes(13) + b"version 109\n" + bytes(range(256)) * 300   # zeros, newlines, the lot
+    sha = hashlib.sha256(save).hexdigest()
+    check("saves: need a profile", post("/v1/saves", token="nope")[0] == 401
+          and put("nope", "doom", "doomsav0.dsg", b"x", base=0)[0] == 401)
+    code, body = put(ta, "doom", "doomsav0.dsg", save, base=0, label="BEFORE BOSS")
+    check("saves: a new save", code == 200 and kvparse(body) == {"rev": "1", "size": str(len(save)), "sha256": sha})
+    code, body = post("/v1/saves/get", token=ta, app="doom", name="doomsav0.dsg")
+    head, _, data = body.partition(b"\n")
+    check("saves: it comes back exactly", code == 200 and data == save and head == f"rev=1&size={len(save)}&sha256={sha}".encode())
+    info, files, _ = listing(ta)
+    check("saves: listed with how big, where from and its name", files.get("doomsav0.dsg", [""] * 8)[2:5] == ["1", str(len(save)), sha]
+          and files["doomsav0.dsg"][6:] == ["Xbox 360", "BEFORE BOSS"] and info.get("used") == str(len(save))
+          and info.get("limit") == str(SAVES_LIMIT))
+    path = os.path.join(os.path.dirname(state.path), "saves", acc["id"], "doom", "doomsav0.dsg")
+    with open(path, "rb") as f:
+        check("saves: kept as a file, in a folder that isn't named after the gamertag", f.read() == save and "Saver" not in path)
+    code, body = put(ta, "doom", "doomsav0.dsg", b"from an older copy", base=0)
+    check("saves: a change made from an older copy is refused, saying what's there",
+          code == 409 and kvparse(body).get("rev") == "1" and kvparse(body).get("label") == "BEFORE BOSS"
+          and kvparse(body).get("from") == "Xbox 360")
+    check("saves: a change made from the latest is taken", kvparse(put(ta, "doom", "doomsav0.dsg", b"newer", base=1)[1]).get("rev") == "2")
+    check("saves: and any copy the player chose", kvparse(put(ta, "doom", "doomsav0.dsg", b"chosen", base=0, force=1)[1]).get("rev") == "3")
+    check("saves: another profile can't see them", post("/v1/saves/get", token=tb, app="doom", name="doomsav0.dsg")[0] == 404
+          and listing(tb)[1] == {})
+    for app, name in (("doom", "../x"), ("doom", ".hidden"), ("doom", "a/b"), ("DOOM", "x"), ("doom", "x" * 49), ("", "x")):
+        check(f"saves: {app or '(no app)'}/{name[:10]} refused", put(ta, app, name, b"x", base=0)[0] == 400)
+    check("saves: one file too big", put(ta, "doom", "big.dsg", b"x" * (SAVE_MAX + 1), base=0)[0] == 413)
+    filled = [put(tb, "doom", f"slot{i}.dsg", b"y" * SAVE_MAX, base=0)[0] for i in range(SAVES_LIMIT // SAVE_MAX)]
+    code, body = put(tb, "doom", "onemore.dsg", b"z", base=0)
+    check("saves: full at the limit", filled == [200] * (SAVES_LIMIT // SAVE_MAX) and code == 413
+          and "full" in kvparse(body).get("error", ""))
+    check("saves: a file replaced counts only its new size", put(tb, "doom", "slot0.dsg", b"y" * 1000, base=1)[0] == 200
+          and put(tb, "doom", "onemore.dsg", b"z", base=0)[0] == 200)
+
+    # Deleting leaves a marker, so machines with a copy don't send it back unchanged
+    code, body = post("/v1/saves/delete", token=ta, app="doom", name="doomsav0.dsg")
+    info, files, gone = listing(ta)
+    check("saves: deleting one", kvparse(body) == {"deleted": "1"} and "doomsav0.dsg" not in files
+          and gone.get("doomsav0.dsg", ["", "", ""])[2] == "4" and info.get("used") == "0" and not os.path.exists(path))
+    check("saves: deleted means gone", post("/v1/saves/get", token=ta, app="doom", name="doomsav0.dsg")[0] == 404)
+    code, body = put(ta, "doom", "doomsav0.dsg", b"chosen", base=3)
+    check("saves: a copy from before the delete is refused", code == 409 and kvparse(body).get("gone") == "1"
+          and kvparse(body).get("rev") == "4")
+    check("saves: a new save after it is taken", kvparse(put(ta, "doom", "doomsav0.dsg", b"new game", base=4)[1]).get("rev") == "5")
+    put(ta, "xenithos", "settings.txt", b"ui_sounds=0\nboot_sound=1\n", base=0)
+    check("saves: one app's", set(listing(ta, app="xenithos")[1]) == {"settings.txt"}
+          and set(listing(ta, app="doom")[1]) == {"doomsav0.dsg"})
+    check("saves: deleting all of an app's", kvparse(post("/v1/saves/delete", token=ta, app="xenithos")[1]) == {"deleted": "1"}
+          and set(listing(ta)[1]) == {"doomsav0.dsg"})
+    code, body = post("/v1/saves/delete", token=tb, all="1")
+    folder = os.path.join(os.path.dirname(state.path), "saves", state.account("other")["id"], "doom")
+    check("saves: deleting everything", kvparse(body) == {"deleted": str(SAVES_LIMIT // SAVE_MAX + 1)}
+          and listing(tb)[0].get("used") == "0" and os.listdir(folder) == [])
+    sent = [put(ta, "volt", "best.txt", b"1", force=1)[0] for _ in range(SAVE_PUTS_PER_MIN)]
+    check("saves: only so many uploads a minute", sent[0] == 200 and sent[-1] == 429)
 
 
 def selftest():
@@ -2238,6 +2519,7 @@ else:
           and b"/download/xenithos-source.tar.gz" in body)
 
     selftest_friends(req, kvparse, check, state, httpd.RequestHandlerClass.friends)
+    selftest_saves(base, kvparse, check, state)
 
     # Tube, with stand-in yt-dlp and ffmpeg
     calls_file = os.path.join(tmp, "calls.txt")

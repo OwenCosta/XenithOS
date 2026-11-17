@@ -1,0 +1,23 @@
+# Cloud saves, the first console: DOOM's save slot 1 deleted from XenithOS Cloud in Profile, Cloud
+# saves. Part of sim/social/test-saves.sh.
+wait 260
+press right
+press right
+press right
+press right
+press a
+wait 40
+press down
+press a
+wait 40
+press down
+press down
+wait 10
+shot sd_selected
+press a
+wait 20
+shot sd_confirm
+press a
+wait 40
+shot sd_deleted
+quit

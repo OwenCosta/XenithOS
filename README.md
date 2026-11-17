@@ -27,14 +27,20 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
   they're playing (also as a notification when one comes on), and the address of a friend's HostMC server to
   join. "Show friends what I'm playing" in Settings keeps that to yourself.
 - Profile: a gamertag and passcode, saved to XenithOS Cloud so it follows you to any machine
+- Cloud saves: DOOM's saves and settings, and XenithOS's own (interface sounds, the start-up chime), follow
+  your profile between the Xbox and your PCs. Each profile has its own folder on a machine, so people
+  sharing a console never mix saves. If a save changed on two machines before they matched up, XenithOS
+  asks which one to keep; nothing is replaced without asking. Profile, Cloud saves shows what's kept (up to
+  4 MB) and deletes it; Settings turns them off for one machine.
 - Avatar editor: thirteen parts in three tabs (face, hair, outfit), colour swatches, random looks
-- Settings: volume, interface sounds, start-up chime, showing friends what you play, network, system info
-  (with start-up times and sound stats), controller test, about
+- Settings: volume, interface sounds, start-up chime, showing friends what you play, cloud saves on this
+  machine, network, system info (with start-up times and sound stats), controller test, about
 
 **Apps** (`apps/`)
 - VOLT: a light-trail game. Scores go to your profile on the leaderboard.
 - DOOM: [doomgeneric](https://github.com/ozkl/doomgeneric) with controller support and sound effects. Get
-  Freedoom from the Store, or copy your own `doom1.wad` / `doom2.wad` into a `doom/` folder.
+  Freedoom from the Store, or copy your own `doom1.wad` / `doom2.wad` into a `doom/` folder. Signed in, its
+  saves and settings are your profile's (`doom/profiles/<gamertag>/`) and follow you as cloud saves.
 - Tube: search and watch YouTube. XenithOS Cloud turns the video into small JPEG frames and plain sound that
   even the Xbox can play. Needs a XenithOS profile.
 - Photos: your pictures (JPEG, PNG, BMP, GIF) from a `photos` folder on the USB stick, or `~/Pictures` on a
@@ -119,7 +125,7 @@ updates all of it (ffmpeg, Deno, the yt-dlp standalone build, the plugin and the
 download against its published checksum.
 
 ```bash
-python3 server/xenith_cloud.py --selftest      # 156 checks, no network needed
+python3 server/xenith_cloud.py --selftest      # 182 checks, no network needed
 ```
 
 Profiles: passcodes are stored as salted PBKDF2 hashes and sign-in tokens as SHA-256 hashes, so the state
@@ -134,6 +140,12 @@ they start something (and every minute or so on the home screen); only friends s
 kept in memory, never in the state file, and with "Show friends what I'm playing" off it isn't even sent. A
 HostMC server's address is shown to friends while HostMC says people on the internet can reach it, and for a
 day after.
+
+Cloud saves: each file is kept as it came, in `saves/` in the state folder (in folders named by a random id,
+not the gamertag), up to 512 KB a file and 4 MB a profile. Every file has a revision: a machine says which one
+its copy was last in step with, and XenithOS Cloud refuses a change based on an older one instead of
+replacing what another machine sent, so XenithOS can ask which to keep. Deleting leaves a marker, so the
+machines that still have a copy keep it without sending it back.
 
 Running your own copy (the unit runs as a throwaway user on a read-only system):
 

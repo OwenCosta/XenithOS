@@ -14,7 +14,8 @@ the USB stick (copied from `usb/`, so run `build.sh` first). Pass a server like 
 online screens against a local `server/xenith_cloud.py`.
 
 Environment: `XSIM_KEY` (console key for the inbox), `XSIM_PROFILE` (a profile.txt to boot signed in),
-`XSIM_BIN` (`xsim` or `xvolt`).
+`XSIM_BIN` (`xsim` or `xvolt`), `XSIM_KEEP=1` (the stick as the last run with that name left it, like a
+console used again), `XSIM_UDA` (a folder of files to put on the stick too).
 
 Checks for things that only exist on the console:
 
@@ -50,6 +51,12 @@ More switches:
   HostMC server can be reached, the home screen, Cloud and Friends showing it, and "Show friends what I'm
   playing" turned off. Each step is checked through XenithOS Cloud's API; screenshots go to
   `sim/out/friends-*`. `sim/social/cloud.py` makes the profiles and does the API calls.
+- `sim/social/test-saves.sh` runs cloud saves between an Xbox and a PC signed in to one profile, each with a
+  stick kept between its runs (`saves_*.txt`): DOOM saves from before profiles had their own folder going
+  up, the PC getting them, a save changed on both (the clash waits for DOOM, which asks), XenithOS's settings
+  following the profile, and a save deleted from XenithOS Cloud staying on both machines. It checks the
+  sticks and the API; screenshots go to `sim/out/saves-*`. DOOM itself isn't started (the simulator can't),
+  so its saves are stand-ins with a save's name in the first 24 bytes.
 
 ## Scripts
 

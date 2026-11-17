@@ -26,6 +26,7 @@ struct xenith_settings {
     int auto_connect;         /* connect to the network after boot */
     int last_inbox;           /* newest inbox message already shown */
     char last_app[96];        /* most recently launched app */
+    int cloud_saves;          /* keep saves and settings in step with the profile's cloud saves */
 };
 
 struct xenith_profile {

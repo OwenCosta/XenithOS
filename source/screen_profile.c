@@ -205,7 +205,7 @@ struct action { int icon; const char *label; const char *sub; };
 
 static int action_list(int x, int y, int w, const struct action *a, int n, int sel, float hl)
 {
-    int i, rowh = 84;
+    int i, rowh = n > 2 ? 76 : 84;
     for (i = 0; i < n; i++) {
         int ry = y + i * rowh, s = i == sel;
         uint32_t bg = s ? C_SEL : C_SURFACE;
@@ -240,10 +240,11 @@ void screen_profile(void)
         };
         static const struct action member[] = {
             {ICON_PALETTE, "Change avatar", "Edit your look"},
+            {ICON_CLOUD, "Cloud saves", "Saves and settings that follow you between machines"},
             {ICON_SIGN_OUT, "Sign out", "Play as a guest on this console"},
         };
         const struct action *acts = prof.signed_in ? member : guest;
-        int n = 2, top = HEADER_H + 16, size = SCR_H - top - 120, ax, d;
+        int n = prof.signed_in ? 3 : 2, top = HEADER_H + 16, size = SCR_H - top - 120, ax, d;
         char line[80], date[32];
         if (size > 360) size = 360;
         ax = M + size + 60;
@@ -258,7 +259,9 @@ void screen_profile(void)
                 if (sel == 0) create_profile(); else sign_in();
                 if (prof.signed_in) load_stats();
             } else {
-                if (sel == 0) change_avatar(); else sign_out();
+                if (sel == 0) change_avatar();
+                else if (sel == 1) screen_saves();
+                else sign_out();
             }
             sel = 0;
             ui_fade_in();

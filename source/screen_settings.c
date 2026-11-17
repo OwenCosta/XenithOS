@@ -14,12 +14,12 @@
 #include "theme.h"
 #include "ui.h"
 
-enum { S_VOLUME, S_UI_SOUNDS, S_BOOT, S_CONNECT, S_SHARING, S_NETWORK, S_SYSTEM, S_CONTROLLER, S_ABOUT,
-       S_SIGN_OUT, S_COUNT };
+enum { S_VOLUME, S_UI_SOUNDS, S_BOOT, S_CONNECT, S_SHARING, S_CLOUD_SAVES, S_NETWORK, S_SYSTEM, S_CONTROLLER,
+       S_ABOUT, S_SIGN_OUT, S_COUNT };
 
 static const char *const label[S_COUNT] = {
     "Volume", "Interface sounds", "Start-up chime", "Connect at start-up", "Show friends what I'm playing",
-    "Network", "System info", "Controller test", "About XenithOS", "Sign out",
+    "Cloud saves on this machine", "Network", "System info", "Controller test", "About XenithOS", "Sign out",
 };
 
 /* The rows shown: the ones about a profile only when someone's signed in. */
@@ -27,7 +27,7 @@ static int visible_rows(int *rows)
 {
     int i, n = 0;
     for (i = 0; i < S_COUNT; i++)
-        if (prof.signed_in || (i != S_SHARING && i != S_SIGN_OUT)) rows[n++] = i;
+        if (prof.signed_in || (i != S_SHARING && i != S_CLOUD_SAVES && i != S_SIGN_OUT)) rows[n++] = i;
     return n;
 }
 
@@ -40,6 +40,7 @@ static void value_of(int i, char *out, int n)
     case S_BOOT: snprintf(out, n, st.boot_sound ? "On" : "Off"); break;
     case S_CONNECT: snprintf(out, n, st.auto_connect ? "On" : "Off"); break;
     case S_SHARING: snprintf(out, n, prof.sharing ? "On" : "Off"); break;
+    case S_CLOUD_SAVES: snprintf(out, n, st.cloud_saves ? "On" : "Off"); break;
     case S_NETWORK: snprintf(out, n, net_is_up() ? net_ip() : "Not connected"); break;
     }
 }
@@ -273,7 +274,14 @@ void screen_settings(void)
         dx = ui_nav_x();
         if (d && sel + d >= 0 && sel + d < n) { sel += d; sfx(SFX_MOVE); }
         if (PRESSED(b)) {
-            if (changed) settings_save();
+            if (changed) {
+                settings_save();
+                if (cloud_saves_on() && net_is_up()) {      /* the ones that follow the profile go up */
+                    ui_busy_begin("Saving your settings", NULL);
+                    cloud_saves_sync("xenithos", 0);
+                    ui_busy_end();
+                }
+            }
             sfx(SFX_BACK);
             return;
         }
@@ -308,6 +316,21 @@ void screen_settings(void)
             case S_SHARING:
                 toggle_sharing();
                 ui_fade_in();
+                break;
+            case S_CLOUD_SAVES:
+                st.cloud_saves = !st.cloud_saves;
+                settings_save();
+                sfx(SFX_SELECT);
+                if (st.cloud_saves && cloud_ready("Settings")) {    /* catch up now */
+                    ui_busy_begin("Bringing your saves up to date", NULL);
+                    cloud_saves_sync(NULL, 1);
+                    ui_busy_end();
+                    ui_fade_in();
+                }
+                ui_toast_icon(ICON_CLOUD);
+                ui_toast(st.cloud_saves ? "Cloud saves are on" : "Cloud saves are off",
+                         st.cloud_saves ? "Your saves and settings follow you to this machine." :
+                         "This machine keeps its own. What's on XenithOS Cloud stays there.");
                 break;
             default:
                 if (!PRESSED(a)) break;
@@ -351,7 +374,7 @@ void screen_settings(void)
                 gfx_line(M + w - 30.0f, cy + 7.0f, M + w - 24.0f, (float)cy, 3, s ? 0xFFFFFF : C_DIM, 255);
             }
         }
-        ui_hints(rows[sel] == S_VOLUME ? "LEFT/RIGHT=Change;B=Back" : rows[sel] <= S_SHARING ? "A=Switch;B=Back" : "A=Open;B=Back");
+        ui_hints(rows[sel] == S_VOLUME ? "LEFT/RIGHT=Change;B=Back" : rows[sel] <= S_CLOUD_SAVES ? "A=Switch;B=Back" : "A=Open;B=Back");
         ui_end_frame();
     }
 }
