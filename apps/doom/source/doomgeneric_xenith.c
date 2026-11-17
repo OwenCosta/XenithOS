@@ -32,6 +32,7 @@
 
 #include "audio.h"
 #include "../../../shared/config.h"     /* doomgeneric has a config.h of its own */
+#include "cloudsave.h"
 #include "gfx.h"
 #include "handoff.h"
 #include "platform.h"
@@ -262,6 +263,47 @@ void DG_OnRead(void)
     if (loading && plat_time_us() - loading_drawn > 66000) loading_screen();
 }
 
+/* -------------------------------------------------------- achievements */
+#include "doomstat.h"                      /* the game's state, which they come from */
+#include "social.h"
+
+/* Earned from what the game is doing, looked at every frame: a level finished, with every monster
+ * in it beaten, a secret found, the end of an episode or of DOOM II. Never in the title screen's
+ * demos. They're kept on the stick and go to XenithOS Cloud when XenithOS next starts (on a PC,
+ * at the end of the level), and Doom's own message line says so. */
+static void earned(const char *id)
+{
+    static char line[64];
+    if (!social_earn(id)) return;
+    snprintf(line, sizeof line, "achievement: %s", social_achievement_name(id));
+    players[consoleplayer].message = line;
+}
+
+static void check_achievements(void)
+{
+    static int last = -1, secrets, last_time;
+    player_t *p = &players[consoleplayer];
+    if (demoplayback || !usergame || !prof.signed_in) { last = gamestate; return; }
+    if (gamestate == GS_LEVEL) {
+        /* A level starting, or a save loaded (the clock jumps): the secrets so far don't count */
+        if (last != GS_LEVEL || leveltime < last_time || leveltime > last_time + 35) secrets = p->secretcount;
+        else if (p->secretcount > secrets) {
+            secrets = p->secretcount;
+            earned("doom-secret");
+        }
+        last_time = leveltime;
+    } else if (last == GS_LEVEL && (gamestate == GS_INTERMISSION || gamestate == GS_FINALE)) {
+        earned("doom-exit");
+        if (totalkills > 0 && p->killcount >= totalkills) earned("doom-sweep");
+        if (gamestate == GS_FINALE) earned("doom-episode");       /* DOOM's episodes end straight into it */
+        social_flush();
+    } else if (gamestate == GS_FINALE && last != GS_FINALE && gamemode == commercial && gamemap == 30) {
+        earned("doom-episode");                                    /* DOOM II's last level */
+        social_flush();
+    }
+    last = gamestate;
+}
+
 /* ---------------------------------------------------------- doomgeneric */
 static int dst_x, dst_y, dst_w, dst_h;
 
@@ -281,6 +323,7 @@ void DG_Init(void)
 
 void DG_DrawFrame(void)
 {
+    check_achievements();
     gfx_blit_scaled(DG_ScreenBuffer, DOOMGENERIC_RESX, DOOMGENERIC_RESY, dst_x, dst_y, dst_w, dst_h);
     gfx_present();
     if (!first_frame_done) {
@@ -338,6 +381,27 @@ static const struct { const char *file, *name; } games[] = {
 };
 #define NGAMES ((int)(sizeof games / sizeof *games))
 #define CHOICE_FILE "uda:/doom/iwad.txt"
+
+/* Where DOOM keeps its settings and saves (m_config.c asks): the signed-in profile's own folder,
+ * uda:/doom/profiles/<gamertag>/, which XenithOS keeps in step with the profile's cloud saves
+ * before DOOM starts and after it closes, so two people on one console never mix saves. A
+ * guest uses uda:/doom/ as before. */
+static char config_dir[96] = "uda:/doom/";
+
+const char *DG_ConfigDir(void)
+{
+    return config_dir;
+}
+
+static void use_profile_folder(void)
+{
+    const struct cloud_app *a = cloud_app_find("doom");
+    config_load();                           /* XenithOS Cloud's address, for achievements */
+    profile_load();
+    if (a) profile_folder_start(a);          /* the first time: what's in uda:/doom/ comes along */
+    profile_folder("uda:/doom/", config_dir, sizeof config_dir);
+    make_folders(config_dir);
+}
 
 static char found_path[NGAMES][96];
 static int found_game[NGAMES], nfound;
@@ -486,6 +550,7 @@ int main(int argc, char **argv)
     snprintf(wad, sizeof wad, "%s", found_path[pick]);
 
     mkdir("uda:/doom", 0777);
+    use_profile_folder();
     atexit(back_to_xenith);       /* Doom's Quit, and its fatal errors, return to XenithOS */
 
     doomgeneric_Create(3, args);

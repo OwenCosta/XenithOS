@@ -1,7 +1,8 @@
 #!/bin/bash
 # Test music for the Music app, all synthesized here (no recordings, nothing copyrighted):
 # little tunes from sine and square waves, as MP3, FLAC, Ogg Vorbis and WAV, with tags, covers
-# inside the files and next to them, odd rates, accented names, and one broken file.
+# inside the files and next to them, odd rates, accented names, and one broken file. Needs only
+# ffmpeg (with lame and vorbis).
 #   make-music.sh <folder>
 set -e
 out="${1:-$HOME/.xsim-music}"
@@ -15,30 +16,22 @@ tune() {   # tune <seconds> <base Hz> <step pattern seed>
     echo "'0.22*sin(2*PI*($base*pow(2,(mod(floor(t*4)*$seed,7))/12))*t)*(1-0.6*mod(t*4,1))+0.06*sin(2*PI*($base/2)*t)'"
 }
 
-cover() {   # cover <file> <r> <g> <b> <text>
-    python3 - "$@" <<'EOF'
-import sys
-from PIL import Image, ImageDraw
-path, r, g, b, text = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), sys.argv[5]
-im = Image.new("RGB", (600, 600), (r, g, b))
-d = ImageDraw.Draw(im)
-d.ellipse([330, 330, 760, 760], fill=(min(r + 50, 255), min(g + 50, 255), min(b + 50, 255)))
-d.rectangle([40, 40, 260, 70], fill=(240, 240, 240))
-d.rectangle([40, 90, 180, 110], fill=(200, 200, 200))
-d.text((40, 140), text, fill=(250, 250, 250))
-im.save(path, quality=90)
-EOF
+# A flat cover: a colour, two light bars and a lighter square in the corner.
+cover() {   # cover <file> <colour, 0xRRGGBB> <corner colour>
+    ffmpeg -loglevel error -y -f lavfi -i "color=c=$2:s=600x600" -frames:v 1 \
+        -vf "drawbox=x=40:y=40:w=220:h=30:color=0xF0F0F0:t=fill,drawbox=x=40:y=90:w=140:h=20:color=0xC8C8C8:t=fill,drawbox=x=360:y=360:w=240:h=240:color=$3:t=fill" \
+        "$1"
 }
 
 # 1. MP3s, 44.1 kHz stereo, ID3v2.3 tags, the cover inside the first two.
 mkdir -p "The Test Tones/Night Signals"
-cover /tmp/night.png 24 40 92 "NIGHT SIGNALS"
+cover "$out/.night.png" 0x18285C 0x4A5A8E
 for i in 1 2 3 4; do
     f="The Test Tones/Night Signals/0$i Signal $i.mp3"
     titles=("" "Lighthouse" "Static Bloom" "Far Away Ping" "Last Transmission")
     if [ $i -le 2 ]; then
         ffmpeg -loglevel error -f lavfi -i "aevalsrc=$(tune 8 330 $((i+1))):s=44100:d=8,aformat=channel_layouts=stereo" \
-            -i /tmp/night.png -map 0:a -map 1:v -c:a libmp3lame -b:a 128k -c:v png -id3v2_version 3 \
+            -i "$out/.night.png" -map 0:a -map 1:v -c:a libmp3lame -b:a 128k -c:v png -id3v2_version 3 \
             -metadata title="${titles[$i]}" -metadata artist="The Test Tones" -metadata album="Night Signals" \
             -metadata album_artist="The Test Tones" -metadata track="$i/4" -disposition:v attached_pic "$f"
     else
@@ -50,7 +43,7 @@ done
 
 # 2. FLAC, 48 kHz, Vorbis comments, a cover.jpg in the folder.
 mkdir -p "Ada Sine/Paper Boats"
-cover "Ada Sine/Paper Boats/cover.jpg" 120 52 30 "PAPER BOATS"
+cover "Ada Sine/Paper Boats/cover.jpg" 0x783418 0xAA6648
 n=1
 for t in "Fold" "Float" "Sink Slowly"; do
     ffmpeg -loglevel error -f lavfi -i "aevalsrc=$(tune 7 392 $((n+2))):s=48000:d=7,aformat=channel_layouts=stereo" \

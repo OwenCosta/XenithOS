@@ -1,0 +1,33 @@
+# The downloads queue on the Xbox. X picks DOOM (which comes with Freedoom), Tube and Photos,
+# START downloads them one after another, and B stops Tube midway (sim/store/between.py sends it
+# slowly); the rest carry on. Then the Store shows what was installed.
+# Run by sim/store/test-store.sh, with XSIM_NET_TIME=1 so time passes during downloads.
+wait 200
+press right
+press a
+wait 90
+press down
+press x
+press down
+press x
+press down
+press x
+wait 10
+shot queue_picked
+press start
+wait 20
+shot queue_confirm
+press a
+wait 90
+shot queue_running
+press b
+wait 40
+shot queue_stopped
+wait 150
+shot queue_done
+press a
+wait 30
+shot store_after_queue
+press b
+wait 30
+quit

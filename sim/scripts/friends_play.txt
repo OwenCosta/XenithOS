@@ -1,0 +1,15 @@
+# Friends, on the second console as a PC (Bob Two): Minecraft from "Jump back in", then Return
+# home in the guide, which leaves it running. Friends see it as what he's playing. Part of
+# sim/social/test-friends.sh, with XSIM_KIND=pc XSIM_GUIDE=1 XSIM_OTHER=minecraft.
+wait 236
+press down
+press right
+wait 20
+press a
+wait 45
+press down
+wait 10
+press a
+wait 60
+shot fp_home_running
+quit

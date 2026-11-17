@@ -10,7 +10,9 @@ Public
   GET  /v1/ping                       pong
   GET  /v1/lan                        key=value: id (this server's), and lan, its address on its
                                       own network when XENITH_LAN_ADDR is set. Consoles there use
-                                      that instead, once it answers with the same id.
+                                      that instead, once it answers with the same id. And https,
+                                      its HTTPS address when XENITH_PUBLIC_HTTPS is set, which PCs
+                                      and Raspberry Pis use the same way (the Xbox has no TLS).
   GET  /v1/status                     key=value server stats (does not log a console)
   GET  /v1/hello?name=Owen&ver=0.5    key=value: motd, players, online now (logs the console)
   GET  /v1/news                       id|unix_time|text   (newest first), XenithOS news
@@ -24,13 +26,30 @@ Public
                                       reply (store_bundle), for 0.5.7 consoles
   GET  /v1/store/file/<id>            the file bytes
   GET  /v1/store/icon/<id>.ximg|.png  the item's thumbnail
+                                      With XENITH_STORE_KEY, all of these but the files come with
+                                      an X-Xenith-Sig header, XenithOS Cloud's signature, which
+                                      consoles check (see "Store signatures" below)
   GET  /v1/scores/<game>              rank|name|score|avatar
-  GET  /v1/players                    name|avatar|joined|volt_best   (most recently seen first)
+  GET  /v1/players                    name|avatar|joined|volt_best|achievements   (most recently seen first)
   GET  /v1/players/<name>             key=value
+  GET  /v1/players/<name>/achievements  id|seconds since it was earned   (newest first)
+  GET  /v1/achievements               id|app|name|how it's earned|how many profiles have it
+  GET  /v1/achievements/recent        name|avatar|id|seconds since   (the newest anyone earned)
   GET  /v1/inbox?key=<console key>    the news, for 0.4 consoles
   GET  /download/xenithos-xbox360.zip XenithOS, its apps and a config, ready for a USB stick
   GET  /download/config.txt           a config with this server's address
   GET  /download/xenithos-source.tar.gz, /install.sh   for PCs and Raspberry Pis
+
+Crash reports (from XenithOS when it or an app crashed, source/crash_report.c)
+  POST /v1/crash                      program, version, platform, what, where, report (the crash
+                                      file), and token only when the person added their gamertag
+                                      -> ok, id. Kept like feedback (and the report as
+                                      crashes/<id>.txt in the state folder), and passed on to
+                                      Discord the first time each kind of crash comes in a day
+                                      (feedback-webhooks.txt: "crash=<webhook>", else bug's)
+  GET  /v1/crash                      admin: id|time|program|version|platform|what|where|from|kind,
+                                      newest first (kind: the same crash has the same one)
+  GET  /v1/crash/<id>                 admin: that report
 
 Tube (YouTube; needs a signed-in profile)
   POST /v1/tube/search                token, q          -> id|title|channel|seconds
@@ -43,10 +62,38 @@ Tube (YouTube; needs a signed-in profile)
                                                         error=: it couldn't be played)
   GET  /v1/tube/stop?s=<session>
 
+Friends (form posts with a profile's token; see Friends)
+  POST /v1/hello                      token, ver, app (what's running), hold=1 (handing over to an
+                                      app that can't say hello itself), mc (HostMC server's address,
+                                      "" when it isn't reachable), bye=1 (going offline)
+                                      -> as GET /v1/hello, plus news_id, news_text, sharing, asks,
+                                      ask (newest asker), friends_on, on (friends on, comma-separated)
+  POST /v1/friends                    token  -> name|avatar|rel|online|app|app name|seconds since
+                                      seen|HostMC address   (rel: friend, in, out)
+  POST /v1/friends/add                token, name  -> now (asked, or friends if they'd asked you)
+  POST /v1/friends/accept             token, name
+  POST /v1/friends/remove             token, name  (a friend, a request to you, or your own)
+  POST /v1/friends/sharing            token, on  (show friends what you play and your server)
+
+Cloud saves (a profile's saves and settings, the same on every machine; see CloudSaves)
+  POST /v1/saves                      token[, app]  -> used, limit, files_limit, then
+                                      file=app|name|rev|size|sha256|seconds since|from|label
+                                      and gone=app|name|rev|seconds since (deleted)
+  POST /v1/saves/get                  token, app, name  -> "rev=&size=&sha256=" line, then the file
+  POST /v1/saves/put                  a form line (token, app, name, base: the revision the copy
+                                      was last in step with, force, from, label), "\n", the file
+                                      -> rev, size, sha256; 409 with rev (and sha256, from, label,
+                                      or gone) when it changed elsewhere since base
+  POST /v1/saves/delete               token, app[, name], or all=1  -> deleted
+
+Achievements (earned on the machine; see Achievements)
+  POST /v1/achievements/earn          token, ids (comma-separated)  -> new (the ones it didn't have), count
+
 Accounts (form posts; errors come back as "error=<message>")
   POST /v1/accounts/create            name, pin, avatar   -> name, token, avatar, joined
   POST /v1/accounts/login             name, pin           -> name, token, avatar, joined
-  POST /v1/accounts/me                token               -> name, avatar, joined, volt_best, volt_rank
+  POST /v1/accounts/me                token               -> name, avatar, joined, volt_best, volt_rank,
+                                                             sharing, achievements
   POST /v1/accounts/avatar            token, avatar
   POST /v1/accounts/logout            token
   POST /v1/scores/<game>              token, score  (or legacy: name, score, for names without a profile)
@@ -61,6 +108,10 @@ Admin (header X-Xenith-Key: <XENITH_ADMIN_KEY>)
   GET  /v1/feedback                   time|kind|from|version|platform|text, newest first
 
 Command line
+  xenith_cloud.py store-key new <file>   make the Store's signing key; prints its public half
+  xenith_cloud.py store-key show <file>  the public half of a key file
+  xenith_cloud.py store-key check <host:port or URL> [public key]   check a running server's
+                                      Store signatures (default: the keys in source/store_key.h)
   xenith_cloud.py send "text"         message the console inbox (through the running server)
   xenith_cloud.py motd "text"         set the message of the day
   xenith_cloud.py --selftest          built-in tests (no network, temp dir)
@@ -71,9 +122,15 @@ Environment
                      connection with a PROXY protocol v1 line naming the console's own address,
                      so XenithOS Cloud can run behind a home connection while consoles keep a
                      public address. Off when unset; only the relay should reach this port.
+  XENITH_EDGE_PORT   a port for Cloudflare's tunnel (cloudflared) to bring HTTPS requests to.
+                     Cloudflare names each console's own address in CF-Connecting-IP, which is
+                     used the way the relay's PROXY line is; a request without one gets no
+                     answer. Off when unset; only cloudflared should reach this port.
   XENITH_STATE_DIR   default ./state      (state.json lives here)
   XENITH_STORE_DIR   default ./store      (store.json + the files it lists, flathub.json, steam.json,
                                           and <id>.ximg / <id>.png thumbnails)
+  XENITH_STORE_KEY   the file with the Store's signing key (store-key new). It must be outside the
+                     store, web, download and state folders. Unset: Store replies go out unsigned
   XENITH_WEB_DIR     default ./web        (index.html and static/)
   XENITH_ADMIN_KEY   admin key; admin routes are off when unset
   XENITH_CONSOLE_KEY when set, the old /v1/inbox route needs ?key=<this>
@@ -81,6 +138,9 @@ Environment
                      address each download was requested from
   XENITH_LAN_ADDR    the private "a.b.c.d:port" consoles on this server's own network can reach
                      it at directly, skipping the relay (/v1/lan). Off when unset.
+  XENITH_PUBLIC_HTTPS  the name (with :port when it isn't 443) PCs and Raspberry Pis can reach
+                     this server at over HTTPS, such as a Cloudflare tunnel's hostname whose
+                     service is XENITH_EDGE_PORT (/v1/lan). Off when unset.
   XENITH_DOWNLOAD_DIR default ./downloads   (install.sh, xenithos-source.tar.gz)
   XENITH_YTDLP, XENITH_FFMPEG  paths for Tube (default: found on PATH); Tube is off without them
   XENITH_TUBE_STREAMS default 3: videos playing at once, across everyone
@@ -104,6 +164,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -131,6 +192,7 @@ AVATAR_COUNTS = [10, 14, 13, 8, 10, 8, 12, 11, 12, 6, 5, 5, 3]     # "2" + 13 di
 ONLINE_WINDOW = 15 * 60        # "online now": seen in the last 15 minutes
 PUBLIC_ADDR_RE = re.compile(r"^[A-Za-z0-9.-]{1,64}:[0-9]{1,5}$")
 LAN_ADDR_RE = re.compile(r"^([0-9]{1,3}(?:\.[0-9]{1,3}){3}):([0-9]{1,5})$")
+HTTPS_ADDR_RE = re.compile(r"^([A-Za-z0-9.-]{1,64})(?::([0-9]{1,5}))?$")
 PIN_RE = re.compile(r"^[0-9]{4,8}$")
 STATIC_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}\.(png|js|css|svg|ico|webp|wav)$")
 KINDS = {"app", "data", "system", "pc"}      # pc: XenithOS's source, which PCs and Pis build themselves
@@ -188,7 +250,10 @@ def feedback_hooks(state_dir):
                     hooks[key] = url
     except OSError:
         return {}
-    return {kind: hooks.get(kind) or hooks.get("all") for kind in FEEDBACK_KINDS if hooks.get(kind) or hooks.get("all")}
+    found = {kind: hooks.get(kind) or hooks.get("all") for kind in FEEDBACK_KINDS if hooks.get(kind) or hooks.get("all")}
+    if hooks.get("crash") or found.get("bug"):          # crash reports: their own, else the bug reports'
+        found["crash"] = hooks.get("crash") or found["bug"]
+    return found
 
 
 def send_feedback(hook, kind, text, who, version, platform):
@@ -205,6 +270,60 @@ def send_feedback(hook, kind, text, who, version, platform):
         urllib.request.urlopen(req, timeout=15).close()
     except (OSError, ValueError) as e:
         log(f"feedback: Discord didn't take it: {e}")
+
+
+# ---------------------------------------------------------------------- crash reports
+
+# From XenithOS when it or one of its apps crashed (source/crash_report.c, shared/crash.h): sent by
+# themselves once the person set Settings > Send crash reports to "Always", or when they said yes.
+# Each one's details are kept in the state like feedback, and the report itself (the crash file:
+# where it stopped and the stack) as crashes/<id>.txt beside state.json, so that stays small. One
+# goes on to Discord the first time its kind of crash comes in each day, so a crash on every start
+# doesn't flood the channel. The sender's IP address isn't kept, and a gamertag only comes with one
+# when the person chose to add it.
+CRASH_KEEP = 300
+CRASH_MAX_BODY = 48 * 1024           # the report form-encoded, up to 3 bytes a character
+CRASH_TEXT_MAX = 12000
+CRASH_POST_EVERY = 24 * 3600
+CRASH_PROGRAM_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+
+
+def clean_report(text, limit=CRASH_TEXT_MAX):
+    """Lines of printable ASCII (tabs as spaces), cut at a line once it's over limit."""
+    lines = ["".join(ch if 32 <= ord(ch) < 127 else "    " if ch == "\t" else "?" for ch in line).rstrip()
+             for line in str(text).replace("\r", "").split("\n")]
+    out = "\n".join(lines).strip("\n")
+    if len(out) > limit:
+        out = out[:limit].rsplit("\n", 1)[0]
+    return out
+
+
+def crash_kind(program, version, what, where):
+    """The same crash from any machine: program, version, what and where, without the addresses,
+    which change from one start to the next."""
+    where = re.sub(r"0x[0-9a-fA-F]+", "", where)
+    return hashlib.sha256(f"{program}|{version}|{what}|{where}".encode()).hexdigest()[:12]
+
+
+def send_crash(hook, entry, text):
+    """Posts one to Discord: what and where, and the report's stack in names when it has them."""
+    where_part = text.split("--- where\n", 1)[1].split("\n--- ", 1)[0] if "--- where\n" in text else ""
+    shown = (where_part.strip() or text)[:1500].replace("```", "'''")
+    payload = {"username": "XenithOS crash reports", "allowed_mentions": {"parse": []},
+               "embeds": [{"title": f"{entry['program']} crashed", "color": 0xE50914,
+                           "description": f"**{entry['what']}**\n{entry['where']}\n```\n{shown}\n```",
+                           "fields": [{"name": "From", "value": entry["from"], "inline": True},
+                                      {"name": "XenithOS", "value": f"{entry['version']} on {entry['platform']}",
+                                       "inline": True},
+                                      {"name": "Report", "value": f"#{entry['id']} (GET /v1/crash/{entry['id']})",
+                                       "inline": True}],
+                           "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(entry["t"]))}]}
+    req = urllib.request.Request(hook, data=json.dumps(payload).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", "User-Agent": "XenithOS-Cloud/1"})
+    try:
+        urllib.request.urlopen(req, timeout=15).close()
+    except (OSError, ValueError) as e:
+        log(f"crash report: Discord didn't take it: {e}")
 
 
 def check_gamertag(name):
@@ -257,6 +376,18 @@ class RateLimit:
             return True
 
 
+def rate_key(ip):
+    """What rate limits count by: the address, or an IPv6 address's /64, which is one home or
+    phone the way an IPv4 address is (and has more addresses than any limit)."""
+    try:
+        a = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if a.version == 6 and not a.ipv4_mapped:
+        return str(ipaddress.ip_network(f"{a}/64", strict=False))
+    return ip
+
+
 # ---------------------------------------------------------------------- state
 
 
@@ -286,6 +417,45 @@ class State:
                          "version": version, "platform": platform})
             del kept[:-FEEDBACK_KEEP]
             self.save()
+
+    # -------------------------------------------------------------- crash reports
+    def add_crash(self, entry, text):
+        """Keeps one (entry: program, version, platform, what, where, from, kind) and its report.
+        Returns the entry with its id and time, and whether it's the first of its kind today."""
+        folder = os.path.join(os.path.dirname(self.path), "crashes")
+        with self.lock:
+            cid = self.data.get("crash_next", 1)
+            self.data["crash_next"] = cid + 1
+            entry = dict(entry, id=cid, t=int(time.time()))
+            os.makedirs(folder, exist_ok=True)
+            with open(os.path.join(folder, f"{cid}.txt"), "w", encoding="ascii") as f:
+                f.write(text + "\n")
+            kept = self.data.setdefault("crashes", [])
+            kept.append(entry)
+            for old in kept[:-CRASH_KEEP]:
+                try:
+                    os.remove(os.path.join(folder, f"{old['id']}.txt"))
+                except OSError:
+                    pass
+            del kept[:-CRASH_KEEP]
+            posted = self.data.setdefault("crash_posted", {})
+            for kind in [k for k, t in posted.items() if entry["t"] - t >= CRASH_POST_EVERY]:
+                del posted[kind]
+            first = entry["kind"] not in posted
+            if first:
+                posted[entry["kind"]] = entry["t"]
+            self.save()
+            return entry, first
+
+    def crash_report(self, cid):
+        """The report kept as crashes/<cid>.txt, or None."""
+        if not str(cid).isdigit():
+            return None
+        try:
+            with open(os.path.join(os.path.dirname(self.path), "crashes", f"{int(cid)}.txt"), encoding="ascii") as f:
+                return f.read()
+        except (OSError, ValueError):
+            return None
 
     # -------------------------------------------------------------- inbox, motd
     def set_motd(self, text):
@@ -431,6 +601,7 @@ class Store:
         self.dir = store_dir
         self.cache = {}   # path -> (mtime, size, sha256)
         self.lock = threading.Lock()
+        self.key = None   # StoreKey: what the Store serves goes out signed with it
 
     def _digest(self, path):
         st = os.stat(path)
@@ -528,6 +699,427 @@ class Store:
             return None
         path = os.path.join(self.dir, f"{iid}.{ext}")
         return path if os.path.isfile(path) else None
+
+
+# ---------------------------------------------------------------------- friends
+
+# Friends are asked for by gamertag and only become friends once the other person accepts.
+# Friends see each other's presence: whether they're on, what they're playing (unless they
+# turned that off in Settings) and the address of a HostMC server of theirs that people on the
+# internet can reach. Presence is kept in memory only, so what someone plays is never written
+# to disk, and it's gone once they go offline or turn sharing off.
+FRIENDS_MAX = 100                # friends one profile can have
+ASKS_WAITING_MAX = 50            # requests waiting on one profile at a time
+ASKS_PER_HOUR = 20               # new requests one profile can send in an hour
+DECLINED_WAIT_S = 7 * 86400      # after a "no thanks", the same person can't ask again for a week
+PRESENCE_S = 15 * 60             # a hello keeps someone online this long
+PRESENCE_HOLD_S = 60 * 60        # or this long when XenithOS hands over to an app that can't say hello
+SEEN_SAVE_S = 10 * 60            # hellos write last_seen to disk at most this often
+MC_KEEP_S = 24 * 3600            # a HostMC server's address is shown this long after HostMC last said so
+MC_ADDR_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,94}[A-Za-z0-9])?(?::[0-9]{1,5})?$")
+OWN_APPS = {"xenithos": "XenithOS", "volt": "VOLT", "doom": "DOOM", "tube": "Tube", "photos": "Photos",
+            "music": "Music", "hostmc": "HostMC"}
+
+
+class Friends:
+    def __init__(self, state, store):
+        self.state, self.store = state, store
+        self.presence = {}               # profile key -> {"t", "until", "app"}; never saved
+        self.asks = RateLimit(ASKS_PER_HOUR, 3600)
+        self.names = (-1e9, {})          # (when, app id -> name) from the Store's lists
+        self.clock = time.time
+
+    def app_names(self):
+        """App ids friends can be seen playing, with their names: XenithOS's own apps and what
+        the Store lists (its apps, Flathub's, and Steam's games, also as steam-<app id>, the way
+        PCs name Steam games). Read again every few minutes."""
+        when, names = self.names
+        if time.monotonic() - when < 300:
+            return names
+        names = dict(OWN_APPS)
+        try:
+            names.update({i["id"]: i["name"] for i in self.store.items() if i["kind"] == "app"})
+            names.update({a["id"]: a["name"] for a in self.store.flathub()})
+            for g in self.store.steam():
+                names[g["id"]] = names[f"steam-{g['appid']}"] = g["name"]
+        except (OSError, ValueError):
+            pass
+        self.names = (time.monotonic(), names)
+        return names
+
+    @staticmethod
+    def app_name(names, app):
+        if not app:
+            return ""
+        return names.get(app) or ("a game on Steam" if re.match(r"^steam-[0-9]{1,10}$", app) else "")
+
+    def online(self, key, now):
+        p = self.presence.get(key)
+        return p if p and p["until"] > now else None
+
+    def hello(self, acc, ip, app="", hold=False, mc=None, bye=False):
+        """A signed-in console or app says it's here, and what it's running. mc: the address of
+        the profile's HostMC server ("" when it isn't reachable any more, None: not about it)."""
+        names, now, key = self.app_names(), self.clock(), acc["name"].lower()
+        with self.state.lock:
+            sharing = acc.get("sharing", True)
+            if len(self.presence) > 500:          # the ones that went quiet: nothing to keep
+                for k in [k for k, p in self.presence.items() if p["until"] < now]:
+                    del self.presence[k]
+            if bye:
+                self.presence.pop(key, None)
+            else:
+                shown = app if sharing and self.app_name(names, app) else ""
+                self.presence[key] = {"t": now, "until": now + (PRESENCE_HOLD_S if hold else PRESENCE_S),
+                                      "app": shown}
+                self.state.data["consoles"][acc["name"]] = {"t": int(now), "ip": ip}
+            save = now - acc.get("last_seen", 0) > SEEN_SAVE_S
+            if mc is not None:
+                old = acc.get("mc") or {}
+                if mc and sharing:
+                    save = save or old.get("addr") != mc or now - old.get("t", 0) > 3600
+                    acc["mc"] = {"addr": mc, "t": int(now)}
+                elif acc.pop("mc", None):
+                    save = True
+            acc["last_seen"] = int(now)
+            if save:
+                self.state.save()
+
+    def set_sharing(self, acc, on):
+        with self.state.lock:
+            acc["sharing"] = bool(on)
+            if not on:
+                acc.pop("mc", None)
+                p = self.presence.get(acc["name"].lower())
+                if p:
+                    p["app"] = ""
+            self.state.save()
+
+    def summary(self, acc):
+        """For a console's regular hello: requests waiting, and which friends are on."""
+        now, accounts = self.clock(), self.state.data["accounts"]
+        with self.state.lock:
+            asks = sorted((t, k) for k, t in acc.get("asks_in", {}).items() if k in accounts)
+            on = sorted((accounts[k]["name"] for k in acc.get("friends", {})
+                         if k in accounts and self.online(k, now)), key=str.lower)
+        return {"asks": len(asks), "ask": accounts[asks[-1][1]]["name"] if asks else "",
+                "friends_on": len(on), "on": ",".join(on[:20])}
+
+    def rows(self, acc):
+        """name|avatar|rel|online|app|app name|seconds since seen|HostMC address, one a line:
+        requests to you first, then friends who are on, friends who aren't (most recently seen
+        first), then your own requests. rel is friend, in (they asked you) or out (you asked).
+        Only friends get presence."""
+        names, now, accounts = self.app_names(), self.clock(), self.state.data["accounts"]
+        asking, on, off, asked = [], [], [], []
+        with self.state.lock:
+            for key, t in acc.get("asks_in", {}).items():
+                o = accounts.get(key)
+                if o:
+                    asking.append((-t, f"{o['name']}|{o['avatar']}|in|0|||0|\n"))
+            for key in acc.get("friends", {}):
+                o = accounts.get(key)
+                if not o:
+                    continue
+                p, sharing = self.online(key, now), o.get("sharing", True)
+                app = p["app"] if p and sharing else ""
+                mc = (o.get("mc") or {}) if sharing else {}
+                addr = mc.get("addr", "") if now - mc.get("t", 0) < MC_KEEP_S else ""
+                seen = 0 if p else max(0, int(now - o.get("last_seen", 0)))
+                line = f"{o['name']}|{o['avatar']}|friend|{1 if p else 0}|{app}|{self.app_name(names, app)}|{seen}|{addr}\n"
+                (on if p else off).append((o["name"].lower() if p else seen, line))
+            for key, t in acc.get("asks_out", {}).items():
+                o = accounts.get(key)
+                if o:
+                    asked.append((-t, f"{o['name']}|{o['avatar']}|out|0|||0|\n"))
+        return "".join(line for group in (asking, on, off, asked) for _, line in sorted(group))
+
+    # ------------------------------------------------------------- asking
+    def add(self, acc, name):
+        """Ask someone to be friends, or say yes if they asked first. (status, message, extra)."""
+        me, key = acc["name"].lower(), (name or "").strip().lower()
+        with self.state.lock:
+            other = self.state.data["accounts"].get(key)
+            if not other:
+                return 404, f"There's no profile called {clean(name, 15) or 'that'}.", {}
+            if other is acc:
+                return 400, "That's you. Ask someone else.", {}
+            if key in acc.get("friends", {}):
+                return 409, f"You're friends with {other['name']} already.", {}
+            if key in acc.get("asks_in", {}):
+                return self._befriend(acc, other)
+            if key in acc.get("asks_out", {}):
+                return 409, f"You've asked {other['name']} already. They'll see it next time they're on.", {}
+            if len(acc.get("friends", {})) >= FRIENDS_MAX:
+                return 409, f"You have {FRIENDS_MAX} friends, the most there can be. Remove one first.", {}
+            if len(other.get("friends", {})) >= FRIENDS_MAX:
+                return 409, f"{other['name']} has as many friends as there can be.", {}
+            if other.get("declined", {}).get(me, 0) > self.clock():
+                return 403, f"You can't ask {other['name']} again yet.", {}
+            other.get("declined", {}).pop(me, None)
+            if len(other.get("asks_in", {})) >= ASKS_WAITING_MAX:
+                return 429, f"{other['name']} has a lot of requests waiting. Try again another day.", {}
+            if not self.asks.allow(me):
+                return 429, "That's a lot of requests at once. Try again in an hour.", {}
+            now = int(self.clock())
+            acc.setdefault("asks_out", {})[key] = now
+            other.setdefault("asks_in", {})[me] = now
+            self.state.save()
+            return 200, "", {"now": "asked", "name": other["name"]}
+
+    def _befriend(self, acc, other):
+        me, key, now = acc["name"].lower(), other["name"].lower(), int(self.clock())
+        for a, b in ((acc, key), (other, me)):
+            for k in ("asks_in", "asks_out", "declined"):
+                a.get(k, {}).pop(b, None)
+            a.setdefault("friends", {})[b] = now
+        self.state.save()
+        return 200, "", {"now": "friends", "name": other["name"]}
+
+    def accept(self, acc, name):
+        key = (name or "").strip().lower()
+        with self.state.lock:
+            other = self.state.data["accounts"].get(key)
+            if not other or key not in acc.get("asks_in", {}):
+                return 404, "That request isn't there any more.", {}
+            if len(acc.get("friends", {})) >= FRIENDS_MAX:
+                return 409, f"You have {FRIENDS_MAX} friends, the most there can be. Remove one first.", {}
+            if len(other.get("friends", {})) >= FRIENDS_MAX:
+                return 409, f"{other['name']} has as many friends as there can be.", {}
+            return self._befriend(acc, other)
+
+    def remove(self, acc, name):
+        """Stop being friends, say no to a request, or take back your own."""
+        me, key = acc["name"].lower(), (name or "").strip().lower()
+        with self.state.lock:
+            other = self.state.data["accounts"].get(key) or {}
+            if key in acc.get("friends", {}):
+                acc["friends"].pop(key, None)
+                other.get("friends", {}).pop(me, None)
+                now = "removed"
+            elif key in acc.get("asks_in", {}):
+                acc["asks_in"].pop(key, None)
+                other.get("asks_out", {}).pop(me, None)
+                declined = acc.setdefault("declined", {})
+                cutoff = self.clock()
+                for k in [k for k, until in declined.items() if until < cutoff]:
+                    del declined[k]
+                declined[key] = int(cutoff + DECLINED_WAIT_S)
+                now = "declined"
+            elif key in acc.get("asks_out", {}):
+                acc["asks_out"].pop(key, None)
+                other.get("asks_in", {}).pop(me, None)
+                now = "cancelled"
+            else:
+                return 404, "You're not friends, and there's no request.", {}
+            self.state.save()
+            return 200, "", {"now": now, "name": other.get("name", name)}
+
+
+# ---------------------------------------------------------------------- cloud saves
+
+# DOOM's saves and apps' settings follow a profile between machines. Each file is kept as it came,
+# in the state folder (saves/<the profile's folder>/<app>/<name>); state.json has its revision,
+# size, SHA-256, when it came, the machine it came from and a label (a DOOM save's name). A machine
+# says which revision its copy was last in step with, and a change based on an older one is
+# refused (409) instead of replacing what another machine sent: XenithOS on that machine asks
+# which one to keep. Deleting leaves a marker with the next revision, so a machine that still has
+# a copy keeps it without sending it back.
+SAVES_LIMIT = 4 * 1024 * 1024    # one profile's files together
+SAVE_MAX = 512 * 1024            # one file
+SAVE_FILES_MAX = 64              # one profile's files
+SAVE_GONE_KEEP = 200             # deletion markers kept for each profile
+SAVE_PUTS_PER_MIN = 30           # uploads, per profile
+SAVE_GETS_PER_MIN = 120          # downloads, per profile
+SAVE_APP_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,15}$")
+SAVE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,47}$")
+
+
+class CloudSaves:
+    def __init__(self, state):
+        self.state = state
+        self.dir = os.path.join(os.path.dirname(state.path), "saves")
+        self.puts = RateLimit(SAVE_PUTS_PER_MIN, 60)
+        self.gets = RateLimit(SAVE_GETS_PER_MIN, 60)
+        self.clock = time.time
+
+    @staticmethod
+    def valid(app, name):
+        return bool(SAVE_APP_RE.match(app or "") and SAVE_NAME_RE.match(name or ""))
+
+    def path(self, acc, app, name):
+        """Where a profile's file is kept: a folder named by a random id, not the gamertag."""
+        with self.state.lock:
+            if not acc.get("id"):
+                acc["id"] = secrets.token_hex(8)
+                self.state.save()
+            return os.path.join(self.dir, acc["id"], app, name)
+
+    @staticmethod
+    def used(acc, leaving_out=None):
+        return sum(m["size"] for k, m in acc.get("saves", {}).items() if not m.get("gone") and k != leaving_out)
+
+    def listing(self, acc, app=""):
+        """used, limit and files_limit, then a line for each file:
+        file=app|name|rev|size|sha256|seconds since|from|label, and for each deletion marker
+        gone=app|name|rev|seconds since."""
+        now = self.clock()
+        with self.state.lock:
+            lines = [f"used={self.used(acc)}\nlimit={SAVES_LIMIT}\nfiles_limit={SAVE_FILES_MAX}\n"]
+            for key, m in sorted(acc.get("saves", {}).items()):
+                a, n = key.split("/", 1)
+                if app and a != app:
+                    continue
+                age = max(0, int(now - m["t"]))
+                if m.get("gone"):
+                    lines.append(f"gone={a}|{n}|{m['rev']}|{age}\n")
+                else:
+                    lines.append(f"file={a}|{n}|{m['rev']}|{m['size']}|{m['sha256']}|{age}|{m['from']}|{m['label']}\n")
+        return "".join(lines)
+
+    def get(self, acc, app, name):
+        """(metadata, bytes), or None."""
+        with self.state.lock:
+            m = acc.get("saves", {}).get(f"{app}/{name}")
+            if not m or m.get("gone"):
+                return None
+            try:
+                with open(self.path(acc, app, name), "rb") as f:
+                    return dict(m), f.read(SAVE_MAX + 1)
+            except OSError:
+                return None
+
+    def put(self, acc, app, name, data, base, force=False, sent_from="", label=""):
+        """(status, message, metadata). base: the revision the machine's copy was last in step
+        with, 0 if it never had one. force: replace whatever is there (the player chose it)."""
+        key = f"{app}/{name}"
+        with self.state.lock:
+            saves = acc.setdefault("saves", {})
+            cur = saves.get(key)
+            rev = cur["rev"] if cur else 0
+            if not force and base != rev:
+                return 409, "That changed on another machine since this one last had it.", cur
+            if sum(1 for k, m in saves.items() if not m.get("gone") and k != key) >= SAVE_FILES_MAX:
+                return 413, f"XenithOS Cloud keeps {SAVE_FILES_MAX} files for each profile. Delete some in Profile.", cur
+            if self.used(acc, key) + len(data) > SAVES_LIMIT:
+                return 413, (f"Your cloud saves are full: {SAVES_LIMIT // 1048576} MB is the most. "
+                             "Delete some in Profile, Cloud saves."), cur
+            path = self.path(acc, app, name)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = f"{path}.{secrets.token_hex(4)}.part"
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, path)
+            saves[key] = {"rev": rev + 1, "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+                          "t": int(self.clock()), "from": clean(sent_from, 24), "label": clean(label, 24)}
+            self.state.save()
+            return 200, "", saves[key]
+
+    def delete(self, acc, app="", name=""):
+        """Deletes one file (app and name), an app's files (app), or all of them. Returns how many."""
+        now, n = int(self.clock()), 0
+        with self.state.lock:
+            saves = acc.get("saves", {})
+            for key, m in list(saves.items()):
+                a, nm = key.split("/", 1)
+                if m.get("gone") or (app and a != app) or (name and nm != name):
+                    continue
+                try:
+                    os.remove(self.path(acc, a, nm))
+                except OSError:
+                    pass
+                saves[key] = {"rev": m["rev"] + 1, "gone": True, "t": now}
+                n += 1
+            gone = sorted((m["t"], k) for k, m in saves.items() if m.get("gone"))
+            for _, k in gone[:max(0, len(gone) - SAVE_GONE_KEEP)]:
+                del saves[k]
+            if n:
+                self.state.save()
+        return n
+
+
+# ---------------------------------------------------------------------- achievements
+
+# A small set for each of XenithOS's own apps. The app decides when one is earned, on the machine
+# itself, and it comes here when the machine is online, to be kept with when it was earned. They're
+# public like the leaderboards: on profiles, the Cloud screen and the website. shared/social.c has
+# the same names for the notification a console shows (the self-test checks they agree).
+ACHIEVEMENTS = [
+    # id, app, name, how it's earned
+    ("volt-100", "volt", "Charged up", "Score 100 in one run of VOLT."),
+    ("volt-500", "volt", "High voltage", "Score 500 in one run of VOLT."),
+    ("volt-1000", "volt", "Overload", "Score 1,000 in one run of VOLT."),
+    ("volt-board", "volt", "On the board", "Put a VOLT score on the leaderboard."),
+    ("doom-exit", "doom", "Way out", "Finish a level of DOOM."),
+    ("doom-secret", "doom", "Off the map", "Find a secret area in DOOM."),
+    ("doom-sweep", "doom", "Clean sweep", "Finish a DOOM level with every monster in it beaten."),
+    ("doom-episode", "doom", "The end", "Finish an episode of DOOM, or the whole of DOOM II."),
+    ("tube-first", "tube", "Now playing", "Watch a video in Tube."),
+    ("tube-end", "tube", "Every second", "Watch a Tube video all the way through."),
+    ("tube-ten", "tube", "Channel surfer", "Watch 10 videos in Tube."),
+    ("hostmc-start", "hostmc", "Server's up", "Start a Minecraft server with HostMC."),
+    ("hostmc-online", "hostmc", "Open doors", "Make your HostMC server reachable from the internet."),
+    ("hostmc-join", "hostmc", "Company", "Have a player join your HostMC server."),
+    ("hostmc-backup", "hostmc", "Safe keeping", "Back up your Minecraft world in HostMC."),
+]
+ACHIEVEMENT_IDS = {a[0] for a in ACHIEVEMENTS}
+UNLOCKS_KEEP = 50                # the newest ones everyone's earned, for "just earned"
+EARNS_PER_MIN = 20               # sends, per profile
+
+
+class Achievements:
+    def __init__(self, state):
+        self.state = state
+        self.earns = RateLimit(EARNS_PER_MIN, 60)
+        self.clock = time.time
+
+    def earn(self, acc, ids):
+        """Keeps the ones the profile doesn't have yet, and returns them."""
+        now, new = int(self.clock()), []
+        with self.state.lock:
+            have = acc.setdefault("achievements", {})
+            for i in ids:
+                if i in ACHIEVEMENT_IDS and i not in have:
+                    have[i] = now
+                    new.append(i)
+            if new:
+                feed = self.state.data.setdefault("unlocks", [])
+                feed.extend({"who": acc["name"].lower(), "id": i, "t": now} for i in new)
+                del feed[:-UNLOCKS_KEEP]
+                self.state.save()
+        return new
+
+    @staticmethod
+    def count(acc):
+        return sum(1 for i in acc.get("achievements", {}) if i in ACHIEVEMENT_IDS)
+
+    def catalogue(self):
+        """id|app|name|how it's earned|how many profiles have it, in the catalogue's order."""
+        counts = {}
+        with self.state.lock:
+            for acc in self.state.data["accounts"].values():
+                for i in acc.get("achievements", {}):
+                    counts[i] = counts.get(i, 0) + 1
+        return "".join(f"{i}|{app}|{name}|{what}|{counts.get(i, 0)}\n" for i, app, name, what in ACHIEVEMENTS)
+
+    def of(self, acc):
+        """id|seconds since it was earned, newest first."""
+        now = self.clock()
+        with self.state.lock:
+            got = sorted(acc.get("achievements", {}).items(), key=lambda e: -e[1])
+        return "".join(f"{i}|{max(0, int(now - t))}\n" for i, t in got if i in ACHIEVEMENT_IDS)
+
+    def recent(self, n=20):
+        """name|avatar|id|seconds since: the newest earned by anyone, newest first."""
+        now, rows = self.clock(), []
+        with self.state.lock:
+            for u in reversed(self.state.data.get("unlocks", [])):
+                acc = self.state.data["accounts"].get(u["who"])
+                if acc and u["id"] in ACHIEVEMENT_IDS:
+                    rows.append(f"{acc['name']}|{acc['avatar']}|{u['id']}|{max(0, int(now - u['t']))}\n")
+                if len(rows) == n:
+                    break
+        return "".join(rows)
 
 
 # ---------------------------------------------------------------------- stats
@@ -1065,6 +1657,295 @@ def store_bundle(store, pc):
     return b"".join(out)
 
 
+def https_addr_ok(addr):
+    """XENITH_PUBLIC_HTTPS: a name, or name:port, for PCs (linux/http_posix.c)."""
+    m = HTTPS_ADDR_RE.match(addr or "")
+    return bool(m) and not addr.startswith((".", "-")) and (not m.group(2) or 0 < int(m.group(2)) < 65536)
+
+
+# ---------------------------------------------------------------------- Store signatures
+
+# The Store's replies travel over plain HTTP, and the SHA-256 that checks each download comes in
+# them, so someone in between could change a list and the file together. So with a key
+# (XENITH_STORE_KEY) every list, the bundle and every thumbnail go out signed with XenithOS Cloud's
+# ed25519 key, in a header older consoles never look at:
+#     X-Xenith-Sig: 1 <key id> <signature>
+# "1" is the format, the key id the first 16 hex digits of the public key (so during a change of
+# key both can be sent, and each console uses the one it knows), the signature 128 hex digits over
+#     XenithOS Store 1\n<name>\n<SHA-256 of the body, in hex>\n
+# where the name says which reply it is (store_sig_name), so one can't stand in for another.
+# Consoles built with the public key (source/store_key.h) refuse a list without a good signature;
+# the files themselves are checked against the SHA-256s in the signed list.
+#
+# The standard library has no ed25519, so here it is after RFC 8032. Python's integers don't run in
+# constant time; it only ever signs this server's own replies, once for each new content (made),
+# so an outsider can't have it sign much, let alone time it.
+ED_P = 2 ** 255 - 19
+ED_L = 2 ** 252 + 27742317777372353535851937790883648493
+ED_D = -121665 * pow(121666, ED_P - 2, ED_P) % ED_P
+ED_I = pow(2, (ED_P - 1) // 4, ED_P)                   # a square root of -1
+ED_ZERO = (0, 1, 1, 0)
+STORE_SIG_HEADER = "X-Xenith-Sig"
+STORE_KEY_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _ed_add(a, b):
+    """Points in extended coordinates (X, Y, Z, T): x = X/Z, y = Y/Z, xy = T/Z. Adds and doubles."""
+    p = ED_P
+    x1, y1, z1, t1 = a
+    x2, y2, z2, t2 = b
+    e1, e2 = (y1 - x1) * (y2 - x2) % p, (y1 + x1) * (y2 + x2) % p
+    c, d = 2 * ED_D * t1 * t2 % p, 2 * z1 * z2 % p
+    e, f, g, h = e2 - e1, d - c, d + c, e2 + e1
+    return e * f % p, g * h % p, f * g % p, e * h % p
+
+
+def _ed_mul(s, point):
+    """s times point, always the same 256 doublings and additions whatever s is."""
+    q = ED_ZERO
+    for i in range(255, -1, -1):
+        q = _ed_add(q, q)
+        added = _ed_add(q, point)
+        q = added if (s >> i) & 1 else q
+    return q
+
+
+def _ed_encode(point):
+    x, y, z, _ = point
+    zi = pow(z, ED_P - 2, ED_P)
+    x, y = x * zi % ED_P, y * zi % ED_P
+    return (y | (x & 1) << 255).to_bytes(32, "little")
+
+
+def _ed_decode(data):
+    """The point 32 bytes stand for, or None when they aren't one written the one proper way."""
+    if len(data) != 32:
+        return None
+    y = int.from_bytes(data, "little")
+    sign, y = y >> 255, y & ((1 << 255) - 1)
+    if y >= ED_P:
+        return None
+    x2 = (y * y - 1) * pow(ED_D * y * y + 1, ED_P - 2, ED_P) % ED_P
+    x = pow(x2, (ED_P + 3) // 8, ED_P)
+    if (x * x - x2) % ED_P:
+        x = x * ED_I % ED_P
+    if (x * x - x2) % ED_P or (x == 0 and sign):
+        return None
+    if x & 1 != sign:
+        x = ED_P - x
+    return x, y, 1, x * y % ED_P
+
+
+ED_B = _ed_decode((4 * pow(5, ED_P - 2, ED_P) % ED_P).to_bytes(32, "little"))
+
+
+def _ed_secret(seed):
+    h = hashlib.sha512(seed).digest()
+    return int.from_bytes(h[:32], "little") & ((1 << 254) - 8) | 1 << 254, h[32:]
+
+
+def ed25519_public(seed):
+    """The public key (32 bytes) of a 32-byte private key (RFC 8032's seed)."""
+    return _ed_encode(_ed_mul(_ed_secret(seed)[0], ED_B))
+
+
+def ed25519_sign(seed, msg, public=None):
+    a, prefix = _ed_secret(seed)
+    public = public or _ed_encode(_ed_mul(a, ED_B))
+    r = int.from_bytes(hashlib.sha512(prefix + msg).digest(), "little") % ED_L
+    big_r = _ed_encode(_ed_mul(r, ED_B))
+    k = int.from_bytes(hashlib.sha512(big_r + public + msg).digest(), "little") % ED_L
+    return big_r + ((r + k * a) % ED_L).to_bytes(32, "little")
+
+
+def ed25519_verify(public, msg, sig):
+    """RFC 8032's check without the cofactor, as Monocypher and libsodium make it: S below L,
+    A a proper point, and [S]B - [k]A written out the same as R."""
+    if len(sig) != 64:
+        return False
+    a, s = _ed_decode(public), int.from_bytes(sig[32:], "little")
+    if a is None or s >= ED_L:
+        return False
+    k = int.from_bytes(hashlib.sha512(sig[:32] + public + msg).digest(), "little") % ED_L
+    minus_a = (ED_P - a[0], a[1], a[2], ED_P - a[3])
+    return _ed_encode(_ed_add(_ed_mul(s, ED_B), _ed_mul(k, minus_a))) == sig[:32]
+
+
+def store_sig_name(parts, query):
+    """Which signed reply a Store route is ("store", "all pc", "icon doom.ximg"), or None for one
+    that isn't signed (the files: the signed list has their SHA-256s)."""
+    names = {("v1", "store"): "store", ("v1", "store", "needs"): "needs",
+             ("v1", "store", "flathub"): "flathub", ("v1", "store", "steam"): "steam"}
+    if tuple(parts) in names:
+        return names[tuple(parts)]
+    if parts == ["v1", "store", "all"]:
+        return "all pc" if query.get("pc", [""])[0] == "1" else "all"
+    if len(parts) == 4 and parts[:3] == ["v1", "store", "icon"]:
+        return "icon " + parts[3]
+    return None
+
+
+def store_sig_text(name, body):
+    """What a signature covers: the reply's name and its body's SHA-256."""
+    return f"XenithOS Store 1\n{name}\n{hashlib.sha256(body).hexdigest()}\n".encode()
+
+
+class StoreKey:
+    """XenithOS Cloud's Store signing key, and the X-Xenith-Sig headers made with it."""
+
+    def __init__(self, seed):
+        self.seed = seed
+        self.public = ed25519_public(seed)
+        self.key_id = self.public.hex()[:16]
+        self.made = {}                         # signed text -> header (one per content)
+        self.lock = threading.Lock()
+
+    def header(self, name, body):
+        text = store_sig_text(name, body)
+        with self.lock:
+            value = self.made.get(text)
+        if not value:
+            value = f"1 {self.key_id} {ed25519_sign(self.seed, text, self.public).hex()}"
+            with self.lock:
+                if len(self.made) >= 1024:
+                    self.made.clear()
+                self.made[text] = value
+        return value
+
+
+def read_store_key(path):
+    """The private key in a key file (store-key new): its first line that isn't a # comment."""
+    with open(path, encoding="ascii") as f:
+        for line in f:
+            line = line.strip().lower()
+            if line and not line.startswith("#"):
+                if STORE_KEY_RE.match(line):
+                    return bytes.fromhex(line)
+                break
+    raise ValueError("it doesn't hold a key (64 hex digits on a line of their own)")
+
+
+def load_store_key(path, kept_out_of):
+    """StoreKey from the file XENITH_STORE_KEY names, or None after saying why not. kept_out_of:
+    the folders XenithOS Cloud serves files from or keeps its state in, where a key could leak
+    (through store.json, a backup of the state, a stray copy in the website)."""
+    real = os.path.realpath(path)
+    for folder in kept_out_of:
+        inside = os.path.realpath(folder)
+        if real == inside or real.startswith(inside.rstrip(os.sep) + os.sep):
+            log(f"XENITH_STORE_KEY is in {folder}, which XenithOS Cloud serves or keeps its state in. Move it "
+                f"out (to a folder of its own). Until then Store lists go out unsigned, and consoles that "
+                f"check refuse them.")
+            return None
+    try:
+        seed = read_store_key(path)
+        loose = os.stat(path).st_mode & 0o077
+    except (OSError, ValueError, UnicodeDecodeError) as e:
+        log(f"XENITH_STORE_KEY {path}: {e}. Until it's fixed Store lists go out unsigned, and consoles that "
+            f"check refuse them.")
+        return None
+    if loose:
+        log(f"XENITH_STORE_KEY {path} can be read by others than its owner: chmod 600 it")
+    return StoreKey(seed)
+
+
+def store_keys_in(header_file):
+    """The public keys (hex) a console build trusts, from source/store_key.h."""
+    try:
+        with open(header_file, encoding="utf-8") as f:
+            text = re.sub(r"/\*.*?\*/|//[^\n]*", "", f.read(), flags=re.S)
+    except OSError:
+        return []
+    return re.findall(r'"([0-9a-f]{64})"', text)
+
+
+def store_sig_good(values, name, body, keys):
+    """True when one of the X-Xenith-Sig values is a good signature of this reply by one of the
+    public keys (hex): what consoles check (source/store_sig.c)."""
+    text = store_sig_text(name, body)
+    for value in values:
+        f = value.split()
+        if len(f) != 3 or f[0] != "1" or not re.fullmatch(r"[0-9a-f]{16}", f[1]) \
+                or not re.fullmatch(r"[0-9a-f]{128}", f[2]):
+            continue
+        for key in keys:
+            if key.startswith(f[1]) and ed25519_verify(bytes.fromhex(key), text, bytes.fromhex(f[2])):
+                return True
+    return False
+
+
+def store_key_command(args):
+    """xenith_cloud.py store-key new <file> | show <file> | check <host:port or URL> [public key]"""
+    def tell(public):
+        print(f"Public half: {public}  (key id {public[:16]})\n"
+              f"For source/store_key.h, the line inside store_keys[]:\n    \"{public}\",")
+
+    if len(args) == 2 and args[0] == "new":
+        seed = secrets.token_bytes(32)
+        public = ed25519_public(seed).hex()
+        try:                                    # never over a key that's there: it may be in use
+            fd = os.open(args[1], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except OSError as e:
+            print(f"{args[1]}: {e.strerror}. A key file is never replaced like this.", file=sys.stderr)
+            return 1
+        with os.fdopen(fd, "w", encoding="ascii") as f:
+            f.write("# XenithOS Cloud's Store signing key (ed25519). Keep it secret, and keep a copy somewhere\n"
+                    "# safe: consoles built with its public half only trust Store lists signed with it.\n"
+                    f"# Public half: {public}\n{seed.hex()}\n")
+        print(f"Made {args[1]}, which only you can read.")
+        tell(public)
+        return 0
+    if len(args) == 2 and args[0] == "show":
+        try:
+            tell(ed25519_public(read_store_key(args[1])).hex())
+        except (OSError, ValueError, UnicodeDecodeError) as e:
+            print(f"{args[1]}: {e}", file=sys.stderr)
+            return 1
+        return 0
+    if len(args) in (2, 3) and args[0] == "check":
+        here = os.path.dirname(os.path.abspath(__file__))
+        keys = [args[2].lower()] if len(args) == 3 else store_keys_in(os.path.join(here, "..", "source", "store_key.h"))
+        if not keys or not all(STORE_KEY_RE.match(k) for k in keys):
+            print("No public key to check with: give one (64 hex digits), or put it in source/store_key.h.",
+                  file=sys.stderr)
+            return 2
+        routes, bad, first = ["/v1/store", "/v1/store/needs", "/v1/store/flathub", "/v1/store/steam",
+                              "/v1/store/all", "/v1/store/all?pc=1"], 0, ""
+        base = (args[1] if args[1].startswith(("http://", "https://")) else "http://" + args[1]).rstrip("/")
+        while routes:
+            route = routes.pop(0)
+            try:
+                # As a console asks: Cloudflare (cloud.owencosta.diy) turns away Python's own User-Agent.
+                ask = urllib.request.Request(base + route, headers={"User-Agent": "XenithOS/0.4 (store-key check)"})
+                with urllib.request.urlopen(ask, timeout=20) as r:
+                    body, values = r.read(), r.headers.get_all(STORE_SIG_HEADER) or []
+            except urllib.error.HTTPError as e:
+                if "/icon/" in route and e.code == 404:
+                    print(f"     {route}: no thumbnail to check")
+                    continue
+                print(f"FAIL {route}: {e}")
+                bad += 1
+                continue
+            except (OSError, ValueError) as e:
+                print(f"FAIL {route}: {e}")
+                bad += 1
+                continue
+            url = urlparse(route)
+            good = store_sig_good(values, store_sig_name([p for p in url.path.split("/") if p], parse_qs(url.query)),
+                                  body, keys)
+            print(f"{'PASS' if good else 'FAIL'} {route}: "
+                  f"{'signed' if good else 'a signature that does not check out' if values else 'not signed'}")
+            bad += not good
+            if route == "/v1/store" and body and not first:
+                first = body.split(b"|", 1)[0].decode("ascii", "replace")
+                if ID_RE.match(first):
+                    routes.append(f"/v1/store/icon/{first}.ximg")
+        print("Every Store reply checked out." if not bad else f"{bad} didn't check out.")
+        return 1 if bad else 0
+    print(store_key_command.__doc__, file=sys.stderr)
+    return 2
+
+
 def lan_addr_ok(addr):
     """XENITH_LAN_ADDR: a private IPv4 address and port (the Xbox has no DNS)."""
     m = LAN_ADDR_RE.match(addr or "")
@@ -1091,10 +1972,17 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
     logins = RateLimit(LOGIN_PER_10MIN, 600)
     feedback_by_ip = RateLimit(30, 3600)          # consoles reached through the relay share an address
     feedback_by_name = RateLimit(6, 3600)
+    crashes_by_ip = RateLimit(30, 3600)
+    crashes_all = RateLimit(600, 3600)            # however many come in, the disk only fills so fast
+    friends = Friends(state, store)
+    saves = CloudSaves(state)
+    achievements = Achievements(state)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "XenithOS-Cloud/" + VERSION
         protocol_version = "HTTP/1.0"
+        https = ""                                # XENITH_PUBLIC_HTTPS, which serve() sets: for /v1/lan
+        secure = False                            # the request came over HTTPS (edge())
 
         def log_message(self, fmt, *args):
             line = fmt % args
@@ -1102,13 +1990,15 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 return                       # several a second while a video plays
             sys.stderr.write("%s %s\n" % (self.client_address[0], line))
 
-        def reply(self, code, text="", ctype="text/plain; charset=ascii", cache=None):
+        def reply(self, code, text="", ctype="text/plain; charset=ascii", cache=None, headers=None):
             body = text.encode("ascii", "replace") if isinstance(text, str) else text
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             if cache:
                 self.send_header("Cache-Control", cache)
+            for name, value in (headers or {}).items():
+                self.send_header(name, value)
             self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
@@ -1120,9 +2010,15 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
             with open(path, "rb") as f:
                 return self.reply(200, f.read(), ctype, cache)
 
-        def body(self):
+        def signed(self, name, text, ctype="text/plain; charset=ascii", cache=None):
+            """A Store reply, with its X-Xenith-Sig when there's a key."""
+            body = text.encode("ascii", "replace") if isinstance(text, str) else text
+            key = store.key
+            return self.reply(200, body, ctype, cache, {STORE_SIG_HEADER: key.header(name, body)} if key else None)
+
+        def body(self, limit=MAX_BODY):
             n = int(self.headers.get("Content-Length") or 0)
-            if n < 0 or n > MAX_BODY:
+            if n < 0 or n > limit:
                 return None
             return self.rfile.read(n).decode("utf-8", "replace")
 
@@ -1144,13 +2040,15 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 return self.reply(200, "pong\n")
 
             if parts == ["v1", "lan"]:
-                return self.reply(200, kv({"id": server_id, **({"lan": lan} if lan else {})}), cache="no-store")
+                return self.reply(200, kv({"id": server_id, **({"lan": lan} if lan else {}),
+                                           **({"https": self.https} if self.https else {})}), cache="no-store")
 
             if parts == ["v1", "status"]:
                 lines = {"motd": state.data["motd"], "server": "XENITHOS CLOUD " + VERSION,
                          "consoles": str(len(state.data["consoles"])),
                          "players": str(len(state.data["accounts"])),
-                         "apps": str(len(store.items()))}
+                         "apps": str(len(store.items())),
+                         "store_key": store.key.key_id if store.key else "none"}
                 lines.update(server_stats())
                 return self.reply(200, kv(lines))
 
@@ -1168,6 +2066,18 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
             if parts == ["v1", "news"]:
                 return self.reply(200, "".join(f"{m['id']}|{m['t']}|{m['text']}\n"
                                                for m in state.data["inbox"]))
+
+            if parts[:2] == ["v1", "crash"] and len(parts) <= 3:
+                if not self.is_admin():
+                    return self.error(401, "Admin key required.")
+                if len(parts) == 2:
+                    return self.reply(200, "".join(
+                        f"{c['id']}|{c['t']}|{c['program']}|{c['version']}|{c['platform']}|{c['what']}|{c['where']}|"
+                        f"{c['from']}|{c['kind']}\n" for c in reversed(state.data.get("crashes", []))), cache="no-store")
+                text = state.crash_report(parts[2])
+                if text is None:
+                    return self.error(404, "No such crash report.")
+                return self.reply(200, text, cache="no-store")
 
             if parts == ["v1", "feedback"]:
                 if not self.is_admin():
@@ -1229,7 +2139,9 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                     script = f.read()
                 addr = public_addr(self, public)
                 host = (self.headers.get("Host") or "").strip()
-                source = f"http://{host}/download/xenithos-source.tar.gz" if PUBLIC_ADDR_RE.match(host) or re.match(r"^[A-Za-z0-9.-]{1,64}$", host) else ""
+                # The source the way this script came: over HTTPS when it did.
+                scheme = "https" if self.secure else "http"
+                source = f"{scheme}://{host}/download/xenithos-source.tar.gz" if PUBLIC_ADDR_RE.match(host) or re.match(r"^[A-Za-z0-9.-]{1,64}$", host) else ""
                 script = script.replace("@XENITHOS_SERVER@", addr).replace("@XENITHOS_SOURCE@", source)
                 return self.reply(200, script.encode(), "text/plain; charset=utf-8", "no-store")
 
@@ -1241,22 +2153,22 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                                                for m in state.data["inbox"]))
 
             if parts == ["v1", "store"]:
-                return self.reply(200, store_rows(store.items()))
+                return self.signed("store", store_rows(store.items()))
 
             if parts == ["v1", "store", "all"]:
-                return self.reply(200, store_bundle(store, q.get("pc", [""])[0] == "1"),
-                                  "application/octet-stream", "no-store")
+                return self.signed(store_sig_name(parts, q), store_bundle(store, q.get("pc", [""])[0] == "1"),
+                                   "application/octet-stream", "no-store")
 
             if parts == ["v1", "store", "flathub"]:
                 # Their own routes: consoles that don't know these kinds never see them.
-                return self.reply(200, flathub_rows(store.flathub()))
+                return self.signed("flathub", flathub_rows(store.flathub()))
 
             if parts == ["v1", "store", "steam"]:
-                return self.reply(200, steam_rows(store.steam()))
+                return self.signed("steam", steam_rows(store.steam()))
 
             if parts == ["v1", "store", "needs"]:
                 # Its own route: a 9th field on /v1/store would end up in older consoles' descriptions.
-                return self.reply(200, needs_rows(store.needs()))
+                return self.signed("needs", needs_rows(store.needs()))
 
             if len(parts) == 4 and parts[:3] == ["v1", "store", "file"]:
                 item = store.find(parts[3])
@@ -1269,7 +2181,9 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 path = store.icon(iid, ext) if ext in ("ximg", "png") else None
                 if not path:
                     return self.error(404, "No thumbnail.")
-                return self.send_file(path, "image/png" if ext == "png" else "application/octet-stream")
+                with open(path, "rb") as f:
+                    return self.signed(store_sig_name(parts, q), f.read(),
+                                       "image/png" if ext == "png" else "application/octet-stream", "public, max-age=300")
 
             if len(parts) == 3 and parts[:2] == ["v1", "scores"] and parts[2] in GAMES:
                 rows = []
@@ -1281,8 +2195,8 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
             if parts == ["v1", "players"]:
                 accs = sorted(state.data["accounts"].values(), key=lambda a: -a.get("last_seen", 0))[:100]
                 return self.reply(200, "".join(
-                    f"{a['name']}|{a['avatar']}|{a['joined']}|{state.best_of('volt', a['name'])[0]}\n"
-                    for a in accs))
+                    f"{a['name']}|{a['avatar']}|{a['joined']}|{state.best_of('volt', a['name'])[0]}|"
+                    f"{Achievements.count(a)}\n" for a in accs))
 
             if len(parts) == 3 and parts[:2] == ["v1", "players"]:
                 acc = state.account(parts[2])
@@ -1290,7 +2204,20 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                     return self.error(404, "No such player.")
                 best, rank = state.best_of("volt", acc["name"])
                 return self.reply(200, kv({"name": acc["name"], "avatar": acc["avatar"], "joined": acc["joined"],
-                                           "volt_best": best, "volt_rank": rank}))
+                                           "volt_best": best, "volt_rank": rank,
+                                           "achievements": Achievements.count(acc)}))
+
+            if len(parts) == 4 and parts[:2] == ["v1", "players"] and parts[3] == "achievements":
+                acc = state.account(parts[2])
+                if not acc:
+                    return self.error(404, "No such player.")
+                return self.reply(200, achievements.of(acc), cache="no-store")
+
+            if parts == ["v1", "achievements"]:
+                return self.reply(200, achievements.catalogue(), cache="no-store")
+
+            if parts == ["v1", "achievements", "recent"]:
+                return self.reply(200, achievements.recent(), cache="no-store")
 
             if len(parts) == 2 and parts[0] == "static" and STATIC_RE.match(parts[1]):
                 path = os.path.join(web_dir, "static", parts[1])
@@ -1309,11 +2236,14 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
         # -------------------------------------------------------------- POST
         def do_POST(self):
             parts = [p for p in urlparse(self.path).path.split("/") if p]
-            body = self.body()
+            if parts == ["v1", "saves", "put"]:         # a file, bigger than a form
+                return self.saves_put()
+            body = self.body(CRASH_MAX_BODY if parts == ["v1", "crash"] else MAX_BODY)
             if body is None:
                 return self.error(413, "Too large.")
             form = {k: v[0] for k, v in parse_qs(body, keep_blank_values=True).items()}
             ip = self.client_address[0]
+            limit_key = rate_key(ip)
 
             if parts == ["v1", "accounts", "create"]:
                 name, pin, avatar = form.get("name", "").strip(), form.get("pin", ""), form.get("avatar", "")
@@ -1324,7 +2254,7 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                     return self.error(400, "Passcodes are 4 to 8 digits.")
                 if not valid_avatar(avatar):
                     return self.error(400, "That avatar code isn't valid.")
-                if not creates.allow(ip):
+                if not creates.allow(limit_key):
                     return self.error(429, "Too many new profiles from this network. Try again later.")
                 result, err = state.create(name, pin, avatar)
                 if err:
@@ -1332,12 +2262,33 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 return self.session_reply(*result)
 
             if parts == ["v1", "accounts", "login"]:
-                if not logins.allow(ip):
+                if not logins.allow(limit_key):
                     return self.error(429, "Too many sign-in attempts. Wait a few minutes.")
                 result, err = state.login(form.get("name", "").strip(), form.get("pin", ""))
                 if err:
                     return self.error(429 if "15 minutes" in err else 401, err)
                 return self.session_reply(*result)
+
+            if parts == ["v1", "crash"]:
+                program = form.get("program", "").strip().lower()
+                if not CRASH_PROGRAM_RE.match(program):
+                    return self.error(400, "Say which program crashed.")
+                text = clean_report(form.get("report", ""))
+                if len(text) < 20:
+                    return self.error(400, "That crash report is empty.")
+                if not crashes_by_ip.allow(ip) or not crashes_all.allow("all"):
+                    return self.error(429, "That's a lot of crash reports at once. Try again in a while.")
+                acc = state.by_token(form.get("token", ""))
+                entry = {"program": program, "version": clean(form.get("version", ""), 16) or "?",
+                         "platform": clean(form.get("platform", ""), 32) or "?",
+                         "what": clean(form.get("what", ""), 80) or "?", "where": clean(form.get("where", ""), 200),
+                         "from": acc["name"] if acc else "Anonymous"}
+                entry["kind"] = crash_kind(program, entry["version"], entry["what"], entry["where"])
+                entry, first = state.add_crash(entry, text)
+                hook = feedback_hooks(os.path.dirname(state.path)).get("crash")
+                if hook and first:
+                    threading.Thread(target=send_crash, args=(hook, entry, text), daemon=True).start()
+                return self.reply(200, kv({"ok": 1, "id": entry["id"]}))
 
             if parts == ["v1", "feedback"]:
                 kind, text = form.get("kind", ""), clean(form.get("text", ""), 1000)
@@ -1346,7 +2297,7 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 if len(text) < 3:
                     return self.error(400, "Write a little more.")
                 acc = state.by_token(form.get("token", ""))
-                if not feedback_by_ip.allow(ip) or (acc and not feedback_by_name.allow(acc["name"])):
+                if not feedback_by_ip.allow(limit_key) or (acc and not feedback_by_name.allow(acc["name"])):
                     return self.error(429, "That's a lot of feedback at once. Try again in a while.")
                 who = acc["name"] if acc else "Guest"
                 version, platform = clean(form.get("version", ""), 16) or "?", clean(form.get("platform", ""), 32) or "?"
@@ -1356,6 +2307,21 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                     threading.Thread(target=send_feedback, args=(hook, kind, text, who, version, platform),
                                      daemon=True).start()
                 return self.reply(200, "ok=1\n")
+
+            if parts == ["v1", "hello"] or parts[:2] == ["v1", "friends"]:
+                return self.friends_post(parts, form, ip)
+
+            if parts[:2] == ["v1", "saves"]:
+                return self.saves_post(parts, form)
+
+            if parts == ["v1", "achievements", "earn"]:
+                acc = state.by_token(form.get("token", ""))
+                if not acc:
+                    return self.error(401, "Your sign-in expired. Sign in again.")
+                if not achievements.earns.allow(acc["name"].lower()):
+                    return self.error(429, "That's a lot of achievements at once. Wait a minute.")
+                new = achievements.earn(acc, [i for i in form.get("ids", "").split(",")[:32] if i])
+                return self.reply(200, kv({"new": ",".join(new), "count": Achievements.count(acc)}))
 
             if parts in (["v1", "tube", "search"], ["v1", "tube", "start"]):
                 if not tube or not tube.available():
@@ -1400,7 +2366,9 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                     state.seen(acc["name"], ip)
                     best, rank = state.best_of("volt", acc["name"])
                     return self.reply(200, kv({"name": acc["name"], "avatar": acc["avatar"], "joined": acc["joined"],
-                                               "volt_best": best, "volt_rank": rank}))
+                                               "volt_best": best, "volt_rank": rank,
+                                               "sharing": 1 if acc.get("sharing", True) else 0,
+                                               "achievements": Achievements.count(acc)}))
                 if parts[2] == "avatar":
                     if not valid_avatar(form.get("avatar", "")):
                         return self.error(400, "That avatar code isn't valid.")
@@ -1429,9 +2397,9 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                         return self.error(409, "That name belongs to a profile. Sign in to use it.")
                 with last_score_lock:
                     now = time.monotonic()
-                    if now - last_score.get(ip, -1e9) < SCORE_COOLDOWN_S:
+                    if now - last_score.get(limit_key, -1e9) < SCORE_COOLDOWN_S:
                         return self.error(429, "Slow down a little.")
-                    last_score[ip] = now
+                    last_score[limit_key] = now
                 rank, entry = state.submit(parts[2], name, score)
                 return self.reply(200, f"{rank or 0}|{entry['name']}|{entry['score']}\n")
 
@@ -1450,6 +2418,99 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
 
             return self.error(404, "Not found.")
 
+        # -------------------------------------------------------------- friends
+        def friends_post(self, parts, form, ip):
+            acc = state.by_token(form.get("token", ""))
+            if not acc:
+                return self.error(401, "Your sign-in expired. Sign in again.")
+            if parts == ["v1", "hello"]:
+                if form.get("bye") == "1":
+                    friends.hello(acc, ip, bye=True)
+                    return self.reply(200, "ok=1\n")
+                app, mc = form.get("app", ""), form.get("mc")
+                if mc is not None:
+                    mc = mc.strip()
+                    if mc and not MC_ADDR_RE.match(mc):
+                        return self.error(400, "That isn't a server address.")
+                friends.hello(acc, ip, app if ID_RE.match(app) else "", form.get("hold") == "1", mc)
+                news = state.data["inbox"][0] if state.data["inbox"] else {"id": 0, "text": ""}
+                lines = {"motd": state.data["motd"], "server": "XENITHOS CLOUD " + VERSION,
+                         "players": len(state.data["accounts"]), "online": state.online(),
+                         "news": len(state.data["inbox"]), "news_id": news["id"], "news_text": news["text"],
+                         "now": int(time.time()), "sharing": 1 if acc.get("sharing", True) else 0}
+                lines.update(friends.summary(acc))
+                return self.reply(200, kv(lines), cache="no-store")
+            if parts == ["v1", "friends"]:
+                return self.reply(200, friends.rows(acc), cache="no-store")
+            if parts == ["v1", "friends", "sharing"]:
+                friends.set_sharing(acc, form.get("on") == "1")
+                return self.reply(200, kv({"sharing": 1 if acc["sharing"] else 0}))
+            if len(parts) == 3 and parts[2] in ("add", "accept", "remove"):
+                code, message, extra = getattr(friends, parts[2])(acc, form.get("name", ""))
+                if code != 200:
+                    return self.error(code, message)
+                return self.reply(200, kv({"ok": 1, **extra}))
+            return self.error(404, "Not found.")
+
+        # ---------------------------------------------------------- cloud saves
+        def saves_post(self, parts, form):
+            acc = state.by_token(form.get("token", ""))
+            if not acc:
+                return self.error(401, "Your sign-in expired. Sign in again.")
+            app, name = form.get("app", ""), form.get("name", "")
+            if parts == ["v1", "saves"]:
+                if app and not SAVE_APP_RE.match(app):
+                    return self.error(400, "That isn't an app.")
+                return self.reply(200, saves.listing(acc, app), cache="no-store")
+            if parts == ["v1", "saves", "get"]:
+                if not saves.valid(app, name):
+                    return self.error(400, "That isn't a cloud save.")
+                if not saves.gets.allow(acc["name"].lower()):
+                    return self.error(429, "That's a lot of downloading. Wait a minute.")
+                found = saves.get(acc, app, name)
+                if not found:
+                    return self.error(404, "That isn't on XenithOS Cloud.")
+                m, data = found
+                head = f"rev={m['rev']}&size={len(data)}&sha256={m['sha256']}\n".encode()
+                return self.reply(200, head + data, "application/octet-stream", "no-store")
+            if parts == ["v1", "saves", "delete"]:
+                if form.get("all") == "1":
+                    return self.reply(200, kv({"deleted": saves.delete(acc)}))
+                if not SAVE_APP_RE.match(app) or (name and not saves.valid(app, name)):
+                    return self.error(400, "That isn't a cloud save.")
+                return self.reply(200, kv({"deleted": saves.delete(acc, app, name)}))
+            return self.error(404, "Not found.")
+
+        def saves_put(self):
+            """The body is a form line (token, app, name, base, force, from, label), a newline, then
+            the file as it is."""
+            n = int_or(self.headers.get("Content-Length"), -1)
+            if n < 0 or n > SAVE_MAX + 1024:
+                return self.error(413, f"A cloud save can be {SAVE_MAX // 1024} KB at most.")
+            head, sep, data = self.rfile.read(n).partition(b"\n")
+            if not sep or len(head) > 1024:
+                return self.error(400, "That isn't a cloud save.")
+            form = {k: v[0] for k, v in parse_qs(head.decode("utf-8", "replace"), keep_blank_values=True).items()}
+            acc = state.by_token(form.get("token", ""))
+            if not acc:
+                return self.error(401, "Your sign-in expired. Sign in again.")
+            app, name = form.get("app", ""), form.get("name", "")
+            if not saves.valid(app, name):
+                return self.error(400, "That isn't a cloud save.")
+            if len(data) > SAVE_MAX:
+                return self.error(413, f"A cloud save can be {SAVE_MAX // 1024} KB at most.")
+            if not saves.puts.allow(acc["name"].lower()):
+                return self.error(429, "That's a lot of saving at once. Wait a minute.")
+            code, message, m = saves.put(acc, app, name, data, int_or(form.get("base"), -1), form.get("force") == "1",
+                                         form.get("from", ""), form.get("label", ""))
+            if code == 200:
+                return self.reply(200, kv({"rev": m["rev"], "size": m["size"], "sha256": m["sha256"]}))
+            now = {"rev": m["rev"], "gone": 1} if m and m.get("gone") else \
+                  {"rev": m["rev"], "sha256": m["sha256"], "from": m["from"], "label": m["label"]} if m else {"rev": 0}
+            return self.reply(code, kv({"error": message, **now}))
+
+    Handler.friends = friends                     # for the self-test
+    Handler.saves = saves
     return Handler
 
 
@@ -1491,9 +2552,32 @@ def proxied(handler):
     return Proxied
 
 
+def edge(handler):
+    """handler, for requests from Cloudflare's tunnel (XENITH_EDGE_PORT), which came over HTTPS.
+    Cloudflare names the console's own address in CF-Connecting-IP, and that's used as
+    client_address (logs, rate limits, who's online); every request through the tunnel would
+    otherwise come from cloudflared's one address. One without a good address gets no answer."""
+    class Edge(handler):
+        secure = True
+        timeout = 300                         # a connection that stalls doesn't keep its thread
+
+        def parse_request(self):
+            if not super().parse_request():
+                return False
+            try:
+                ip = ipaddress.ip_address((self.headers.get("CF-Connecting-IP") or "").strip())
+            except ValueError:
+                return False
+            self.client_address = (str(ip), self.client_address[1])
+            return True
+
+    return Edge
+
+
 def serve():
     port = int(os.environ.get("XENITH_PORT", "8795"))
     proxy_port = int(os.environ.get("XENITH_PROXY_PORT", "0") or 0)
+    edge_port = int(os.environ.get("XENITH_EDGE_PORT", "0") or 0)
     state = State(os.environ.get("XENITH_STATE_DIR", "state"))
     store = Store(os.environ.get("XENITH_STORE_DIR", "store"))
     admin_key = os.environ.get("XENITH_ADMIN_KEY", "")
@@ -1513,6 +2597,17 @@ def serve():
     if lan and not lan_addr_ok(lan):
         log(f"XENITH_LAN_ADDR must be a private a.b.c.d:port, not {lan!r}; consoles won't be told one")
         lan = ""
+    https = os.environ.get("XENITH_PUBLIC_HTTPS", "").strip()
+    if https and not https_addr_ok(https):
+        log(f"XENITH_PUBLIC_HTTPS must be a name or name:port, not {https!r}; PCs won't be told one")
+        https = ""
+    key_file = os.environ.get("XENITH_STORE_KEY", "")
+    if key_file:
+        store.key = load_store_key(key_file, [store.dir, web_dir, downloads, os.path.dirname(state.path)])
+        if store.key:
+            log(f"Store lists go out signed with key {store.key.key_id}")
+    else:
+        log("XENITH_STORE_KEY isn't set: Store lists go out unsigned, and consoles that check refuse them")
     with state.lock:                          # tells this server apart from another at that address
         if not state.data.get("server_id"):
             state.data["server_id"] = secrets.token_hex(8)
@@ -1527,11 +2622,19 @@ def serve():
 
     handler = make_handler(state, store, admin_key, web_dir, console_key, tube, public, downloads, lan, server_id)
     httpd = ThreadingHTTPServer(("0.0.0.0", port), handler)
+    handler.https = https
     httpd.daemon_threads = True
     if proxy_port:
         relayed = ThreadingHTTPServer(("0.0.0.0", proxy_port), proxied(handler))
         relayed.daemon_threads = True
         threading.Thread(target=relayed.serve_forever, daemon=True).start()
+    if edge_port:
+        edged = ThreadingHTTPServer(("0.0.0.0", edge_port), edge(handler))
+        edged.daemon_threads = True
+        threading.Thread(target=edged.serve_forever, daemon=True).start()
+        print(f"Cloudflare's tunnel on :{edge_port}", flush=True)
+    if https:
+        print(f"PCs and Raspberry Pis are told to use https://{https}", flush=True)
     tube_mode = ("on, Deno and PO tokens when needed" if tube.deno and tube.plugins else
                  "on, Deno when needed" if tube.deno else "on") if tube.available() else "off"
     print(f"XenithOS Cloud {VERSION} on :{port}{f' (relay on :{proxy_port})' if proxy_port else ''} "
@@ -1541,6 +2644,234 @@ def serve():
 
 
 # ---------------------------------------------------------------------- selftest
+
+
+def selftest_friends(req, kvparse, check, state, friends):
+    """Friends and presence, for selftest(). Profiles are made directly, past the sign-up limit."""
+    def make(name):
+        (_, token), _ = state.create(name, "2468", "1202001000")
+        return token
+
+    def post(path, token, extra=""):
+        return req("POST", path, f"token={token}{extra}")
+
+    def rows(token):
+        code, body = post("/v1/friends", token)
+        return {r.split("|")[0]: r.split("|") for r in body.decode().splitlines()} if code == 200 else {}
+
+    def later(seconds):
+        friends.clock = lambda: real() + seconds
+
+    real = friends.clock
+    ta, tb, tc = make("Alice"), make("Bob Two"), make("Carol")
+    check("friends: need a profile", req("POST", "/v1/friends", "token=nope")[0] == 401
+          and req("POST", "/v1/hello", "app=volt")[0] == 401)
+    code, body = post("/v1/friends/add", ta, "&name=bob%20two")
+    check("friends: asking (any case)", code == 200 and kvparse(body) == {"ok": "1", "now": "asked", "name": "Bob Two"})
+    check("friends: the request shows on both sides",
+          rows(ta).get("Bob Two", [""] * 3)[2] == "out" and rows(tb).get("Alice", [""] * 3)[2] == "in")
+    post("/v1/hello", ta, "&app=volt")
+    check("friends: no presence before a yes", rows(tb)["Alice"][3:] == ["0", "", "", "0", ""])
+    for bad, want in (("Nobody", 404), ("ALICE", 400), ("Bob%20Two", 409)):
+        check(f"friends: asking {bad} refused", post("/v1/friends/add", ta, "&name=" + bad)[0] == want)
+    hello = kvparse(post("/v1/hello", tb, "&ver=0.6.9")[1])
+    check("hello: a request waiting, and who from", hello.get("asks") == "1" and hello.get("ask") == "Alice"
+          and hello.get("friends_on") == "0" and "motd" in hello and int(hello.get("now", "0")) > 0)
+    check("friends: accepting", kvparse(post("/v1/friends/accept", tb, "&name=Alice")[1]) ==
+          {"ok": "1", "now": "friends", "name": "Alice"} and rows(ta)["Bob Two"][2] == "friend")
+    check("friends: accepting twice", post("/v1/friends/accept", tb, "&name=Alice")[0] == 404)
+
+    # Presence: what friends are playing, for how long a hello counts
+    post("/v1/hello", tb, "&app=doom")
+    check("presence: a friend on, playing DOOM", rows(ta)["Bob Two"][2:7] == ["friend", "1", "doom", "DOOM", "0"])
+    hello = kvparse(post("/v1/hello", ta)[1])
+    check("hello: which friends are on", hello.get("on") == "Bob Two" and hello.get("friends_on") == "1")
+    post("/v1/hello", tb, "&app=my-own-thing")
+    check("presence: apps XenithOS Cloud doesn't know aren't named", rows(ta)["Bob Two"][3:6] == ["1", "", ""])
+    post("/v1/hello", tb, "&app=..%2Fx")
+    check("presence: a bad app id is left out", rows(ta)["Bob Two"][3:6] == ["1", "", ""])
+    post("/v1/hello", tb, "&app=volt")
+    later(PRESENCE_S + 5)
+    gone = rows(ta)["Bob Two"]
+    check("presence: gone a while after the last hello", gone[3:6] == ["0", "", ""] and int(gone[6]) >= PRESENCE_S)
+    friends.clock = real
+    post("/v1/hello", tb, "&app=volt&hold=1")
+    later(PRESENCE_S + 5)
+    check("presence: held while an app that can't say hello runs", rows(ta)["Bob Two"][3:6] == ["1", "volt", "VOLT"])
+    later(PRESENCE_HOLD_S + 5)
+    check("presence: not held for ever", rows(ta)["Bob Two"][3] == "0")
+    friends.clock = real
+    post("/v1/hello", tb, "&app=volt")
+    check("presence: bye", post("/v1/hello", tb, "&bye=1")[0] == 200 and rows(ta)["Bob Two"][3] == "0")
+
+    # A HostMC server friends can join
+    post("/v1/hello", tb, "&app=hostmc&mc=cheery-panda-61.mc.example.net:25566")
+    check("HostMC: friends see the server's address", rows(ta)["Bob Two"][7] == "cheery-panda-61.mc.example.net:25566")
+    check("HostMC: a bad address is refused", post("/v1/hello", tb, "&mc=a%20b;rm%20-rf")[0] == 400)
+    later(MC_KEEP_S + 5)
+    check("HostMC: an address not heard about for a day isn't shown", rows(ta)["Bob Two"][7] == "")
+    friends.clock = real
+    post("/v1/hello", tb, "&app=hostmc&mc=")
+    check("HostMC: gone when it isn't reachable", rows(ta)["Bob Two"][7] == "" and "mc" not in state.account("bob two"))
+
+    # Showing what you play can be turned off, and then nothing about it is kept
+    post("/v1/hello", tb, "&app=doom&mc=203.0.113.5")
+    check("sharing: turned off", kvparse(post("/v1/friends/sharing", tb, "&on=0")[1]) == {"sharing": "0"})
+    r = rows(ta)["Bob Two"]
+    check("sharing off: on, but not what or where", r[3:6] == ["1", "", ""] and r[7] == "" and "mc" not in state.account("bob two"))
+    post("/v1/hello", tb, "&app=doom&mc=203.0.113.5")
+    check("sharing off: what's said isn't kept", rows(ta)["Bob Two"][4] == "" and "mc" not in state.account("bob two")
+          and friends.presence["bob two"]["app"] == "")
+    check("sharing: on again", kvparse(post("/v1/friends/sharing", tb, "&on=1")[1]) == {"sharing": "1"}
+          and kvparse(post("/v1/accounts/me", tb)[1]).get("sharing") == "1")
+    check("presence is never saved", '"app"' not in json.dumps(state.data) and "presence" not in json.dumps(state.data))
+
+    # No, taking a request back, asking someone who asked you, unfriending
+    post("/v1/friends/add", tc, "&name=Alice")
+    check("friends: saying no", kvparse(post("/v1/friends/remove", ta, "&name=Carol")[1]).get("now") == "declined"
+          and "Alice" not in rows(tc) and "Carol" not in rows(ta))
+    check("friends: after a no, no asking again straight away", post("/v1/friends/add", tc, "&name=Alice")[0] == 403)
+    later(DECLINED_WAIT_S + 5)
+    check("friends: a week later, asking again", post("/v1/friends/add", tc, "&name=Alice")[0] == 200)
+    friends.clock = real
+    check("friends: taking a request back", kvparse(post("/v1/friends/remove", tc, "&name=Alice")[1]).get("now") == "cancelled"
+          and "Carol" not in rows(ta) and "Alice" not in rows(tc))
+    post("/v1/friends/add", tc, "&name=Alice")
+    check("friends: asking someone who asked you", kvparse(post("/v1/friends/add", ta, "&name=carol")[1]).get("now") == "friends"
+          and rows(tc)["Alice"][2] == "friend" and not state.account("alice").get("asks_in"))
+    td, te = make("Dave"), make("Erin")
+    post("/v1/friends/add", td, "&name=Alice")
+    post("/v1/friends/add", ta, "&name=Erin")
+    post("/v1/hello", tc, "&app=tube")
+    post("/v1/hello", tb, "&bye=1")
+    check("friends: requests first, then who's on, who isn't, and requests sent",
+          list(rows(ta)) == ["Dave", "Carol", "Bob Two", "Erin"])
+    check("friends: unfriending", kvparse(post("/v1/friends/remove", ta, "&name=Carol")[1]).get("now") == "removed"
+          and "Alice" not in rows(tc) and "Carol" not in rows(ta))
+    check("friends: removing a stranger", post("/v1/friends/remove", ta, "&name=Carol")[0] == 404)
+    pals = [make(f"Pal{i}") for i in range(ASKS_PER_HOUR)]
+    sent = [post("/v1/friends/add", ta, f"&name=Pal{i}")[0] for i in range(len(pals))]
+    check("friends: only so many requests an hour", sent[:ASKS_PER_HOUR - 2] == [200] * (ASKS_PER_HOUR - 2)
+          and sent[-1] == 429)
+
+
+def selftest_saves(base, kvparse, check, state):
+    """Cloud saves, for selftest(). Files are sent as they are, so this posts bytes itself."""
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    def call(path, data):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(base + path, data=data, method="POST")) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    def post(path, **form):
+        return call(path, urllib.parse.urlencode(form).encode())
+
+    def put(token, app, name, data, **extra):
+        head = urllib.parse.urlencode({"token": token, "app": app, "name": name, "from": "Xbox 360", **extra})
+        return call("/v1/saves/put", head.encode() + b"\n" + data)
+
+    def listing(token, **extra):
+        lines = post("/v1/saves", token=token, **extra)[1].decode().splitlines()
+        rows = lambda kind: {r.split("|")[1]: r.split("|") for r in (x[5:] for x in lines if x.startswith(kind))}
+        return kvparse("\n".join(x for x in lines if "|" not in x).encode()), rows("file="), rows("gone=")
+
+    (acc, ta), _ = state.create("Saver", "1357", "1202001000")
+    (_, tb), _ = state.create("Other", "1357", "1202001000")
+    save = b"BEFORE BOSS" + bytes(13) + b"version 109\n" + bytes(range(256)) * 300   # zeros, newlines, the lot
+    sha = hashlib.sha256(save).hexdigest()
+    check("saves: need a profile", post("/v1/saves", token="nope")[0] == 401
+          and put("nope", "doom", "doomsav0.dsg", b"x", base=0)[0] == 401)
+    code, body = put(ta, "doom", "doomsav0.dsg", save, base=0, label="BEFORE BOSS")
+    check("saves: a new save", code == 200 and kvparse(body) == {"rev": "1", "size": str(len(save)), "sha256": sha})
+    code, body = post("/v1/saves/get", token=ta, app="doom", name="doomsav0.dsg")
+    head, _, data = body.partition(b"\n")
+    check("saves: it comes back exactly", code == 200 and data == save and head == f"rev=1&size={len(save)}&sha256={sha}".encode())
+    info, files, _ = listing(ta)
+    check("saves: listed with how big, where from and its name", files.get("doomsav0.dsg", [""] * 8)[2:5] == ["1", str(len(save)), sha]
+          and files["doomsav0.dsg"][6:] == ["Xbox 360", "BEFORE BOSS"] and info.get("used") == str(len(save))
+          and info.get("limit") == str(SAVES_LIMIT))
+    path = os.path.join(os.path.dirname(state.path), "saves", acc["id"], "doom", "doomsav0.dsg")
+    with open(path, "rb") as f:
+        check("saves: kept as a file, in a folder that isn't named after the gamertag", f.read() == save and "Saver" not in path)
+    code, body = put(ta, "doom", "doomsav0.dsg", b"from an older copy", base=0)
+    check("saves: a change made from an older copy is refused, saying what's there",
+          code == 409 and kvparse(body).get("rev") == "1" and kvparse(body).get("label") == "BEFORE BOSS"
+          and kvparse(body).get("from") == "Xbox 360")
+    check("saves: a change made from the latest is taken", kvparse(put(ta, "doom", "doomsav0.dsg", b"newer", base=1)[1]).get("rev") == "2")
+    check("saves: and any copy the player chose", kvparse(put(ta, "doom", "doomsav0.dsg", b"chosen", base=0, force=1)[1]).get("rev") == "3")
+    check("saves: another profile can't see them", post("/v1/saves/get", token=tb, app="doom", name="doomsav0.dsg")[0] == 404
+          and listing(tb)[1] == {})
+    for app, name in (("doom", "../x"), ("doom", ".hidden"), ("doom", "a/b"), ("DOOM", "x"), ("doom", "x" * 49), ("", "x")):
+        check(f"saves: {app or '(no app)'}/{name[:10]} refused", put(ta, app, name, b"x", base=0)[0] == 400)
+    check("saves: one file too big", put(ta, "doom", "big.dsg", b"x" * (SAVE_MAX + 1), base=0)[0] == 413)
+    filled = [put(tb, "doom", f"slot{i}.dsg", b"y" * SAVE_MAX, base=0)[0] for i in range(SAVES_LIMIT // SAVE_MAX)]
+    code, body = put(tb, "doom", "onemore.dsg", b"z", base=0)
+    check("saves: full at the limit", filled == [200] * (SAVES_LIMIT // SAVE_MAX) and code == 413
+          and "full" in kvparse(body).get("error", ""))
+    check("saves: a file replaced counts only its new size", put(tb, "doom", "slot0.dsg", b"y" * 1000, base=1)[0] == 200
+          and put(tb, "doom", "onemore.dsg", b"z", base=0)[0] == 200)
+
+    # Deleting leaves a marker, so machines with a copy don't send it back unchanged
+    code, body = post("/v1/saves/delete", token=ta, app="doom", name="doomsav0.dsg")
+    info, files, gone = listing(ta)
+    check("saves: deleting one", kvparse(body) == {"deleted": "1"} and "doomsav0.dsg" not in files
+          and gone.get("doomsav0.dsg", ["", "", ""])[2] == "4" and info.get("used") == "0" and not os.path.exists(path))
+    check("saves: deleted means gone", post("/v1/saves/get", token=ta, app="doom", name="doomsav0.dsg")[0] == 404)
+    code, body = put(ta, "doom", "doomsav0.dsg", b"chosen", base=3)
+    check("saves: a copy from before the delete is refused", code == 409 and kvparse(body).get("gone") == "1"
+          and kvparse(body).get("rev") == "4")
+    check("saves: a new save after it is taken", kvparse(put(ta, "doom", "doomsav0.dsg", b"new game", base=4)[1]).get("rev") == "5")
+    put(ta, "xenithos", "settings.txt", b"ui_sounds=0\nboot_sound=1\n", base=0)
+    check("saves: one app's", set(listing(ta, app="xenithos")[1]) == {"settings.txt"}
+          and set(listing(ta, app="doom")[1]) == {"doomsav0.dsg"})
+    check("saves: deleting all of an app's", kvparse(post("/v1/saves/delete", token=ta, app="xenithos")[1]) == {"deleted": "1"}
+          and set(listing(ta)[1]) == {"doomsav0.dsg"})
+    code, body = post("/v1/saves/delete", token=tb, all="1")
+    folder = os.path.join(os.path.dirname(state.path), "saves", state.account("other")["id"], "doom")
+    check("saves: deleting everything", kvparse(body) == {"deleted": str(SAVES_LIMIT // SAVE_MAX + 1)}
+          and listing(tb)[0].get("used") == "0" and os.listdir(folder) == [])
+    sent = [put(ta, "volt", "best.txt", b"1", force=1)[0] for _ in range(SAVE_PUTS_PER_MIN)]
+    check("saves: only so many uploads a minute", sent[0] == 200 and sent[-1] == 429)
+
+
+def selftest_achievements(req, kvparse, check, state):
+    """Achievements, for selftest()."""
+    (_, token), _ = state.create("Earner", "1357", "22020010000000")
+    (_, other), _ = state.create("Second", "1357", "1202001000")
+    check("achievements: need a profile", req("POST", "/v1/achievements/earn", "token=nope&ids=volt-100")[0] == 401)
+    code, body = req("POST", "/v1/achievements/earn", f"token={token}&ids=volt-100,volt-500,not-one,..%2Fx")
+    check("achievements: earned, the real ones only", code == 200 and kvparse(body) == {"new": "volt-100,volt-500", "count": "2"})
+    check("achievements: earning one again changes nothing",
+          kvparse(req("POST", "/v1/achievements/earn", f"token={token}&ids=volt-100")[1]) == {"new": "", "count": "2"})
+    req("POST", "/v1/achievements/earn", f"token={other}&ids=volt-100,doom-exit")
+    code, body = req("GET", "/v1/players/earner/achievements")
+    check("achievements: a player's, newest first", code == 200
+          and {r.split("|")[0] for r in body.decode().splitlines()} == {"volt-100", "volt-500"})
+    check("achievements: a player nobody has", req("GET", "/v1/players/nobody/achievements")[0] == 404)
+    rows = [r.split("|") for r in req("GET", "/v1/achievements")[1].decode().splitlines()]
+    check("achievements: the whole set, with how many have each", len(rows) == len(ACHIEVEMENTS)
+          and rows[0] == ["volt-100", "volt", "Charged up", "Score 100 in one run of VOLT.", "2"]
+          and {r[0]: r[4] for r in rows}["doom-exit"] == "1" and {r[0]: r[4] for r in rows}["tube-ten"] == "0")
+    recent = [r.split("|") for r in req("GET", "/v1/achievements/recent")[1].decode().splitlines()]
+    check("achievements: just earned, by anyone, newest first", [r[0] for r in recent[:2]] == ["Second", "Second"]
+          and recent[2][:3] == ["Earner", "22020010000000", "volt-500"] and len(recent) == 4)
+    players = {r.split("|")[0]: r.split("|") for r in req("GET", "/v1/players")[1].decode().splitlines()}
+    check("achievements: counted on the players list, profiles and me", players["Earner"][4] == "2"
+          and kvparse(req("GET", "/v1/players/earner")[1]).get("achievements") == "2"
+          and kvparse(req("POST", "/v1/accounts/me", f"token={token}")[1]).get("achievements") == "2")
+    sent = [req("POST", "/v1/achievements/earn", f"token={other}&ids=tube-first")[0] for _ in range(EARNS_PER_MIN)]
+    check("achievements: only so many sends a minute", sent[0] == 200 and sent[-1] == 429)
+    # The console's notification names the achievement from shared/social.c: the same names
+    console = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shared", "social.c")
+    if os.path.exists(console):
+        with open(console, encoding="utf-8") as f:
+            named = dict(re.findall(r'\{"([a-z0-9-]+)", "([^"]+)"\}', f.read()))
+        check("achievements: the console names them the same", named == {i: name for i, _, name, _ in ACHIEVEMENTS})
 
 
 def selftest():
@@ -1728,11 +3059,131 @@ else:
     check("store bundle for the Xbox: no Flathub or Steam",
           xbox is not None and "flathub" not in xbox and "steam" not in xbox and "icon:kodi" not in xbox
           and xbox.get("icon:game") == b"XIMGthumb")
+
+    # Store signatures: ed25519 as RFC 8032 has it (its first three test vectors), then the header
+    for seed_hex, pub_hex, msg_hex, sig_hex in (
+            ("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+             "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a", "",
+             "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e0652249015"
+             "55fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"),
+            ("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
+             "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c", "72",
+             "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da"
+             "085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"),
+            ("c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7",
+             "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025", "af82",
+             "6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac"
+             "18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a")):
+        seed, msg = bytes.fromhex(seed_hex), bytes.fromhex(msg_hex)
+        check(f"ed25519: RFC 8032 test {pub_hex[:6]}: public key, signature and check",
+              ed25519_public(seed).hex() == pub_hex and ed25519_sign(seed, msg).hex() == sig_hex
+              and ed25519_verify(bytes.fromhex(pub_hex), msg, bytes.fromhex(sig_hex)))
+    seed = bytes(range(32))
+    pub, text = ed25519_public(seed), store_sig_text("store", b"a|b\n")
+    sig = ed25519_sign(seed, text)
+    check("ed25519: refuses a changed text, R, S, S plus L, or another key",
+          ed25519_verify(pub, text, sig) and not ed25519_verify(pub, text + b"x", sig)
+          and not ed25519_verify(pub, text, bytes([sig[0] ^ 1]) + sig[1:])
+          and not ed25519_verify(pub, text, sig[:40] + bytes([sig[40] ^ 4]) + sig[41:])
+          and not ed25519_verify(pub, text, sig[:32] + (int.from_bytes(sig[32:], "little") + ED_L).to_bytes(32, "little"))
+          and not ed25519_verify(ed25519_public(bytes(32)), text, sig) and not ed25519_verify(pub, text, bytes(64)))
+
+    def sig_get(path):
+        try:
+            with urllib.request.urlopen(base + path) as resp:
+                return resp.status, resp.read(), resp.headers.get_all(STORE_SIG_HEADER) or []
+        except urllib.error.HTTPError as e:
+            return e.code, e.read(), e.headers.get_all(STORE_SIG_HEADER) or []
+
+    unsigned = sig_get("/v1/store")
+    check("store signing off: no signature, status says so",
+          unsigned[2] == [] and kvparse(req("GET", "/v1/status")[1]).get("store_key") == "none")
+    store.key = StoreKey(seed)
+    keys = [pub.hex()]
+    signed_routes = {"/v1/store": "store", "/v1/store/needs": "needs", "/v1/store/flathub": "flathub",
+                     "/v1/store/steam": "steam", "/v1/store/all": "all", "/v1/store/all?pc=1": "all pc",
+                     "/v1/store/icon/game.ximg": "icon game.ximg", "/v1/store/icon/kodi.ximg": "icon kodi.ximg"}
+    got = {route: sig_get(route) for route in signed_routes}
+    check("store signing: every list, the bundle and thumbnails signed, bodies as before",
+          all(code == 200 and len(values) == 1 and store_sig_good(values, signed_routes[route], body, keys)
+              for route, (code, body, values) in got.items())
+          and got["/v1/store"][1] == unsigned[1] and got["/v1/store/icon/game.ximg"][1] == b"XIMGthumb")
+    check("store signing: the header is 1, the key id and 128 hex digits",
+          re.fullmatch(r"1 " + pub.hex()[:16] + r" [0-9a-f]{128}", got["/v1/store"][2][0]) is not None)
+    check("store signing: the files themselves aren't signed (their SHA-256 is)",
+          sig_get("/v1/store/file/game")[2] == [] and sig_get("/v1/store/file/game")[0] == 200)
+    store_code, store_body, store_sig = got["/v1/store"]
+    check("store signing: a changed list fails", not store_sig_good(store_sig, "store", store_body.replace(b"Game X", b"Game Y"), keys)
+          and not store_sig_good(store_sig, "store", store_body + b"evil|app|Evil|1|9|" + b"0" * 64 + b"|e|x\n", keys))
+    check("store signing: one reply can't stand in for another",
+          not store_sig_good(store_sig, "needs", store_body, keys)
+          and not store_sig_good(got["/v1/store/all"][2], "all pc", got["/v1/store/all"][1], keys)
+          and not store_sig_good(got["/v1/store/icon/game.ximg"][2], "icon kodi.ximg", b"XIMGthumb", keys))
+    check("store signing: another key's console refuses it, and a missing header is refused",
+          not store_sig_good(store_sig, "store", store_body, [ed25519_public(bytes(32)).hex()])
+          and not store_sig_good([], "store", store_body, keys)
+          and not store_sig_good(["1 " + pub.hex()[:16] + " " + "0" * 128], "store", store_body, keys))
+    check("store signing: two keys at once, each console finds its own",
+          store_sig_good(["1 0123456789abcdef " + "ab" * 64] + store_sig, "store", store_body,
+                         [ed25519_public(bytes(32)).hex(), pub.hex()]))
+    check("store signing: the same list, the same signature (made once)",
+          sig_get("/v1/store")[2] == store_sig and kvparse(req("GET", "/v1/status")[1]).get("store_key") == pub.hex()[:16])
+    import contextlib
+    with contextlib.redirect_stdout(io.StringIO()) as said:
+        addr = f"127.0.0.1:{httpd.server_address[1]}"
+        checked = store_key_command(["check", addr, pub.hex()]) == 0 and store_key_command(["check", addr, "ab" * 32]) == 1
+        as_url = store_key_command(["check", f"http://{addr}/", pub.hex()]) == 0
+    check("store-key check: passes a signed server, fails with another key, takes a URL too",
+          checked and as_url and said.getvalue().count("PASS /v1/store") == 14 and "FAIL /v1/store:" in said.getvalue())
+
+    # The key file: made private, never overwritten, kept out of what the server serves
+    key_dir = os.path.join(tmp, "keys")
+    os.makedirs(key_dir)
+    key_file = os.path.join(key_dir, "store.key")
+    with contextlib.redirect_stdout(io.StringIO()) as said:
+        made = store_key_command(["new", key_file]) == 0
+        public_line = said.getvalue()
+    with contextlib.redirect_stderr(io.StringIO()):
+        again = store_key_command(["new", key_file])
+    file_pub = ed25519_public(read_store_key(key_file)).hex()
+    check("store-key new: a key only its owner can read, its public half printed, never overwritten",
+          made and again == 1 and os.stat(key_file).st_mode & 0o777 == 0o600 and f'"{file_pub}",' in public_line)
+    with contextlib.redirect_stderr(io.StringIO()) as said:
+        loaded = load_store_key(key_file, [store_dir, web_dir, dl_dir, os.path.join(tmp, "state")])
+        shutil.copy(key_file, os.path.join(store_dir, "store.key"))
+        in_store = load_store_key(os.path.join(store_dir, "store.key"), [store_dir, web_dir])
+        shutil.copy(key_file, os.path.join(tmp, "state", "k"))
+        in_state = load_store_key(os.path.join(tmp, "state", "k"), [store_dir, os.path.join(tmp, "state")])
+        with open(os.path.join(key_dir, "bad.key"), "w") as f:
+            f.write("# a comment\nnot a key\n")
+        bad_key = load_store_key(os.path.join(key_dir, "bad.key"), [store_dir])
+        missing = load_store_key(os.path.join(key_dir, "nope.key"), [store_dir])
+    os.remove(os.path.join(store_dir, "store.key"))
+    check("XENITH_STORE_KEY: loads from its own folder, refused in the store or state folder, or broken",
+          loaded is not None and loaded.public.hex() == file_pub and in_store is None and in_state is None
+          and bad_key is None and missing is None and said.getvalue().count("unsigned") == 4)
+    header_file = os.path.join(key_dir, "store_key.h")
+    with open(header_file, "w") as f:
+        f.write(f'/* "{"0" * 64}" in a comment doesn\'t count */\nstatic const char *const store_keys[] = {{\n'
+                f'    "{file_pub}",\n    // "{"1" * 64}",\n    NULL\n}};\n')
+    check("store_key.h: the keys a console build trusts", store_keys_in(header_file) == [file_pub])
+    store.key = None
     code, body = req("GET", "/v1/lan")
     check("lan: this server's id and its home address", code == 200 and kvparse(body) == {"id": "5e4e1d", "lan": "192.168.1.20:8795"})
     check("lan address must be private and numeric",
           lan_addr_ok("192.168.50.145:8795") and lan_addr_ok("10.0.0.2:80") and not lan_addr_ok("37.1.2.3:8795")
           and not lan_addr_ok("keystone:8795") and not lan_addr_ok("192.168.1.2") and not lan_addr_ok("192.168.1.2:0"))
+    httpd.RequestHandlerClass.https = "cloud.example.org"         # XENITH_PUBLIC_HTTPS
+    code, body = req("GET", "/v1/lan")
+    check("lan: and the HTTPS address, when there is one", code == 200 and kvparse(body) ==
+          {"id": "5e4e1d", "lan": "192.168.1.20:8795", "https": "cloud.example.org"})
+    check("https address: a name, or name:port",
+          https_addr_ok("cloud.example.org") and https_addr_ok("localhost:8443") and not https_addr_ok("https://x.org")
+          and not https_addr_ok("x.org/path") and not https_addr_ok("-x.org") and not https_addr_ok("x.org:0")
+          and not https_addr_ok("x.org:99999") and not https_addr_ok(""))
+    check("rate limits count an IPv6 /64 as one address",
+          rate_key("2001:db8:1:2::5") == rate_key("2001:db8:1:2:ffff::9") != rate_key("2001:db8:1:3::5")
+          and rate_key("203.0.113.7") == "203.0.113.7" and rate_key("::ffff:203.0.113.7") == "::ffff:203.0.113.7")
 
     # Accounts
     code, body = req("POST", "/v1/accounts/create", "name=Owen&pin=1234&avatar=1202001000")
@@ -1823,7 +3274,60 @@ else:
         f.write("# feedback\nbug=https://discord.com/api/webhooks/1/abc_D-e\nhttps://discord.com/api/webhooks/2/xyz\n"
                 "idea=https://example.com/not-discord\n")
     check("webhooks: one for bugs, one line for the rest", feedback_hooks(hooks_dir) ==
-          {"bug": "https://discord.com/api/webhooks/1/abc_D-e", "idea": "https://discord.com/api/webhooks/2/xyz"})
+          {"bug": "https://discord.com/api/webhooks/1/abc_D-e", "idea": "https://discord.com/api/webhooks/2/xyz",
+           "crash": "https://discord.com/api/webhooks/1/abc_D-e"})
+
+    # Crash reports: kept like feedback, the report itself beside state.json, read back by the admin
+    from urllib.parse import urlencode as form_encode
+    report = ("# XenithOS crash report\nprogram=hostmc\nversion=0.6.8\nsignal=SIGABRT\ncode=-6 raised\tby it\x01\n"
+              "frame=0x55d0c0001234 program+0x1234\n--- where\n0x1233: main at apps/hostmc/source/main.c:1349\n"
+              "--- trace\nlibc.so.6(__chk_fail+0x10) [0x7f00]\n")
+    crash = {"program": "hostmc", "version": "0.6.8", "platform": "PC, x86_64", "report": report,
+             "what": "SIGABRT, a buffer overflow check|x", "where": "main at apps/hostmc/source/main.c:1349"}
+    check("crash report needs a program", req("POST", "/v1/crash", form_encode(dict(crash, program="../x")))[0] == 400)
+    check("crash report needs a report", req("POST", "/v1/crash", form_encode(dict(crash, report="x")))[0] == 400)
+    code, body = req("POST", "/v1/crash", form_encode(crash))
+    check("a crash report is taken", code == 200 and kvparse(body) == {"ok": "1", "id": "1"})
+    code, body = req("POST", "/v1/crash", form_encode(dict(crash, token=token, report=report + "x" * 13000)))
+    check("a crash report longer than other posts is taken, with the gamertag added",
+          code == 200 and kvparse(body).get("id") == "2")
+    check("a crash report too big is refused",
+          req("POST", "/v1/crash", form_encode(dict(crash, report="y" * CRASH_MAX_BODY)))[0] == 413)
+    check("crash list needs admin", req("GET", "/v1/crash")[0] == 401 and req("GET", "/v1/crash/1")[0] == 401)
+    code, body = req("GET", "/v1/crash", key="k3y")
+    rows = [line.split("|") for line in body.decode().splitlines()]
+    check("crash list: newest first, from who, the same kind",
+          code == 200 and len(rows) == 2 and all(len(r) == 9 for r in rows) and [r[0] for r in rows] == ["2", "1"]
+          and rows[0][7] == "Tuber" and rows[1][7] == "Anonymous" and rows[0][8] == rows[1][8]
+          and rows[1][2:7] == ["hostmc", "0.6.8", "PC, x86_64", "SIGABRT, a buffer overflow check x",
+                               "main at apps/hostmc/source/main.c:1349"])
+    code, body = req("GET", "/v1/crash/1", key="k3y")
+    check("crash report read back, cleaned", code == 200 and body.decode() ==
+          report.replace("\t", "    ").replace("\x01", "?").strip("\n") + "\n")
+    code, body = req("GET", "/v1/crash/2", key="k3y")
+    check("crash report cut at a line", code == 200 and len(body) <= CRASH_TEXT_MAX + 1 and body.endswith(b"0x7f00]\n"))
+    check("crash report unknown id", req("GET", "/v1/crash/99", key="k3y")[0] == 404
+          and req("GET", "/v1/crash/..%2Fstate.json", key="k3y")[0] == 404 and req("GET", "/v1/crash/a", key="k3y")[0] == 404)
+    check("crash reports kept beside the state, not in it", "__chk_fail" not in json.dumps(state.data)
+          and os.path.isfile(os.path.join(tmp, "state", "crashes", "1.txt")))
+    check("crash kind leaves the addresses out",
+          crash_kind("volt", "1", "SIGSEGV", "pc 0x1234") == crash_kind("volt", "1", "SIGSEGV", "pc 0xbeef")
+          and crash_kind("volt", "1", "SIGSEGV", "x") != crash_kind("volt", "1", "SIGFPE", "x"))
+    crash_state = State(os.path.join(tmp, "crash-state"))
+    kept_before = CRASH_KEEP
+    globals()["CRASH_KEEP"] = 2
+    firsts = [crash_state.add_crash({"program": "volt", "kind": k}, "text")[1] for k in ("a", "a", "b")]
+    globals()["CRASH_KEEP"] = kept_before
+    check("crash reports: each kind goes to Discord once a day", firsts == [True, False, True])
+    check("crash reports: the oldest go, report and all", [c["id"] for c in crash_state.data["crashes"]] == [2, 3]
+          and sorted(os.listdir(os.path.join(tmp, "crash-state", "crashes"))) == ["2.txt", "3.txt"])
+    crash_state.data["crash_posted"]["a"] -= CRASH_POST_EVERY
+    check("crash reports: the next day, again", crash_state.add_crash({"program": "volt", "kind": "a"}, "text")[1])
+    with open(os.path.join(hooks_dir, "feedback-webhooks.txt"), "a") as f:
+        f.write("crash=https://discord.com/api/webhooks/3/crash\n")
+    check("webhooks: crash reports' own", feedback_hooks(hooks_dir).get("crash") == "https://discord.com/api/webhooks/3/crash")
+    statuses = [req("POST", "/v1/crash", form_encode(crash))[0] for _ in range(30)]
+    check("crash reports: rate limited", statuses[:28] == [200] * 28 and statuses[-1] == 429)
     hello = kvparse(req("GET", "/v1/hello?name=Owen&ver=0.5")[1])
     check("hello has players and online", int(hello.get("players", "0")) >= 1 and int(hello.get("online", "0")) >= 1
           and int(hello.get("now", "0")) > 0)
@@ -1861,6 +3365,10 @@ else:
     code, body = req("GET", "/install.sh")
     check("install.sh filled in", code == 200 and f'SERVER="127.0.0.1:{httpd.server_address[1]}"'.encode() in body
           and b"/download/xenithos-source.tar.gz" in body)
+
+    selftest_friends(req, kvparse, check, state, httpd.RequestHandlerClass.friends)
+    selftest_saves(base, kvparse, check, state)
+    selftest_achievements(req, kvparse, check, state)
 
     # Tube, with stand-in yt-dlp and ffmpeg
     calls_file = os.path.join(tmp, "calls.txt")
@@ -1945,6 +3453,58 @@ else:
           and req("GET", f"/v1/tube/chunk?s={sid}&off=0")[0] == 410)
     check("tube thumb bad id", req("GET", "/v1/tube/thumb/..x.jpg")[0] == 404)
 
+    # Cloudflare's tunnel (XENITH_EDGE_PORT): CF-Connecting-IP names the console
+    import socket
+    edged = ThreadingHTTPServer(("127.0.0.1", 0), edge(httpd.RequestHandlerClass))
+    edged.daemon_threads = True
+    threading.Thread(target=edged.serve_forever, daemon=True).start()
+
+    def send_raw(port, data):
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+            sock.sendall(data)
+            out = b""
+            while True:
+                part = sock.recv(65536)
+                if not part:
+                    return out
+                out += part
+
+    def via_tunnel(method, path, ip, body=""):
+        head = f"{method} {path} HTTP/1.1\r\nHost: cloud.example.org\r\nConnection: keep-alive\r\n"
+        head += f"CF-Connecting-IP: {ip}\r\n" if ip else ""
+        head += f"Content-Length: {len(body)}\r\n" if body else ""
+        return send_raw(edged.server_address[1], (head + "\r\n" + body).encode())
+
+    def code_of(out):
+        return (out.split(b" ", 2) + [b"", b""])[1]
+
+    out = via_tunnel("GET", "/v1/hello?name=TUNNELED&ver=0.6", "198.51.100.4")
+    check("edge: CF-Connecting-IP accepted", out.startswith(b"HTTP/1.0 200") and b"motd=" in out)
+    check("edge: the console's own address is recorded",
+          state.data["consoles"].get("TUNNELED", {}).get("ip") == "198.51.100.4")
+    check("edge: no CF-Connecting-IP, no answer", via_tunnel("GET", "/v1/ping", "") == b"")
+    check("edge: a bad address, no answer", via_tunnel("GET", "/v1/ping", "999.1.1.1") == b"")
+    send_raw(httpd.server_address[1], b"GET /v1/hello?name=DIRECTCF&ver=0.6 HTTP/1.0\r\n"
+                                      b"CF-Connecting-IP: 198.51.100.9\r\n\r\n")
+    check("edge: the direct port ignores CF-Connecting-IP",
+          state.data["consoles"].get("DIRECTCF", {}).get("ip") == "127.0.0.1")
+
+    def score(ip, name):
+        return code_of(via_tunnel("POST", "/v1/scores/volt", ip, f"name={name}&score=5"))
+
+    check("edge: rate limits go by each console's address",
+          score("198.51.100.4", "EDGEA") == b"200" and score("198.51.100.4", "EDGEA") == b"429"
+          and score("198.51.100.5", "EDGEB") == b"200")
+    check("edge: an IPv6 /64 counts as one address",
+          score("2001:db8:1:2::5", "EDGEC") == b"200" and score("2001:db8:1:2::6", "EDGEC") == b"429"
+          and score("2001:db8:1:3::5", "EDGED") == b"200")
+    check("edge: install.sh gets the source over HTTPS too",
+          b'SOURCE_URL="https://cloud.example.org/download/xenithos-source.tar.gz"' in
+          via_tunnel("GET", "/install.sh", "198.51.100.4"))
+    check("edge: install.sh from the direct port stays plain",
+          b'SOURCE_URL="http://127.0.0.1:' in req("GET", "/install.sh")[1])
+    edged.shutdown()
+
     # A relay's connections (XENITH_PROXY_PORT): the PROXY line names the console
     import socket
     relayed = ThreadingHTTPServer(("127.0.0.1", 0), proxied(httpd.RequestHandlerClass))
@@ -1990,6 +3550,8 @@ else:
 
 if __name__ == "__main__":
     args = sys.argv[1:]
+    if args[:1] == ["store-key"]:
+        sys.exit(store_key_command(args[1:]))
     if args == ["--selftest"]:
         sys.exit(selftest())
     if len(args) == 2 and args[0] in ("send", "motd"):

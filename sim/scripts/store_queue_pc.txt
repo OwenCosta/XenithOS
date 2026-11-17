@@ -1,0 +1,37 @@
+# The downloads queue on a PC. In Apps, X picks DOOM (built here: its Freedoom is downloaded,
+# then it's put on the home screen), Kodi and RetroArch (from Flathub, acted out by the
+# simulator); START runs them one after another, and B stops Kodi while Flatpak works on it.
+# Run by sim/store/test-store.sh with XSIM_KIND=pc and DOOM not on the home screen yet.
+wait 200
+press right
+press a
+wait 90
+press down
+press x
+press down
+press down
+press down
+press down
+press down
+press x
+press down
+press x
+wait 10
+shot pc_queue_picked
+press start
+wait 20
+shot pc_queue_confirm
+press a
+wait 60
+shot pc_queue_running
+press b
+wait 30
+shot pc_queue_stopped
+wait 200
+shot pc_queue_done
+press a
+wait 30
+shot pc_store_after_queue
+press b
+wait 30
+quit

@@ -10,9 +10,12 @@ press right
 press right
 press right
 press right
+press right
 wait 5
 press a
 wait 30
+press down
+press down
 press down
 press down
 press down

@@ -1,0 +1,18 @@
+[
+ {"id": "minecraft", "name": "Minecraft", "ref": "org.prismlauncher.PrismLauncher", "arches": ["x86_64", "aarch64"],
+  "mb": 39, "shared_mb": 1350, "description": "Minecraft: Java Edition, through Prism Launcher. Needs a Minecraft account."},
+ {"id": "roblox", "name": "Roblox", "ref": "org.vinegarhq.Sober", "arches": ["x86_64"],
+  "mb": 160, "shared_mb": 900, "description": "Roblox through Sober, a community project that isn't made by Roblox."},
+ {"id": "steam", "name": "Steam", "ref": "com.valvesoftware.Steam", "arches": ["x86_64"],
+  "mb": 15, "shared_mb": 1300, "description": "Valve's store and launcher, for the games in the Steam section."},
+ {"id": "firefox", "name": "Firefox", "ref": "org.mozilla.firefox", "arches": ["x86_64", "aarch64"],
+  "mb": 110, "shared_mb": 900, "description": "The web browser."},
+ {"id": "kodi", "name": "Kodi", "ref": "tv.kodi.Kodi", "arches": ["x86_64", "aarch64"],
+  "mb": 120, "shared_mb": 900, "description": "Films, shows and music from your own files."},
+ {"id": "retroarch", "name": "RetroArch", "ref": "org.libretro.RetroArch", "arches": ["x86_64", "aarch64"],
+  "mb": 200, "shared_mb": 900, "description": "Emulators for older consoles, for games you own."},
+ {"id": "supertuxkart", "name": "SuperTuxKart", "ref": "net.supertuxkart.SuperTuxKart", "arches": ["x86_64", "aarch64"],
+  "mb": 700, "shared_mb": 900, "description": "Kart racing with friends on one screen or online.", "args": "--fullscreen"},
+ {"id": "vlc", "name": "VLC", "ref": "org.videolan.VLC", "arches": ["x86_64", "aarch64"],
+  "mb": 90, "shared_mb": 900, "description": "Plays almost any video or music file."}
+]

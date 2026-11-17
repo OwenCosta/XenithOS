@@ -3,19 +3,28 @@
 #
 #   sim/run.sh <script.txt> <name> [server]
 #
-# Uses usb/ (made by build.sh) as the USB stick. Screenshots and audio.wav end up in
-# sim/out/<name>/. Pass a server ("127.0.0.1:8795") to test the online screens.
+# Uses usb/ (made by build.sh) as the USB stick, or the folder XSIM_USB names. Screenshots and
+# audio.wav end up in sim/out/<name>/. Pass a server ("127.0.0.1:8795") to test the online screens.
 set -e
 here="$(cd "$(dirname "$0")" && pwd)"
 script="$(realpath "$1")"
 name="$2"
 server="${3:-}"
+usb="${XSIM_USB:-$here/../usb}"
+[ -d "$usb" ] || { echo "no $usb: run build.sh first (sim/test-scripts.sh stages a stand-in without it)" >&2; exit 2; }
 
 work="$HOME/.xsim/$name"
-rm -rf "$work"
-mkdir -p "$work/uda:"
-cp -r "$here/../usb/." "$work/uda:/"
+# XSIM_KEEP=1: the same stick as the last run with this name (a console used again), else a fresh one
+if [ "$XSIM_KEEP" = 1 ] && [ -d "$work/uda:" ]; then
+    rm -rf "$work/out"
+else
+    rm -rf "$work"
+    mkdir -p "$work/uda:"
+    cp -r "$usb/." "$work/uda:/"
+fi
 mkdir -p "$work/uda:/xenith"
+# XSIM_UDA: a folder of files to put on the stick as well (saves, say)
+[ -n "$XSIM_UDA" ] && cp -r "$XSIM_UDA"/. "$work/uda:/"
 {
     echo "server=$server"
     echo "name=SIM"
@@ -48,6 +57,13 @@ if [ -n "$XSIM_OTHER" ]; then
         [ -f "$here/../art/thumbs/$id.ximg" ] && cp "$here/../art/thumbs/$id.ximg" "$work/uda:/apps/$id.ximg"
     done
 fi
+# XSIM_CRASH: crash files (space-separated) as programs leave them (shared/crash.h), for XenithOS
+# to find at the start, as if those had crashed last time
+if [ -n "$XSIM_CRASH" ]; then
+    mkdir -p "$work/uda:/xenith/crash"
+    # shellcheck disable=SC2086
+    for c in $XSIM_CRASH; do cp "$c" "$work/uda:/xenith/crash/"; done
+fi
 # XSIM_PHOTOS: a folder of pictures for Photos (copied to uda:/photos)
 if [ -n "$XSIM_PHOTOS" ]; then
     mkdir -p "$work/uda:/photos"
@@ -76,9 +92,12 @@ fi
 # XSIM_KIND=pc: XenithOS's own apps as a PC has them, built in a folder standing in for
 # /usr/lib/xenithos with their names and pictures, for the Store to list and install.
 # XSIM_UNINSTALLED="doom volt": ones that are built but not on the home screen.
+# XSIM_LOCAL_MORE="music": more of them (left out unless asked, so the Store's lists in the
+# scripts stay as they were written)
 if [ "$XSIM_KIND" = pc ]; then
     mkdir -p "$work/lib"
-    for app in volt doom tube photos hostmc music; do
+    # shellcheck disable=SC2086
+    for app in volt doom tube photos hostmc ${XSIM_LOCAL_MORE:-}; do
         : > "$work/lib/$app"
         [ -f "$here/../apps/$app/app.txt" ] && cp "$here/../apps/$app/app.txt" "$work/lib/$app.txt"
         [ -f "$here/../art/thumbs/$app.ximg" ] && cp "$here/../art/thumbs/$app.ximg" "$work/lib/$app.ximg"

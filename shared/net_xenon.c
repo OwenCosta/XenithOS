@@ -76,10 +76,37 @@ struct conn {
     int connected;               /* the request went out: errors after this aren't NE_CONNECT */
     uint64_t last_activity;
     const char *req;
-    int req_len;
+    int req_len, sent;
     net_progress_fn progress;
     void *ctx;
 };
+
+/* Hand lwIP as much of the request as it has room for. One bigger than its send buffer (8 x 1476
+ * bytes in libxenon), a cloud save going up, goes in pieces as the server takes them: on_sent,
+ * and the wait loop in case room came without a callback. */
+static void send_more(struct conn *c)
+{
+    int queued = 0;
+    while (c->pcb && c->sent < c->req_len) {
+        int n = c->req_len - c->sent, room = tcp_sndbuf(c->pcb);
+        if (room <= 0) break;
+        if (n > room) n = room;
+        if (tcp_write(c->pcb, c->req + c->sent, (u16_t)n, TCP_WRITE_FLAG_COPY) != ERR_OK) break;
+        c->sent += n;
+        queued = 1;
+    }
+    if (queued && c->pcb) tcp_output(c->pcb);
+}
+
+static err_t on_sent(void *arg, struct tcp_pcb *pcb, u16_t len)
+{
+    struct conn *c = arg;
+    (void)pcb;
+    (void)len;
+    c->last_activity = mftb();
+    send_more(c);
+    return ERR_OK;
+}
 
 static int body_complete(struct conn *c)
 {
@@ -136,12 +163,13 @@ static err_t on_connected(void *arg, struct tcp_pcb *pcb, err_t err)
 {
     struct conn *c = arg;
     if (err != ERR_OK) { c->err = NE_CONNECT; return err; }
+    (void)pcb;
     c->connected = 1;
-    if (tcp_write(pcb, c->req, c->req_len, TCP_WRITE_FLAG_COPY) != ERR_OK) {
+    send_more(c);
+    if (!c->sent) {
         c->err = NE_MEMORY;
         return ERR_OK;
     }
-    tcp_output(pcb);
     c->last_activity = mftb();
     return ERR_OK;
 }
@@ -181,6 +209,7 @@ int net_http_once(const char *host, const char *method, const char *path,
     if (!c.pcb) { free(req); free(c.buf); return out->status = NE_MEMORY; }
     tcp_arg(c.pcb, &c);
     tcp_recv(c.pcb, on_recv);
+    tcp_sent(c.pcb, on_sent);
     tcp_err(c.pcb, on_err);
     c.last_activity = mftb();
     if (tcp_connect(c.pcb, &ip, port, on_connected) != ERR_OK) {
@@ -192,16 +221,20 @@ int net_http_once(const char *host, const char *method, const char *path,
 
     while (!c.done && !c.err) {
         network_poll();
+        if (c.connected && c.sent < c.req_len) send_more(&c);
         net_idle();
-        if (!c.connected && tb_diff_msec(mftb(), c.last_activity) > connect_ms) c.err = NE_CONNECT;
+        if (net_cancel_asked()) c.err = NE_CANCELLED;
+        else if (!c.connected && tb_diff_msec(mftb(), c.last_activity) > connect_ms) c.err = NE_CONNECT;
         else if (tb_diff_msec(mftb(), c.last_activity) > IDLE_TIMEOUT_MS) c.err = NE_TIMEOUT;
     }
 
     if (c.pcb) {                         /* detach callbacks before closing */
         tcp_arg(c.pcb, NULL);
         tcp_recv(c.pcb, NULL);
+        tcp_sent(c.pcb, NULL);
         tcp_err(c.pcb, NULL);
-        if (tcp_close(c.pcb) != ERR_OK) tcp_abort(c.pcb);
+        /* Stopped: a reset, so the server stops sending the rest. */
+        if (c.err == NE_CANCELLED || tcp_close(c.pcb) != ERR_OK) tcp_abort(c.pcb);
     }
     free(req);
 

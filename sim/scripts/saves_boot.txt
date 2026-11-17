@@ -1,0 +1,5 @@
+# Cloud saves: a console started again, which brings its saves up to date with XenithOS Cloud's.
+# Part of sim/social/test-saves.sh.
+wait 280
+shot boot_synced
+quit

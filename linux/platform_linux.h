@@ -8,6 +8,11 @@
 
 const char *linux_data_dir(void);              /* the folder that holds "uda:" */
 
+/* crash_linux.c: crash files (shared/crash.h). watch() first thing in plat_init(); test() each
+ * frame, for XENITHOS_TEST_CRASH. */
+void linux_crash_watch(void);
+void linux_crash_test(void);
+
 /* A program by name: $XENITHOS_<NAME> if set (tests point it at a stand-in), else the usual
  * folders. NULL if it isn't there. */
 char *linux_find_program(const char *name, char *out, int n);

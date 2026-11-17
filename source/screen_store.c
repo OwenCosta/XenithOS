@@ -8,6 +8,10 @@
  *             played through Steam with your Steam account, which the Store says before it
  *             opens Steam. PCs with x86-64 processors only: Steam doesn't run on ARM;
  *   XenithOS  XenithOS updates and game data, as on the Xbox.
+ *
+ * Its lists come signed by XenithOS Cloud (store_sig.c), and every download is checked against
+ * the SHA-256 in them. X picks things for the downloads queue and START downloads them one after
+ * another; B stops the one that's downloading and the rest carry on.
  */
 #include <ctype.h>
 #include <stdio.h>
@@ -25,6 +29,7 @@
 #include "platform.h"
 #include "screens.h"
 #include "sha256.h"
+#include "store_sig.h"
 #include "theme.h"
 #include "ui.h"
 
@@ -104,6 +109,31 @@ static int is_update(const struct item *it)
     return !strcmp(it->kind, "system") || !strcmp(it->kind, "pc");
 }
 
+/* Below 0, 0 or above 0 as version a is older than, the same as or newer than b: "0.6.10" is
+ * newer than "0.6.9", and what follows a number ("-beta") doesn't count. */
+static int version_cmp(const char *a, const char *b)
+{
+    for (;;) {
+        long x = 0, y = 0;
+        for (; isdigit((unsigned char)*a); a++) if (x < 100000000) x = x * 10 + (*a - '0');
+        for (; isdigit((unsigned char)*b); b++) if (y < 100000000) y = y * 10 + (*b - '0');
+        if (x != y) return x < y ? -1 : 1;
+        while (*a && *a != '.') a++;
+        while (*b && *b != '.') b++;
+        if (!*a && !*b) return 0;
+        if (*a) a++;
+        if (*b) b++;
+    }
+}
+
+/* An update to an older XenithOS than this one. It's never installed: a list from before (a
+ * signed one, played back by someone in between) mustn't take this machine back to a version
+ * that doesn't check what it installs. */
+static int is_older_xenithos(const struct item *it)
+{
+    return is_update(it) && version_cmp(it->version, XENITH_VERSION) < 0;
+}
+
 static int file_size(const char *path)
 {
     struct stat s;
@@ -118,7 +148,7 @@ static int own_state(const struct item *it)
     if (it->local) return file_size(it->dest) >= 0 ? ST_INSTALLED : ST_NEW;
     have = file_size(it->dest);
     if (is_update(it))
-        return !strcmp(it->version, XENITH_VERSION) ? ST_INSTALLED : ST_UPDATE;
+        return version_cmp(it->version, XENITH_VERSION) > 0 ? ST_UPDATE : ST_INSTALLED;
     return have < 0 ? ST_NEW : have == it->size ? ST_INSTALLED : ST_UPDATE;
 }
 
@@ -418,12 +448,28 @@ static int load_bundle(char *b, int n)
     return ended;
 }
 
+/* A Store reply that didn't come signed by XenithOS Cloud, when this build checks (store_sig.c). */
+static void refuse_unsigned(void)
+{
+    ui_busy_end();
+    sfx(SFX_ERROR);
+    ui_message("The Store didn't load", "Its list didn't come signed by XenithOS Cloud, so something on the way here may have changed it. To be safe, the Store stays closed. Try again later or on another network.");
+}
+
+/* One reply from its own route: 1 with it in r (signed, when this build checks), 0 when there's
+ * none, -1 when its signature is missing or wrong. */
+static int signed_get(const char *path, const char *name, int max, struct http_resp *r)
+{
+    if (cloud_get(path, max, r) != 200) return 0;
+    return store_sig_ok(r, name) ? 1 : -1;
+}
+
 /* Servers before /v1/store/all: each list and thumbnail on its own. */
 static int load_separately(void)
 {
     struct http_resp r;
-    char path[96];
-    int code, i;
+    char path[96], name[64];
+    int code, i, got = 1;
 
     code = cloud_get("/v1/store", 64 * 1024, &r);
     if (code != 200) {
@@ -433,23 +479,30 @@ static int load_separately(void)
         http_free(&r);
         return 0;
     }
-    add_store_rows(r.body);
+    if (!store_sig_ok(&r, "store")) got = -1;
+    else add_store_rows(r.body);
     http_free(&r);
-    if (cloud_get("/v1/store/needs", 8 * 1024, &r) == 200) add_needs(r.body);
+    if (got > 0 && (got = signed_get("/v1/store/needs", "needs", 8 * 1024, &r)) > 0) add_needs(r.body);
     http_free(&r);
-    add_pc_only();
-    if (has_tabs) {                                   /* PCs: Flathub, and Steam where it runs */
-        if (cloud_get("/v1/store/flathub", 64 * 1024, &r) == 200) add_flathub(r.body);
+    if (got >= 0) add_pc_only();
+    if (got >= 0 && has_tabs) {                       /* PCs: Flathub, and Steam where it runs */
+        if ((got = signed_get("/v1/store/flathub", "flathub", 64 * 1024, &r)) > 0) add_flathub(r.body);
         http_free(&r);
-        if (!strcmp(plat_arch(), "x86_64")) {
+        if (got >= 0 && !strcmp(plat_arch(), "x86_64")) {
             plat_sync_apps();
-            if (cloud_get("/v1/store/steam", 64 * 1024, &r) == 200) add_steam(r.body);
+            if ((got = signed_get("/v1/store/steam", "steam", 64 * 1024, &r)) > 0) add_steam(r.body);
             http_free(&r);
         }
     }
-    for (i = 0; i < nitems; i++) {
+    if (got < 0) {
+        free_items();
+        refuse_unsigned();
+        return 0;
+    }
+    for (i = 0; i < nitems; i++) {                    /* a thumbnail that isn't signed is left out */
         snprintf(path, sizeof path, "/v1/store/icon/%s.ximg", items[i].id);
-        if (cloud_get(path, 512 * 1024, &r) == 200) set_icon(&items[i], r.body, r.body_len);
+        snprintf(name, sizeof name, "icon %s.ximg", items[i].id);
+        if (signed_get(path, name, 512 * 1024, &r) > 0) set_icon(&items[i], r.body, r.body_len);
         http_free(&r);
     }
     return 1;
@@ -466,7 +519,13 @@ static int load_store(void)
     has_tabs = plat_kind() == PLAT_PC;
     ui_busy_begin("Opening the Store", NULL);
     code = cloud_get(has_tabs ? "/v1/store/all?pc=1" : "/v1/store/all", 1024 * 1024, &r);
-    ok = code == 200 && load_bundle(r.body, r.body_len);
+    ok = code == 200 && r.body_len >= 9 && !memcmp(r.body, "XSTORE 1\n", 9);
+    if (ok && !store_sig_ok(&r, has_tabs ? "all pc" : "all")) {     /* before load_bundle changes it */
+        http_free(&r);
+        refuse_unsigned();
+        return 0;
+    }
+    ok = ok && load_bundle(r.body, r.body_len);
     http_free(&r);
     if (!ok && code < 0) {                    /* not reachable: asking again the old way won't help */
         ui_busy_end();
@@ -491,15 +550,49 @@ static int load_store(void)
 
 /* ---------------------------------------------------------------- installing */
 
+/* The downloads queue: what X picked, in order, and while START runs them, a job for each. */
+#define MAX_PICKS 16
+static int picks[MAX_PICKS], npicks;
+
+enum { JOB_WAITING, JOB_RUNNING, JOB_DONE, JOB_STOPPED, JOB_FAILED, JOB_SKIPPED };
+struct job {
+    int item, state;
+    int part, parts;            /* the download it's on, of how many (with its game data) */
+    int got, total;             /* bytes of that download so far */
+    int pct;                    /* Flatpak's percent, -1 while it gets ready */
+    char doing[64];             /* "Downloading", "Checking the download" */
+    char why[120];              /* JOB_FAILED: what went wrong */
+};
+static struct job jobs[MAX_PICKS];
+static int njobs, cur_job = -1;     /* the one running, -1 outside the queue */
+static int stop_this, stop_all;     /* B and X on the downloads screen */
+static void draw_jobs(int running);
+
 static const char *install_name;
 static uint64_t last_draw;
 static void on_progress(int got, int total, void *ctx)
 {
     uint64_t now = ui_ms();
     (void)ctx;
+    if (cur_job >= 0) {                  /* the downloads screen draws it, from the idle hook */
+        jobs[cur_job].got = got;
+        jobs[cur_job].total = total;
+        return;
+    }
     if (now - last_draw < 40 && got != total) return;
     last_draw = now;
     ui_progress_frame("Downloading", install_name, got, total);
+}
+
+/* What a download is doing, on whichever screen shows it. */
+static void stage(const char *title, const char *detail)
+{
+    if (cur_job < 0) {
+        ui_loading_frame(title, detail);
+        return;
+    }
+    snprintf(jobs[cur_job].doing, sizeof jobs[cur_job].doing, "%s", title);
+    draw_jobs(1);
 }
 
 static void ensure_dir(const char *path)
@@ -527,42 +620,50 @@ static int write_file(const char *path, const void *data, int len)
     return 1;
 }
 
-/* Download one item, check it against the Store's SHA-256 and save it. step of steps when
- * several go together. Says what went wrong itself; returns 1 when it's in place. */
-static int fetch(struct item *it, int step, int steps)
+/* Why fetch_part() didn't put a download in place: a title and what to say, or a short line for
+ * the downloads screen. */
+static const char *fail_title, *fail_text, *fail_short;
+
+/* Download one item, check it against the Store's SHA-256 and save it: 1 when it's in place,
+ * 0 when something went wrong (fail_*), -1 when it was stopped (the downloads screen's B). */
+static int fetch_part(struct item *it, const char *detail)
 {
-    char path[96], hex[65], detail[64];
+    char path[96], hex[65];
     struct http_resp r;
     int code;
 
-    if (steps > 1) snprintf(detail, sizeof detail, "%s (%d of %d)", it->name, step, steps);
-    else snprintf(detail, sizeof detail, "%s", it->name);
     snprintf(path, sizeof path, "/v1/store/file/%s", it->id);
     install_name = detail;
     last_draw = 0;
-    ui_progress_frame("Downloading", detail, 0, it->size);
+    if (cur_job < 0) ui_progress_frame("Downloading", detail, 0, it->size);
     code = http_request(cfg.server, "GET", path, NULL, 0, it->size + 4096, on_progress, NULL, &r);
+    if (code == NE_CANCELLED) {
+        http_free(&r);
+        return -1;
+    }
     if (code != 200) {
-        sfx(SFX_ERROR);
-        ui_message("Download failed", cloud_error_text(&r, code));
+        fail_title = "Download failed";
+        fail_text = fail_short = cloud_error_text(&r, code);
         http_free(&r);
         return 0;
     }
 
-    ui_loading_frame("Checking the download", "Comparing its SHA-256 with the Store");
+    stage("Checking the download", "Comparing its SHA-256 with the Store");
     sha256_hex(r.body, r.body_len, hex);
     if (r.body_len != it->size || strcmp(hex, it->sha)) {
         http_free(&r);
-        sfx(SFX_ERROR);
-        ui_message("The download was damaged", "Nothing more was installed. Try again in a moment.");
+        fail_title = "The download was damaged";
+        fail_text = "Nothing more was installed. Try again in a moment.";
+        fail_short = "The download was damaged, so it wasn't installed.";
         return 0;
     }
 
-    ui_loading_frame("Installing", detail);
+    stage("Installing", detail);
     if (!write_file(it->dest, r.body, r.body_len)) {
         http_free(&r);
-        sfx(SFX_ERROR);
-        ui_message("Couldn't save it", "Is the USB stick full or write-protected?");
+        fail_title = "Couldn't save it";
+        fail_text = "Is the USB stick full or write-protected?";
+        fail_short = "Couldn't save it. Is the USB stick full?";
         return 0;
     }
     http_free(&r);
@@ -579,6 +680,19 @@ static int fetch(struct item *it, int step, int steps)
         write_file(path, meta, n);
     }
     return 1;
+}
+
+/* fetch_part() on its own screens, saying what went wrong itself. step of steps when several go
+ * together. Returns 1 when it's in place. */
+static int fetch(struct item *it, int step, int steps)
+{
+    char detail[64];
+    if (steps > 1) snprintf(detail, sizeof detail, "%s (%d of %d)", it->name, step, steps);
+    else snprintf(detail, sizeof detail, "%s", it->name);
+    if (fetch_part(it, detail) > 0) return 1;
+    sfx(SFX_ERROR);
+    ui_message(fail_title, fail_text);
+    return 0;
 }
 
 /* While a PC update builds: what it's doing, and for how long. */
@@ -601,6 +715,11 @@ static void install_pc_update(struct item *it)
 {
     char body[200], why[200];
     int ok;
+    if (is_older_xenithos(it)) {
+        snprintf(body, sizeof body, "This machine has XenithOS %s, which is newer than the Store's %s, so there's nothing to install.", XENITH_VERSION, it->version);
+        ui_message("Already newer", body);
+        return;
+    }
     snprintf(body, sizeof body, "XenithOS %s builds itself here from its source: about a minute on a PC, a few on a Raspberry Pi. The current version stays if anything goes wrong.", it->version);
     if (!ui_confirm("Update XenithOS?", body, "Update", "Cancel")) return;
     if (!fetch(it, 1, 1)) {
@@ -850,12 +969,37 @@ static void get_on_steam(struct item *it)
 
 /* ----------------------------------------------- XenithOS's own apps on a PC */
 
+/* Once its game data is here: on the home screen, with its name and picture from the Store when
+ * this machine had none. 1 when it's there. */
+static int put_on_home(struct item *it)
+{
+    char path[96];
+    if (it->own != ST_INSTALLED && !plat_local_app_set(it->id, 1)) return 0;
+    snprintf(path, sizeof path, "uda:/apps/%s.txt", it->id);
+    if (file_size(path) < 0) {
+        FILE *f = fopen(path, "w");
+        if (f) {
+            fprintf(f, "name=%s\nversion=%s\n", it->name, it->version);
+            fclose(f);
+        }
+    }
+    snprintf(path, sizeof path, "uda:/apps/%s.ximg", it->id);
+    if (file_size(path) < 0 && it->icon_raw) {
+        FILE *f = fopen(path, "wb");
+        if (f) {
+            fwrite(it->icon_raw, 1, it->icon_len, f);
+            fclose(f);
+        }
+    }
+    return 1;
+}
+
 /* They're built here already: installing downloads the game data one comes with (Freedoom with
  * DOOM), then puts it on the home screen. */
 static void install_local(struct item *it)
 {
     struct item *todo[MAX_NEEDS];
-    char q[96], body[240], list[120], sz[24], path[96];
+    char q[96], body[240], list[120], sz[24];
     int n = 0, i, bytes = 0;
     if (it->state == ST_INSTALLED) { start_item(it); return; }
     for (i = 0; i < it->nneeds; i++)
@@ -877,29 +1021,12 @@ static void install_local(struct item *it)
             update_states();
             return;
         }
-    if (it->own != ST_INSTALLED && !plat_local_app_set(it->id, 1)) {
+    if (!put_on_home(it)) {
         update_states();
         sfx(SFX_ERROR);
         snprintf(q, sizeof q, "%s didn't install", it->name);
         ui_message(q, "It couldn't be put on the home screen. Try the XenithOS update in the Store, then try again.");
         return;
-    }
-    /* Its name and picture for the home screen, from the Store when this machine had none. */
-    snprintf(path, sizeof path, "uda:/apps/%s.txt", it->id);
-    if (file_size(path) < 0) {
-        FILE *f = fopen(path, "w");
-        if (f) {
-            fprintf(f, "name=%s\nversion=%s\n", it->name, it->version);
-            fclose(f);
-        }
-    }
-    snprintf(path, sizeof path, "uda:/apps/%s.ximg", it->id);
-    if (file_size(path) < 0 && it->icon_raw) {
-        FILE *f = fopen(path, "wb");
-        if (f) {
-            fwrite(it->icon_raw, 1, it->icon_len, f);
-            fclose(f);
-        }
     }
     update_states();
     sfx(SFX_SUCCESS);
@@ -968,6 +1095,11 @@ static void install(struct item *it)
         return;
     }
     if (!strcmp(it->kind, "system")) {
+        if (is_older_xenithos(it)) {
+            snprintf(body, sizeof body, "This console has XenithOS %s, which is newer than the Store's %s, so there's nothing to install.", XENITH_VERSION, it->version);
+            ui_message("Already newer", body);
+            return;
+        }
         if (!ui_confirm("Update XenithOS?", "This replaces xenon.elf on your USB stick with the version from the Store.", "Update", "Cancel")) return;
         todo[n++] = it;
     } else if (it->nneeds && it->state != ST_INSTALLED) {
@@ -1008,6 +1140,305 @@ static void install(struct item *it)
         snprintf(q, sizeof q, "%s is installed", it->name);
         ui_message(q, "Apps that use it will find it automatically.");
     }
+}
+
+/* --------------------------------------------------------- the downloads queue */
+
+/* What can be picked for it: things XenithOS Cloud or Flathub downloads. Not XenithOS updates
+ * (they restart or build XenithOS, so they go on their own) or Steam games (Steam installs them). */
+static int can_queue(const struct item *it)
+{
+    if (is_update(it) || is_steam_game(it)) return 0;
+    if (is_flathub(it)) return !it->unavailable && it->state != ST_INSTALLED;
+    if (it->local) return it->own != ST_INSTALLED;
+    return it->state != ST_INSTALLED;
+}
+
+static int pick_index(int item)
+{
+    int i;
+    for (i = 0; i < npicks; i++) if (picks[i] == item) return i;
+    return -1;
+}
+
+/* X on an item: into the queue, or out of it again. */
+static void toggle_pick(int item)
+{
+    int at = pick_index(item);
+    if (at >= 0) {
+        memmove(&picks[at], &picks[at + 1], (size_t)(npicks - at - 1) * sizeof picks[0]);
+        npicks--;
+        sfx(SFX_BACK);
+    } else if (npicks >= MAX_PICKS) {
+        char title[48];
+        snprintf(title, sizeof title, "That's %d already", MAX_PICKS);
+        sfx(SFX_ERROR);
+        ui_toast_icon(ICON_INFO);
+        ui_toast(title, "Press START to download them, then pick more.");
+    } else {
+        picks[npicks++] = item;
+        sfx(SFX_SELECT);
+    }
+}
+
+/* Picks that can't be downloaded any more (installed in the meantime) come out. */
+static void prune_picks(void)
+{
+    int i, n = 0;
+    for (i = 0; i < npicks; i++) if (can_queue(&items[picks[i]])) picks[n++] = picks[i];
+    npicks = n;
+}
+
+/* Bytes still to come from XenithOS Cloud for an item: its own file and missing game data. */
+static int missing_size(const struct item *it)
+{
+    int n, bytes = !it->local && it->own != ST_INSTALLED ? it->size : 0;
+    for (n = 0; n < it->nneeds; n++)
+        if (items[it->needs[n]].own != ST_INSTALLED) bytes += items[it->needs[n]].size;
+    return bytes;
+}
+
+/* "VOLT, DOOM and Kodi", "VOLT, DOOM, Kodi and 2 more" */
+static void picks_text(char *out, int size)
+{
+    int i, len = 0, shown = npicks <= 4 ? npicks : 3;
+    out[0] = 0;
+    for (i = 0; i < shown && len < size; i++)
+        len += snprintf(out + len, size - len, "%s%s", i == 0 ? "" : i == shown - 1 && shown == npicks ? " and " : ", ",
+                        items[picks[i]].name);
+    if (shown < npicks && len < size) snprintf(out + len, size - len, " and %d more", npicks - shown);
+}
+
+/* One job's line under its name, and the colour for it. */
+static void job_line(const struct job *j, char *out, int n, uint32_t *color)
+{
+    const struct item *it = &items[j->item];
+    *color = C_SUB;
+    switch (j->state) {
+    case JOB_WAITING: snprintf(out, n, "Waiting"); *color = C_DIM; break;
+    case JOB_RUNNING:
+        if (is_flathub(it)) snprintf(out, n, "%s", j->pct >= 0 ? "Installing from Flathub" : "Getting ready");
+        else if (j->parts > 1) snprintf(out, n, "%s, %d of %d", j->doing, j->part, j->parts);
+        else snprintf(out, n, "%s", j->doing);
+        break;
+    case JOB_DONE: snprintf(out, n, "Installed"); *color = C_OK; break;
+    case JOB_STOPPED: snprintf(out, n, "Stopped"); *color = C_DIM; break;
+    case JOB_FAILED: snprintf(out, n, "%s", j->why); *color = C_WARN; break;
+    default: snprintf(out, n, "Not downloaded"); *color = C_DIM; break;
+    }
+}
+
+static void draw_job(const struct job *j, int x, int y, int w, int h)
+{
+    const struct item *it = &items[j->item];
+    int tw = (h - 20) * 16 / 9, tx = x + tw + 28, bar = j->state == JOB_RUNNING ? 260 : 0;
+    char line[140];
+    uint32_t color;
+    if (it->icon.px) gfx_image_rounded(&it->icon, x + 12, y + 10, tw, h - 20, 8, 255);
+    else {
+        gfx_fill_rrect(x + 12.0f, y + 10.0f, (float)tw, h - 20.0f, 8, C_SURFACE2, 255);
+        icon_draw(ICON_DOWNLOAD, x + 12 + tw / 2.0f, y + h / 2.0f, 26, C_DIM, C_SURFACE2);
+    }
+    gfx_str_fit(FONT_BODY_SB, tx, y + 14, C_TEXT, it->name, w - tw - 60 - bar);
+    job_line(j, line, sizeof line, &color);
+    gfx_str_fit(FONT_SMALL, tx, y + 44, color, line, w - tw - 60 - bar);
+    if (bar) {
+        int bw = bar - 40, bx = x + w - bar + 20, by = y + h / 2 - 10;
+        float f = is_flathub(it) ? (j->pct > 0 ? j->pct / 100.0f : 0) : j->total > 0 ? (float)j->got / j->total : 0;
+        char amount[48], a[24], b[24];
+        if (f > 1) f = 1;
+        gfx_fill_rrect((float)bx, (float)by, (float)bw, 6, 3, C_SURFACE2, 255);
+        if (f > 0) gfx_fill_rrect((float)bx, (float)by, bw * f, 6, 3, C_ACCENT, 255);
+        if (is_flathub(it)) {
+            amount[0] = 0;
+            if (j->pct >= 0) snprintf(amount, sizeof amount, "%d%%", j->pct);
+        } else {
+            size_text(j->got, a, sizeof a);
+            size_text(j->total, b, sizeof b);
+            snprintf(amount, sizeof amount, "%s of %s", a, b);
+        }
+        gfx_str_r(FONT_SMALL, bx + bw, by + 14, C_SUB, amount);
+    }
+}
+
+/* The downloads screen, one frame: the jobs, the one running highlighted. */
+static int jobs_first;
+static void draw_jobs(int running)
+{
+    int top = HEADER_H + 16, rowh = 84, w = SCR_W - 2 * M, visible = (SCR_H - top - 70) / rowh, i, len = 0;
+    int count[JOB_SKIPPED + 1] = {0};
+    char sub[160];
+    if (visible < 1) visible = 1;
+    if (running && cur_job >= 0) {
+        if (cur_job < jobs_first) jobs_first = cur_job;
+        if (cur_job >= jobs_first + visible) jobs_first = cur_job - visible + 1;
+    }
+    if (jobs_first > njobs - visible) jobs_first = njobs - visible;
+    if (jobs_first < 0) jobs_first = 0;
+    for (i = 0; i < njobs; i++) count[jobs[i].state]++;
+    if (running) {
+        snprintf(sub, sizeof sub, "%d of %d, one after another. B stops the one downloading, and the rest carry on.", cur_job + 1, njobs);
+    } else {
+        len = snprintf(sub, sizeof sub, "%d installed", count[JOB_DONE]);
+        if (count[JOB_STOPPED]) len += snprintf(sub + len, sizeof sub - len, ", %d stopped", count[JOB_STOPPED]);
+        if (count[JOB_FAILED]) len += snprintf(sub + len, sizeof sub - len, ", %d didn't install", count[JOB_FAILED]);
+        if (count[JOB_SKIPPED]) snprintf(sub + len, sizeof sub - len, ", %d not downloaded", count[JOB_SKIPPED]);
+    }
+    ui_bg();
+    ui_header("Downloads", sub);
+    for (i = 0; i < visible && jobs_first + i < njobs; i++) {
+        int y = top + i * rowh;
+        if (jobs_first + i == cur_job) ui_select_box((float)M, (float)y, (float)w, rowh - 8.0f, 10);
+        draw_job(&jobs[jobs_first + i], M, y, w, rowh - 8);
+    }
+    ui_hints(running ? "B=Stop this one;X=Stop all" : "A=Done");
+    ui_end_frame();
+}
+
+/* While a download waits on the network (the idle hook) and while Flatpak works: B stops the one
+ * running, X stops it and everything after it. */
+static void jobs_tick(void)
+{
+    ui_poll();
+    if (cur_job >= 0 && PRESSED(x) && !stop_all) {
+        sfx(SFX_BACK);
+        stop_all = stop_this = 1;
+        net_cancel();
+    } else if (cur_job >= 0 && PRESSED(b) && !stop_this) {
+        sfx(SFX_BACK);
+        stop_this = 1;
+        net_cancel();
+    }
+    draw_jobs(1);
+}
+
+static int jobs_flatpak_step(int pct, int seconds)
+{
+    (void)seconds;
+    jobs[cur_job].pct = pct;
+    jobs_tick();
+    return !stop_this;
+}
+
+/* One job: everything its item needs, then it's on the home screen (apps from Flathub and
+ * XenithOS's own on a PC) or in place. */
+static void run_job(struct job *j)
+{
+    struct item *it = &items[j->item], *todo[1 + MAX_NEEDS];
+    char why[240];
+    int n = 0, k, r;
+
+    j->state = JOB_RUNNING;
+    if (is_flathub(it)) {
+        j->part = j->parts = 1;
+        draw_jobs(1);
+        r = plat_flatpak("install", it->ref, jobs_flatpak_step, why, sizeof why);
+        if (r > 0) {
+            write_app_file(it);
+            j->state = JOB_DONE;
+        } else if (r < 0) {
+            j->state = JOB_STOPPED;
+        } else {
+            j->state = JOB_FAILED;
+            snprintf(j->why, sizeof j->why, "%s", why);
+        }
+        return;
+    }
+    if (!it->local && it->own != ST_INSTALLED) todo[n++] = it;
+    for (k = 0; k < it->nneeds; k++)
+        if (items[it->needs[k]].own != ST_INSTALLED) todo[n++] = &items[it->needs[k]];
+    j->parts = n;
+    for (k = 0; k < n; k++) {
+        if (stop_this) {
+            j->state = JOB_STOPPED;
+            return;
+        }
+        j->part = k + 1;
+        j->got = 0;
+        j->total = todo[k]->size;
+        if (n > 1) snprintf(j->doing, sizeof j->doing, "Downloading %s", todo[k]->name);
+        else snprintf(j->doing, sizeof j->doing, "Downloading");
+        draw_jobs(1);
+        r = fetch_part(todo[k], todo[k]->name);
+        update_states();                       /* what's here now, for its next part and the next job */
+        if (r < 0) {
+            j->state = JOB_STOPPED;
+            return;
+        }
+        if (r == 0) {
+            j->state = JOB_FAILED;
+            snprintf(j->why, sizeof j->why, "%s", fail_short);
+            return;
+        }
+    }
+    if (it->local && !put_on_home(it)) {
+        j->state = JOB_FAILED;
+        snprintf(j->why, sizeof j->why, "It couldn't be put on the home screen. Try the XenithOS update first.");
+        return;
+    }
+    j->state = JOB_DONE;
+}
+
+/* The picks, one after another on the downloads screen, which stays up with how each went. */
+static void run_queue(void)
+{
+    int i, done = 0, failed = 0;
+    njobs = 0;
+    for (i = 0; i < npicks; i++) {
+        memset(&jobs[njobs], 0, sizeof jobs[njobs]);
+        jobs[njobs].item = picks[i];
+        jobs[njobs].pct = -1;
+        njobs++;
+    }
+    npicks = 0;
+    stop_all = 0;
+    jobs_first = 0;
+    net_set_idle_hook(jobs_tick);
+    for (i = 0; i < njobs; i++) {
+        cur_job = i;
+        stop_this = 0;
+        if (stop_all) jobs[i].state = JOB_SKIPPED;
+        else run_job(&jobs[i]);
+        update_states();
+        done += jobs[i].state == JOB_DONE;
+        failed += jobs[i].state == JOB_FAILED;
+    }
+    net_set_idle_hook(NULL);
+    cur_job = -1;
+    update_states();
+    sfx(failed ? SFX_ERROR : done ? SFX_SUCCESS : SFX_BACK);
+    for (;;) {
+        ui_poll();
+        jobs_first += ui_nav_y();
+        if (PRESSED(a) || PRESSED(b)) {
+            sfx(SFX_SELECT);
+            return;
+        }
+        draw_jobs(0);
+    }
+}
+
+/* START: says what's picked and how much, then downloads it all. */
+static void start_queue(void)
+{
+    char q[64], body[360], names[200], sz[24];
+    int i, bytes = 0, mb = 0;
+    if (!npicks) return;
+    for (i = 0; i < npicks; i++) {
+        const struct item *it = &items[picks[i]];
+        if (is_flathub(it)) mb += it->mb > 0 ? it->mb : 1;
+        else bytes += missing_size(it);
+    }
+    if (mb && !need_flatpak()) return;
+    picks_text(names, sizeof names);
+    if (mb) mb_text(mb + bytes / 1048576, sz, sizeof sz);      /* Flathub's sizes are in MB, and can be GB */
+    else size_text(bytes, sz, sizeof sz);
+    if (npicks == 1) snprintf(q, sizeof q, "Download %s?", items[picks[0]].name);
+    else snprintf(q, sizeof q, "Download all %d?", npicks);
+    snprintf(body, sizeof body, "%s%s in all, one after another: %s. B stops the one that's downloading, and the rest carry on.",
+             mb ? "About " : "", sz, names);
+    if (!ui_confirm(q, body, "Download", "Cancel")) return;
+    run_queue();
 }
 
 /* ------------------------------------------------------------------ screen */
@@ -1057,6 +1488,8 @@ static void note_text(const struct item *it, char *out, int n)
         snprintf(out, n, "Comes with %s.", list);
     } else if (it->local) {
         snprintf(out, n, "It comes with XenithOS, so installing it puts it on the home screen.");
+    } else if (is_older_xenithos(it)) {
+        snprintf(out, n, "This machine has XenithOS %s, which is newer.", XENITH_VERSION);
     } else if (is_flathub(it) && it->unavailable) {
         snprintf(out, n, "Not available for this machine's processor (%s).", plat_arch());
     } else if (is_steam_app(it)) {
@@ -1084,6 +1517,7 @@ static void draw_row(struct item *it, int x, int y, int w, int h, int sel)
     gfx_str_fit(FONT_BODY_SB, x + tw + 28, y + 14, fg, it->name, w - tw - 150);
     gfx_str_fit(FONT_SMALL, x + tw + 28, y + 44, sub, meta, w - tw - 150);
     if (it->unavailable) gfx_str_r(FONT_SMALL, x + w - 16, y + h / 2 - 10, C_DIM, "Not for this PC");
+    else if (pick_index((int)(it - items)) >= 0) gfx_str_r(FONT_SMALL, x + w - 16, y + h / 2 - 10, C_ACCENT_HI, "Queued");
     else if (it->state == ST_INSTALLED) gfx_str_r(FONT_SMALL, x + w - 16, y + h / 2 - 10, C_OK, "Installed");
     else if (it->state == ST_UPDATE) gfx_str_r(FONT_SMALL, x + w - 16, y + h / 2 - 10, C_ACCENT_HI, "Update");
 }
@@ -1119,8 +1553,9 @@ static void switch_tab(int dir)
     build_view();
 }
 
-static const char *hints_for(const struct item *it)
+static const char *base_hints(const struct item *it)
 {
+    if (is_older_xenithos(it)) return has_tabs ? "RB=Next section;Y=Refresh;B=Back" : "Y=Refresh;B=Back";
     if (is_flathub(it)) {
         if (it->unavailable) return has_tabs ? "A=Why not;RB=Next section;Y=Refresh;B=Back" : "A=Why not;Y=Refresh;B=Back";
         if (it->state == ST_INSTALLED) return "A=Start;X=Update or remove;RB=Next section;B=Back";
@@ -1138,11 +1573,34 @@ static const char *hints_for(const struct item *it)
          : it->state == ST_UPDATE ? "A=Update;Y=Refresh;B=Back" : "A=Install;Y=Refresh;B=Back";
 }
 
+/* base_hints with the downloads queue's after A: X picks the item (or puts it back), and START
+ * downloads what's picked. it is NULL in an empty section. */
+static const char *hints_for(const struct item *it)
+{
+    static char out[200];
+    const char *base, *rest;
+    char x[40] = "", start[32] = "";
+    if (!it) {
+        base = has_tabs ? "RB=Next section;Y=Refresh;B=Back" : "Y=Refresh;B=Back";
+        if (!npicks) return base;
+        snprintf(out, sizeof out, "START=Download %d;%s", npicks, base);
+        return out;
+    }
+    base = base_hints(it);
+    rest = strchr(base, ';');
+    if (can_queue(it)) snprintf(x, sizeof x, ";X=%s", pick_index((int)(it - items)) >= 0 ? "Take off downloads" : "Add to downloads");
+    if (npicks) snprintf(start, sizeof start, ";START=Download %d", npicks);
+    if (!x[0] && !start[0]) return base;
+    snprintf(out, sizeof out, "%.*s%s%s%s", rest ? (int)(rest - base) : (int)strlen(base), base, x, start, rest ? rest : "");
+    return out;
+}
+
 void screen_store(void)
 {
     int sel = 0, first = 0, i;
     float hl = 0;
 
+    npicks = 0;
     if (!cloud_ready("Store")) return;
     if (!load_store()) return;
     tab_hl = -1;
@@ -1155,28 +1613,44 @@ void screen_store(void)
         ui_poll();
         d = ui_nav_y();
         if (d && nview && sel + d >= 0 && sel + d < nview) { sel += d; sfx(SFX_MOVE); }
-        if (PRESSED(b)) { sfx(SFX_BACK); free_items(); return; }
+        if (PRESSED(b)) {
+            char body[120];
+            sfx(SFX_BACK);
+            if (npicks == 1) snprintf(body, sizeof body, "You picked one thing to download. Leaving forgets it.");
+            else snprintf(body, sizeof body, "You picked %d things to download. Leaving forgets them.", npicks);
+            if (!npicks || ui_confirm("Leave the Store?", body, "Leave", "Stay")) {
+                npicks = 0;
+                free_items();
+                return;
+            }
+        }
         if (has_tabs && (PRESSED(rb) || PRESSED(lb))) {
             switch_tab(PRESSED(rb) ? 1 : -1);
             sel = first = 0;
             hl = 0;
         }
         if (PRESSED(y)) {
-            int keep = tab;
+            char ids[MAX_PICKS][33];
+            int keep = tab, n = npicks, k;
+            for (k = 0; k < n; k++) snprintf(ids[k], sizeof ids[k], "%s", items[picks[k]].id);
             sfx(SFX_SELECT);
-            if (!load_store()) return;
+            if (!load_store()) { npicks = 0; return; }
+            npicks = 0;                                       /* the picks again, by id */
+            for (k = 0; k < n; k++)
+                for (i = 0; i < nitems; i++)
+                    if (!strcmp(items[i].id, ids[k]) && can_queue(&items[i])) { picks[npicks++] = i; break; }
             if (has_tabs && tab_count(keep)) { tab = keep; build_view(); }
             if (sel >= nview) sel = 0;
         }
         if (PRESSED(a) && nview) { sfx(SFX_SELECT); install(&items[view[sel]]); }
-        if (PRESSED(x) && nview && is_flathub(&items[view[sel]]) && items[view[sel]].state == ST_INSTALLED) {
-            sfx(SFX_SELECT);
-            flathub_options(&items[view[sel]]);
+        if (PRESSED(x) && nview) {
+            struct item *it = &items[view[sel]];
+            if (can_queue(it)) toggle_pick(view[sel]);
+            else if (is_flathub(it) && it->state == ST_INSTALLED) { sfx(SFX_SELECT); flathub_options(it); }
+            else if (it->local && it->own == ST_INSTALLED) { sfx(SFX_SELECT); local_options(it); }
         }
-        if (PRESSED(x) && nview && items[view[sel]].local && items[view[sel]].own == ST_INSTALLED) {
-            sfx(SFX_SELECT);
-            local_options(&items[view[sel]]);
-        }
+        if (PRESSED(start) && npicks) { sfx(SFX_SELECT); start_queue(); }
+        prune_picks();
         if (sel >= nview) sel = nview ? nview - 1 : 0;
 
         ui_bg();
@@ -1234,8 +1708,7 @@ void screen_store(void)
                 }
             }
         }
-        if (nview) ui_hints(hints_for(&items[view[sel]]));
-        else ui_hints(has_tabs ? "RB=Next section;Y=Refresh;B=Back" : "Y=Refresh;B=Back");
+        ui_hints(hints_for(nview ? &items[view[sel]] : NULL));
         ui_end_frame();
     }
 }

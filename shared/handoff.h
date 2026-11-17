@@ -17,6 +17,9 @@
 
 void handoff_args(int argc, char **argv);              /* first thing in main */
 int  handoff_received(void);                           /* started by another XenithOS program */
+/* The path this program was started from (argv[0]: "uda:/apps/volt.elf32"), "" if none was
+ * given (XeLL starting xenon.elf). For crash files on the Xbox, which has no other way to tell. */
+const char *handoff_self(void);
 const char *handoff_get(const char *key);              /* what it passed, or NULL */
 void handoff_set(const char *key, const char *value);  /* for the next program; NULL removes */
 /* The next program's arguments: argv[0] = path, then the mark and the pairs. Returns argc. */

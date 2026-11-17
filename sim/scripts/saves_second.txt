@@ -1,0 +1,19 @@
+# Cloud saves, the second console (a PC, signed in as Saver, a new stick): DOOM's saves and settings
+# come down when XenithOS starts. Then Interface sounds turned off in Settings, which goes up as
+# one of XenithOS's settings that follow the profile. Part of sim/social/test-saves.sh.
+wait 260
+shot sb_home
+press right
+press right
+press right
+press right
+press right
+press a
+wait 30
+press down
+press a
+wait 10
+shot sb_settings
+press b
+wait 30
+quit

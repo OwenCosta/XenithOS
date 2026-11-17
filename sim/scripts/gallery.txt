@@ -15,6 +15,7 @@ shot shot-cloud
 press b
 wait 20
 press right
+press right
 press a
 wait 60
 shot shot-profile

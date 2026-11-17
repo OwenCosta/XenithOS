@@ -20,10 +20,12 @@ press right 2
 press right
 press right
 press right
+press right
 wait 5
 press a
 wait 30
 shot settings
+press down
 press down
 press down
 press down

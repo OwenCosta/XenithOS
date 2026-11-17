@@ -1,7 +1,7 @@
 # The Apps screen: one app to a line going down, the list sliding to keep the chosen one in view,
 # and "Running" on a game the guide left running (Roblox, from here).
 #   XSIM_KIND=pc XSIM_GUIDE=1 XSIM_OTHER="roblox minecraft" XSIM_APPS=6 sim/run.sh sim/scripts/apps_list.txt apps_list
-# The list is by name: DOOM, Game 1 to 6, Minecraft, Photos, Roblox, Tube, VOLT.
+# The list is by name: DOOM, Game 1 to 6, Minecraft, Music, Photos, Roblox, Tube, VOLT.
 wait 210
 press a
 wait 40
@@ -11,6 +11,7 @@ press down
 press down
 wait 20
 shot apps_down3
+press down
 press down
 press down
 press down
