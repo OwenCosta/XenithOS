@@ -43,6 +43,11 @@ More switches:
   The stand-in answers server list pings on its port (on `server-ip`, or 127.0.0.1), and `sim/hostmc/ping.py`
   sends one. With Paper's `proxies.proxy-protocol` on in `config/paper-global.yml` it wants a PROXY header
   first, as Paper does, and notes who each connection was from in `connections.log`.
+- `sim/hostmc/test-bedrock.sh` runs HostMC's Bedrock players (Geyser and Floodgate) through the
+  `hostmc_bedrock*.txt` scripts against a stand-in for GeyserMC's download service (`sim/hostmc/geysermc.py`,
+  through `HOSTMC_GEYSER_API`), with the stand-in server acting as Paper (it loads the two plugins and takes
+  Floodgate's `fwhitelist`), and checks the downloads, their checksums, a refused update and turning it off;
+  screenshots go to `sim/out/hostmc-bedrock`.
 - `XSIM_DESKTOP=1` runs the program as a desktop app, as XenithOS Desktop's Apps menu opens it
   (`plat_desktop()`): the script drives a mouse and the keyboard's own keys too (below), and
   `XSIM_CLIPBOARD` is what's been copied when it starts (what the program copies is said on stderr, as

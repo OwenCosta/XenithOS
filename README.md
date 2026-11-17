@@ -39,8 +39,10 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
 - HostMC (PCs and Pis): a Minecraft: Java Edition server for you and your friends, Minecraft's own or Paper.
   Start and stop it, see who's on, type commands, change its settings, back the world up, and let friends
   join from anywhere through [playit.gg](https://playit.gg), a VPS of your own, or, for supporters on
-  Patreon, the supporter relay, with a name of its own. It keeps running after you leave HostMC, so you can
-  play on it. See [linux/README.md](linux/README.md#hostmc-a-minecraft-server).
+  Patreon, the supporter relay, with a name of its own (and, with Paper, players' real addresses). With
+  Paper, Bedrock Edition players can join too, through Geyser and Floodgate. It keeps running after you
+  leave HostMC, so you can play on it. On XenithOS Desktop it's a desktop app, with the mouse and keyboard.
+  See [linux/README.md](linux/README.md#hostmc-a-minecraft-server).
 
 | DOOM control | |
 |---|---|

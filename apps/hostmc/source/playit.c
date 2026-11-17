@@ -291,11 +291,17 @@ static void handle(int kind, int curl_code)
         if (!strcmp(status, "success")) {
             const char *tun, *best = NULL, *notice;
             char type[32];
+            int java = 0;
             js_str(js_key(data, "agent_id"), agent_id, sizeof agent_id);
+            pi.bedrock[0] = 0;
             for (tun = js_first(js_key(data, "tunnels")); tun; tun = js_next(tun)) {
                 js_str(js_key(tun, "tunnel_type"), type, sizeof type);
-                if (!best || !strcmp(type, "minecraft-java")) best = tun;
-                if (!strcmp(type, "minecraft-java")) break;
+                if (strstr(type, "bedrock")) {             /* Bedrock players' (Geyser), not Java's */
+                    if (!pi.bedrock[0]) js_str(js_key(tun, "display_address"), pi.bedrock, sizeof pi.bedrock);
+                    continue;
+                }
+                if (!java && (!best || !strcmp(type, "minecraft-java"))) best = tun;   /* the first Java one */
+                if (!strcmp(type, "minecraft-java")) java = 1;
             }
             pi.note[0] = 0;
             if (best) {

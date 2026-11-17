@@ -1,0 +1,25 @@
+# HostMC's Bedrock players, second run (sim/hostmc/test-bedrock.sh): Update finds newer builds, but
+# what arrives doesn't match GeyserMC's checksums, so it's thrown away and the ones there stay.
+wait 60
+press down
+press down
+press down
+press down
+wait 10
+press a
+wait 20
+press down
+press down
+press down
+press down
+wait 10
+shot version_update
+press a
+wait 120
+shot update_question
+press a
+wait 300
+shot update_refused
+press a
+wait 20
+quit

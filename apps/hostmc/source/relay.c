@@ -165,11 +165,12 @@ void relay_init(void)
 }
 
 /* Players' real addresses for the server that starts next: Paper new enough to take them, not
- * Bedrock players (Geyser's own connections into the server don't carry the header), and not
+ * Bedrock players (Geyser joins them to Paper through a connection of its own inside the server,
+ * which hasn't been tried with proxy-protocol on, so the two aren't used together), and not
  * turned off on the relay's page. */
 int relay_proxy_wanted(void)
 {
-    return !strcmp(hs.type, "paper") && paper_takes_proxy(hs.version) && !hs.bedrock && hs.real_ips;
+    return !strcmp(hs.type, "paper") && paper_takes_proxy(hs.version) && !geyser_on() && hs.real_ips;
 }
 
 int relay_proxy_on(void)

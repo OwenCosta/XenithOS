@@ -543,7 +543,7 @@ int paper_takes_proxy(const char *version)
 
 int door_prepare(char *why, int n)
 {
-    int want = hs.relay && relay_proxy_on() && hi.ok && !strcmp(hi.type, "paper") && paper_takes_proxy(hi.version) && !hs.bedrock;
+    int want = hs.relay && relay_proxy_on() && hi.ok && !strcmp(hi.type, "paper") && paper_takes_proxy(hi.version) && !geyser_on();
     char v[16];
     why[0] = 0;
     if (!want) {

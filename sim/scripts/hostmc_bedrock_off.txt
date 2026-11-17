@@ -1,0 +1,21 @@
+# HostMC's Bedrock players, third run (sim/hostmc/test-bedrock.sh): turned off, which takes Geyser
+# and Floodgate out of the plugins folder (their settings stay).
+wait 60
+press down
+press down
+press down
+press down
+wait 10
+press a
+wait 20
+press down
+press down
+press down
+wait 10
+press a
+wait 20
+shot turn_off_question
+press a
+wait 30
+shot bedrock_off
+quit

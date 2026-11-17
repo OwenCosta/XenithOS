@@ -18,6 +18,8 @@
 #define HM_AGENT      "XenithOS-HostMC/1.0"     /* the User-Agent for every download */
 #define EULA_URL      "https://aka.ms/MinecraftEULA"
 #define DEFAULT_PORT  25565
+#define BEDROCK_PORT  19132                      /* Geyser's, for Bedrock players */
+#define PLAYIT_GEYSER "https://playit.gg/support/use-geyser-with-playit/"
 
 /* ------------------------------------------------------------------ main.c */
 
@@ -196,6 +198,7 @@ struct hm_playit {
     char claim_url[64];
     int claim_seen;                 /* the link has been opened */
     char address[96];               /* the public address, once there is one */
+    char bedrock[96];               /* a Minecraft Bedrock tunnel's, if the agent has one (geyser.c) */
     char note[200];                 /* what's happening, or what went wrong */
 };
 extern struct hm_playit pi;
@@ -367,6 +370,18 @@ int  door_paper_port(void);                     /* where Paper takes players: it
 int  door_set_players_port(int port);           /* the Port setting, in door mode */
 int  paper_proxy_protocol(int on);              /* proxies.proxy-protocol in config/paper-global.yml */
 int  paper_takes_proxy(const char *version);    /* a Paper version that has that setting */
+
+/* ----------------------------------------------------------- geyser.c */
+
+/* Bedrock players through Geyser and Floodgate, on Paper (see geyser.c). */
+int  geyser_installed(void);                    /* both in the server's plugins folder */
+int  geyser_on(void);                           /* Bedrock players can join: on, Paper, and there */
+int  geyser_port(void);                         /* the Bedrock port, from Geyser's settings */
+void geyser_versions(char *geyser, char *floodgate, int n);   /* "2.12.1, build 1303" */
+int  geyser_plan(char *text, int n, char *why, int wn);       /* what would be downloaded */
+int  geyser_newer(void);                        /* geyser_plan found newer builds than these */
+int  geyser_get(char *why, int n);              /* downloads and checks them, into plugins */
+void geyser_remove(void);
 
 /* --------------------------------------------------------------- qr.c */
 

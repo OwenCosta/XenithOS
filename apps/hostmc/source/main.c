@@ -96,9 +96,9 @@ static int selectable(const struct row *r)
 enum {
     A_START = 1, A_STOP, A_RESTART, A_FORCE,
     A_WL_ADD, S_MOTD, S_MODE, S_DIFF, S_MAX, S_WL, S_ONLINE, S_SEED, S_RAM, S_PORT,
-    V_TYPE, V_VERSION, V_UPDATE, V_CHECK, V_INSTALL,
+    V_TYPE, V_VERSION, V_UPDATE, V_CHECK, V_BEDROCK, V_GEYSER_UPDATE, V_INSTALL,
     W_BACKUP, W_RESTORE, W_RESET,
-    N_ON, N_OFF, N_FORGET, N_CLAIM_OPEN,
+    N_ON, N_OFF, N_FORGET, N_CLAIM_OPEN, N_PI_GEYSER,
     N_VPS, N_VPS_CHECK, N_VPS_STEPS, N_VPS_EDIT, N_VPS_FORGET, N_VPS_OFF,
     N_RELAY, N_RELAY_CHECK, N_RELAY_MEMBER, N_RELAY_NAME, N_RELAY_OFF, N_RELAY_GIVEUP, N_RELAY_REALIP,
     ID_PLAYER = 100, ID_WL = 200, ID_OP = 300,
@@ -573,6 +573,28 @@ static void do_start(void)
 
 /* ------------------------------------------------------------ the pages */
 
+/* Where Bedrock players join from the internet: only through playit.gg, whose Minecraft Bedrock
+ * tunnel carries what Bedrock needs (SSH tunnels carry TCP alone). */
+static void bedrock_internet(char *out, int n, uint32_t *color)
+{
+    *color = C_TEXT;
+    if (hs.internet && pi.bedrock[0]) {
+        const char *colon = strrchr(pi.bedrock, ':');
+        if (colon && colon[1]) snprintf(out, n, "%.*s, port %s", (int)(colon - pi.bedrock), pi.bedrock, colon + 1);
+        else snprintf(out, n, "%s, port %d", pi.bedrock, BEDROCK_PORT);
+        return;
+    }
+    *color = C_DIM;
+    if (hs.internet) {
+        snprintf(out, n, "Add a Bedrock tunnel on playit.gg (Internet says how)");
+        *color = C_SUB;
+    } else if (hs.vps || hs.relay) {
+        snprintf(out, n, "Only through playit.gg: Bedrock needs UDP, which %s doesn't carry", hs.vps ? "a VPS tunnel" : "the relay");
+    } else {
+        snprintf(out, n, "Off. playit.gg in Internet can carry it");
+    }
+}
+
 static void build_server(void)
 {
     char ip[48], text[160], port[16] = "";
@@ -609,6 +631,16 @@ static void build_server(void)
     if (!hs.internet && !hs.vps && !hs.relay) r->color = C_DIM;
     else if (hs.vps && (!vps_up() || (vps.check[0] && !vps.check_ok))) r->color = C_SUB;   /* not yet working */
     else if (hs.relay && (!relay_up() || (relay.w.check[0] && !relay.w.check_ok))) r->color = C_SUB;
+    if (geyser_on()) {
+        /* Bedrock's own "Add Server" asks for the address and the port apart. */
+        uint32_t color;
+        add(R_HEAD, 0, "Bedrock players join at", NULL);
+        if (lan_address(ip, sizeof ip)) snprintf(text, sizeof text, "%s, port %d", ip, geyser_port());
+        else snprintf(text, sizeof text, "Not on a network");
+        add(R_INFO, 0, "Your home network", text);
+        bedrock_internet(text, sizeof text, &color);
+        add(R_INFO, 0, "The internet", text)->color = color;
+    }
     if (prop_bool("white-list", 1) && !sv.nplayers)
         add(R_TEXT, 0, NULL, "The whitelist is on: add your friends' Minecraft names in Players first.")->color = C_SUB;
     snprintf(text, sizeof text, "%d of %d", sv.nplayers, props_get_int("max-players", 20));
@@ -630,6 +662,9 @@ static void build_players(void)
     add(R_HEAD, 0, "Whitelist", prop_bool("white-list", 1) ? "On" : "Off");
     add(R_BUTTON, A_WL_ADD, "Add someone to the whitelist", NULL);
     for (i = 0; i < nwl; i++) add(R_ITEM, ID_WL + i, wl_names[i], NULL);
+    if (geyser_on())
+        add(R_TEXT, 0, NULL, "Bedrock players show up with a dot before their name, like .Steve. Add them as Bedrock players, "
+                             "with their gamertag, while the server runs.")->color = C_DIM;
     if (!prop_bool("white-list", 1)) {
         r = add(R_TEXT, 0, NULL, "The whitelist is off, so anyone with the address can join. Turn it on in Settings to let in only the people on it.");
         r->color = C_DIM;
@@ -712,6 +747,82 @@ static void build_version(void)
     add(R_BUTTON, V_CHECK, "Check for a new version", NULL);
     add(R_TEXT, 0, NULL, "Minecraft is Mojang's own server. Paper is a faster one that also runs plugins. "
                          "Everyone's Minecraft has to be the same version as the server, so pick the one your Prism Launcher instance uses.")->color = C_DIM;
+    /* Bedrock players: Geyser and Floodgate (geyser.c), with Paper. */
+    add(R_HEAD, 0, "Bedrock players", NULL);
+    if (!t) {
+        add(R_TEXT, 0, NULL, "With Paper, players on Minecraft: Bedrock Edition (phones, tablets, consoles, Windows) can join "
+                             "too, through Geyser.")->color = C_DIM;
+        return;
+    }
+    add(R_ITEM, V_BEDROCK, "Bedrock Edition can join", geyser_on() ? "On" : "Off")->cycle = 1;
+    if (geyser_on()) {
+        char g[64], f[64];
+        geyser_versions(g, f, sizeof g);
+        add(R_INFO, 0, "Geyser", g);
+        add(R_INFO, 0, "Floodgate", f);
+        add(R_BUTTON, V_GEYSER_UPDATE, "Update Geyser and Floodgate", NULL);
+        add(R_TEXT, 0, NULL, "Bedrock's own updates need a Geyser that knows them: update it when Bedrock players can't join.")->color = C_DIM;
+        if (strcmp(hs.version, "latest"))
+            add(R_TEXT, 0, NULL, "Geyser keeps up with the newest Minecraft. With an earlier version, Bedrock players may not get in "
+                                 "(the server needs the ViaVersion plugin then).")->color = C_WARN;
+    }
+    add(R_TEXT, 0, NULL, "Geyser lets Bedrock Edition join this server, and Floodgate lets those players in without a Java "
+                         "account. Both are made by GeyserMC, free software under the MIT licence. Bedrock players come over "
+                         "your home network, or from the internet through playit.gg.")->color = C_DIM;
+}
+
+/* Bedrock players on: Geyser and Floodgate downloaded (after asking) into the plugins folder. */
+static void bedrock_on(void)
+{
+    char text[400], why[240];
+    if (!geyser_plan(text, sizeof text, why, sizeof why)) {
+        if (strcmp(why, "Cancelled.")) message("Geyser can't be downloaded", why);
+        return;
+    }
+    if (!ui_confirm("HostMC downloads these first", text, "Download and turn on", "Not now")) return;
+    if (!geyser_get(why, sizeof why)) {
+        if (strcmp(why, "Cancelled.")) message("Geyser didn't download", why);
+        return;
+    }
+    hs.bedrock = 1;
+    hs_save();
+    if (sv.state != SV_STOPPED) needs_restart = 1;
+    sfx(SFX_SUCCESS);
+    ui_toast_icon(ICON_CHECK);
+    ui_toast("Bedrock Edition can join", sv.state != SV_STOPPED ? "Once the server restarts" : "When the server starts");
+}
+
+static void bedrock_off(void)
+{
+    if (!ui_confirm("Turn Bedrock players off?", "HostMC takes Geyser and Floodgate out of the server's plugins folder. Their "
+                                                 "settings stay, for next time.", "Turn them off", "Cancel")) return;
+    geyser_remove();
+    hs.bedrock = 0;
+    hs_save();
+    if (sv.state != SV_STOPPED) needs_restart = 1;
+}
+
+static void bedrock_update(void)
+{
+    char text[400], why[240];
+    if (!geyser_plan(text, sizeof text, why, sizeof why)) {
+        if (strcmp(why, "Cancelled.")) message("No list of builds", why);
+        return;
+    }
+    if (!geyser_newer()) {
+        ui_toast_icon(ICON_CHECK);
+        ui_toast("Geyser and Floodgate are up to date", NULL);
+        return;
+    }
+    if (!ui_confirm("Newer builds are out", text, "Download them", "Not now")) return;
+    if (!geyser_get(why, sizeof why)) {
+        if (strcmp(why, "Cancelled.")) message("Geyser didn't download", why);
+        return;
+    }
+    if (sv.state != SV_STOPPED) needs_restart = 1;
+    sfx(SFX_SUCCESS);
+    ui_toast_icon(ICON_DOWNLOAD);
+    ui_toast("Geyser and Floodgate are updated", sv.state != SV_STOPPED ? "Restart the server to use them" : NULL);
 }
 
 static void build_world(void)
@@ -784,7 +895,7 @@ static int relay_addresses(char *out, int n)
     else if (!paper_takes_proxy(hs.version))
         snprintf(out, n, "Paper %s can't take players' real addresses from the relay, so through it they show up as "
                          "127.0.0.1. Paper 1.19.4 and later can.", hs.version);
-    else if (hs.bedrock)
+    else if (geyser_on())
         snprintf(out, n, "With Bedrock players on, players' real addresses don't come through the relay: they show up as "
                          "127.0.0.1, so bans by address don't work for them; bans by name do.");
     else if (!hs.real_ips)
@@ -824,7 +935,7 @@ static void build_relay(void)
     add(R_BUTTON, N_RELAY_OFF, "Turn off the supporter relay", NULL);
     add(R_BUTTON, N_RELAY_GIVEUP, "Give up the name", NULL);
     add(R_HEAD, 0, "Players' addresses", NULL);
-    if (!strcmp(hs.type, "paper") && paper_takes_proxy(hs.version) && !hs.bedrock)
+    if (!strcmp(hs.type, "paper") && paper_takes_proxy(hs.version) && !geyser_on())
         add(R_ITEM, N_RELAY_REALIP, "Players' real addresses", hs.real_ips ? "On" : "Off")->cycle = 1;
     add(R_TEXT, 0, NULL, text)->color = real ? C_OK : C_DIM;
     add(R_TEXT, 0, NULL, "The relay carries Java Edition, not Bedrock.")->color = C_DIM;
@@ -874,6 +985,16 @@ static void build_internet(void)
         add(R_INFO, 0, "Agent", pi_agent_running() ? "Running" : sv.state == SV_RUNNING ? "Starting" : "Runs while the server does");
         if (pi.note[0]) add(R_TEXT, 0, NULL, pi.note)->color = C_SUB;
         if (pi.address[0]) add(R_TEXT, 0, NULL, "Friends add this address in Minecraft's Multiplayer screen.")->color = C_DIM;
+        if (geyser_on()) {                         /* Bedrock players: a tunnel of their own on playit.gg */
+            uint32_t color;
+            bedrock_internet(text, sizeof text, &color);
+            add(R_INFO, 0, "Bedrock address", pi.bedrock[0] ? text : "No Bedrock tunnel yet")->color = pi.bedrock[0] ? C_TEXT : C_SUB;
+            if (!pi.bedrock[0])
+                add(R_TEXT, 0, NULL, "For Bedrock players, playit.gg needs a Minecraft Bedrock (NetherNet) tunnel for this agent "
+                                     "too, set up as its guide for Geyser says: it gives settings for Geyser's config.yml, in "
+                                     "the server's plugins/Geyser-Spigot folder. playit.gg/support/use-geyser-with-playit")->color = C_SUB;
+            if (ui_desktop) add(R_BUTTON, N_PI_GEYSER, "Open playit.gg's guide for Geyser", NULL);
+        }
         add(R_GAP, 0, NULL, NULL);
         add(R_BUTTON, N_OFF, "Turn off playit.gg", NULL);
         add(R_BUTTON, N_FORGET, "Forget this PC's playit.gg agent", NULL);
@@ -1103,6 +1224,13 @@ static void act_version(int id, int dir)
             force_update = 1;
             do_start();
         }
+        break;
+    case V_BEDROCK:
+        if (geyser_on()) bedrock_off();
+        else bedrock_on();
+        break;
+    case V_GEYSER_UPDATE:
+        bedrock_update();
         break;
     }
 }
@@ -1493,6 +1621,9 @@ static void act_internet(int id)
     case N_CLAIM_OPEN:
         if (pi.state == PI_CLAIM) open_link(pi.claim_url);
         break;
+    case N_PI_GEYSER:
+        open_link(PLAYIT_GEYSER);
+        break;
     case N_FORGET:
         if (!ui_confirm("Forget the agent?", "HostMC deletes this PC's playit.gg key. Turning playit.gg on again makes a new one, which "
                                              "you approve again. Remove the old agent on playit.gg too.", "Forget it", "Cancel")) break;
@@ -1549,6 +1680,31 @@ static void act(int id, int dir)
     case A_FORCE: sv_force_stop(); break;
     case A_WL_ADD: {
         char name[20] = "", why[200] = "", title[64];
+        if (geyser_on()) {
+            /* Bedrock players go on it through Floodgate, which looks their gamertag up while the
+             * server runs. */
+            static const char *const kinds[] = {"A Java Edition player", "A Bedrock Edition player", "Cancel"};
+            char cmd[64];
+            int c = ui_dialog("Add to the whitelist", "Which Minecraft do they play?", kinds, 3);
+            if (c < 0 || c == 2) break;
+            if (c == 1) {
+                if (sv.state != SV_RUNNING) {
+                    message("Start the server first", "Floodgate adds Bedrock players while the server runs.");
+                    break;
+                }
+                if (!ask_text("Add a Bedrock player", "Their gamertag, spelled exactly", name, 16) || !name[0]) break;
+                snprintf(cmd, sizeof cmd, strchr(name, ' ') ? "fwhitelist add \"%s\"" : "fwhitelist add %s", name);
+                if (!sv_command(cmd)) {
+                    message("The command didn't reach the server", "It may still be starting. Try again in a moment.");
+                    break;
+                }
+                snprintf(title, sizeof title, "Adding %s", name);
+                ui_toast_icon(ICON_PERSON_ADD);
+                ui_toast(title, "Floodgate looks them up. The console says when it's done");
+                lists_at = 0;
+                break;
+            }
+        }
         if (ask_text("Add to the whitelist", "Their Minecraft name, spelled exactly", name, 16) && name[0]) {
             if (whitelist_add(name, why, sizeof why)) {
                 snprintf(title, sizeof title, "%s is on the whitelist", name);
@@ -1562,7 +1718,7 @@ static void act(int id, int dir)
         break;
     }
     case W_BACKUP: case W_RESTORE: case W_RESET: act_world(id); break;
-    case N_ON: case N_OFF: case N_FORGET: case N_CLAIM_OPEN:
+    case N_ON: case N_OFF: case N_FORGET: case N_CLAIM_OPEN: case N_PI_GEYSER:
     case N_VPS: case N_VPS_CHECK: case N_VPS_STEPS: case N_VPS_EDIT: case N_VPS_FORGET: case N_VPS_OFF:
     case N_RELAY: case N_RELAY_CHECK: case N_RELAY_MEMBER: case N_RELAY_NAME: case N_RELAY_OFF: case N_RELAY_GIVEUP:
         act_internet(id);
