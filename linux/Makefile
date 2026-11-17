@@ -26,9 +26,9 @@ DOOM_CFLAGS := $(OPT) -std=gnu11 -w -funwind-tables -I../apps/doom/doomgeneric -
 
 TUBE_SRC    := $(wildcard ../apps/tube/source/*.c) $(SHARED) $(PLATFORM)
 PHOTOS_SRC  := ../apps/photos/source/photos.c $(SHARED) $(PLATFORM)
-HOSTMC_SRC  := $(wildcard ../apps/hostmc/source/*.c) $(SHARED) $(PLATFORM)
+MINENEST_SRC := $(wildcard ../apps/minenest/source/*.c) $(SHARED) $(PLATFORM)
 
-all: xenithos volt doom tube photos hostmc
+all: xenithos volt doom tube photos minenest
 
 tube: $(TUBE_SRC) $(HEADERS)
 	$(CC) $(CFLAGS_ALL) -I../apps/tube/source $(TUBE_SRC) -o $@ $(LIBS)
@@ -36,9 +36,10 @@ tube: $(TUBE_SRC) $(HEADERS)
 photos: $(PHOTOS_SRC) $(HEADERS)
 	$(CC) $(CFLAGS_ALL) $(PHOTOS_SRC) -o $@ $(LIBS)
 
-# HostMC is for PCs only (a Minecraft server), so it has no Xbox build.
-hostmc: $(HOSTMC_SRC) $(HEADERS) $(wildcard ../apps/hostmc/source/*.h)
-	$(CC) $(CFLAGS_ALL) -I../apps/hostmc/source $(HOSTMC_SRC) -o $@ $(LIBS)
+# MineNest is for PCs only (Minecraft servers), so it has no Xbox build. The servers are run by
+# the minenest program (github.com/OwenCosta/minenest), which get-minenest.sh puts beside it.
+minenest: $(MINENEST_SRC) $(HEADERS) $(wildcard ../apps/minenest/source/*.h)
+	$(CC) $(CFLAGS_ALL) -I../apps/minenest/source $(MINENEST_SRC) -o $@ $(LIBS)
 
 xenithos: $(SHELL_SRC) $(HEADERS)
 	$(CC) $(CFLAGS_ALL) $(SHELL_SRC) -o $@ $(LIBS)
@@ -50,6 +51,6 @@ doom: $(DOOM_SRC) $(HEADERS)
 	$(CC) $(DOOM_CFLAGS) $(DOOM_SRC) -o $@ $(LIBS)
 
 clean:
-	rm -f xenithos volt doom tube photos hostmc
+	rm -f xenithos volt doom tube photos minenest
 
 .PHONY: all clean

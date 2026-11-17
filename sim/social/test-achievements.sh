@@ -82,12 +82,17 @@ check "tube-first, tube-end and tube-ten" '[ "$(has winner)" = "doom-exit doom-s
 check "the count is kept on the stick" 'grep -qx "winner|#tube-videos|10" "$XBOX/xenith/achievements.txt"'
 check "screenshot" 'shot ach-xbox/ta_earned'
 
-echo "== 3. HostMC on a PC: the server started, a player joining, a backup"
-sim ach-pc hostmc.txt XSIM_PROFILE="$T/winner.txt" XSIM_BIN=xhostmc XSIM_KIND=pc XSIM_THREAD=1 XSIM_HOSTMC=1 \
-    XSIM_TYPE="say Hello from HostMC|"
-check "hostmc-start, hostmc-join and hostmc-backup" \
-    'has winner | grep -q "hostmc-backup hostmc-join hostmc-start "'
-check "not hostmc-online (its Internet was off)" '! has winner | grep -q hostmc-online'
+echo "== 3. MineNest on a PC: the server started, a player joining, a backup"
+if [ -x "${MINENEST_BIN:-}" ]; then
+    sim ach-pc minenest.txt XSIM_PROFILE="$T/winner.txt" XSIM_BIN=xminenest XSIM_KIND=pc XSIM_THREAD=1 XSIM_MINENEST=1 \
+        XSIM_TYPE="say Hello from MineNest|"
+    # The achievements keep HostMC's ids, so ones earned with HostMC still count.
+    check "hostmc-start, hostmc-join and hostmc-backup" \
+        'has winner | grep -q "hostmc-backup hostmc-join hostmc-start "'
+    check "not hostmc-online (its Internet was off)" '! has winner | grep -q hostmc-online'
+else
+    echo "  skip  MineNest needs its own program: MINENEST_BIN"
+fi
 
 echo "== 4. XenithOS shows them"
 api post /v1/achievements/earn "token=$RIVAL" ids=volt-100 > /dev/null

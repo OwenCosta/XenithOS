@@ -65,7 +65,7 @@ static void toggle_sharing(void)
         profile_save();
         sfx(SFX_SELECT);
         ui_toast(want ? "Friends see what you're playing" : "Friends only see that you're on",
-                 want ? "And your HostMC server, when people can reach it." : "Not what you're playing, or your HostMC server.");
+                 want ? "And your MineNest server, when people can reach it." : "Not what you're playing, or your MineNest server.");
     } else {
         sfx(SFX_ERROR);
         ui_message("Couldn't change that", cloud_error_text(&r, code));

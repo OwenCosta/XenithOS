@@ -101,6 +101,22 @@ Accounts (form posts; errors come back as "error=<message>")
                                       in: kept, and passed on to Discord (feedback-webhooks.txt in the
                                       state folder: "bug=<webhook>", "idea=<webhook>", or one for both)
 
+Signing in with an OCAccount (MineNest; off unless XENITH_OC_CLIENT_ID and _SECRET are set)
+  POST /v1/oc/start                   -> session, key, url: the OCAccounts page to open in a browser
+  GET  /v1/oc/callback                where OCAccounts sends the browser back (code, state); trades
+                                      the code and signs in the XenithOS profile linked to the account
+  POST /v1/oc/poll                    session, key -> state (waiting, done, error), and when done:
+                                      name, token, avatar, joined, account (the OCAccount's name);
+                                      error: error. A finished sign-in is handed over once.
+
+MineNest from anywhere, a perk for supporters (off without the supporter relay; see Remote)
+  POST /v1/remote/poll                token -> 200 [{"id", "method", "path", "query", "ctype",
+                                      "changes", "body" (base64)}] (what browsers asked for), or 204
+                                      after 25 seconds with nothing; 403 error= for non-supporters
+  POST /v1/remote/reply               header X-Xenith-Token, JSON {"id", "status", "ctype", "body"}
+  /remote/...                         the supporter's MineNest dashboard in a browser, signed in with
+                                      the same OCAccount (a cookie for /remote, after OCAccounts)
+
 HostMC's supporter relay (off unless XENITH_RELAY_DOMAIN is set; see Relay)
   POST /v1/relay/status               token  -> relay (on/off), step (ok, link, patreon, tier,
                                       error), message, suggest, and with a name: name, state (on,
@@ -162,6 +178,11 @@ Environment
                      address each download was requested from
   XENITH_LAN_ADDR    the private "a.b.c.d:port" consoles on this server's own network can reach
                      it at directly, skipping the relay (/v1/lan). Off when unset.
+  XENITH_OC_URL      default https://owencosta.diy: OCAccounts, for signing in with an OCAccount
+  XENITH_OC_CLIENT_ID, XENITH_OC_CLIENT_SECRET   this server as an OCAccounts client
+                     (owencosta_web.py client add ...), with the redirect URL below
+  XENITH_OC_REDIRECT default https://<XENITH_PUBLIC_HTTPS>/v1/oc/callback
+  XENITH_REMOTE_ANYONE  1: MineNest from anywhere for every profile, not only supporters (tests)
   XENITH_PUBLIC_HTTPS  the name (with :port when it isn't 443) PCs and Raspberry Pis can reach
                      this server at over HTTPS, such as a Cloudflare tunnel's hostname whose
                      service is XENITH_EDGE_PORT (/v1/lan). Off when unset.
@@ -756,7 +777,7 @@ SEEN_SAVE_S = 10 * 60            # hellos write last_seen to disk at most this o
 MC_KEEP_S = 24 * 3600            # a HostMC server's address is shown this long after HostMC last said so
 MC_ADDR_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,94}[A-Za-z0-9])?(?::[0-9]{1,5})?$")
 OWN_APPS = {"xenithos": "XenithOS", "volt": "VOLT", "doom": "DOOM", "tube": "Tube", "photos": "Photos",
-            "hostmc": "HostMC"}
+            "hostmc": "HostMC", "minenest": "MineNest"}
 
 
 class Friends:
@@ -1095,10 +1116,10 @@ ACHIEVEMENTS = [
     ("tube-first", "tube", "Now playing", "Watch a video in Tube."),
     ("tube-end", "tube", "Every second", "Watch a Tube video all the way through."),
     ("tube-ten", "tube", "Channel surfer", "Watch 10 videos in Tube."),
-    ("hostmc-start", "hostmc", "Server's up", "Start a Minecraft server with HostMC."),
-    ("hostmc-online", "hostmc", "Open doors", "Make your HostMC server reachable from the internet."),
-    ("hostmc-join", "hostmc", "Company", "Have a player join your HostMC server."),
-    ("hostmc-backup", "hostmc", "Safe keeping", "Back up your Minecraft world in HostMC."),
+    ("hostmc-start", "hostmc", "Server's up", "Start a Minecraft server with MineNest."),
+    ("hostmc-online", "hostmc", "Open doors", "Make your MineNest server reachable from the internet."),
+    ("hostmc-join", "hostmc", "Company", "Have a player join your MineNest server."),
+    ("hostmc-backup", "hostmc", "Safe keeping", "Back up your Minecraft world in MineNest."),
 ]
 ACHIEVEMENT_IDS = {a[0] for a in ACHIEVEMENTS}
 UNLOCKS_KEEP = 50                # the newest ones everyone's earned, for "just earned"
@@ -2012,7 +2033,7 @@ RELAY_RESERVED = {
     "administrator", "root", "tunnel", "relay", "ssh", "status", "help", "support", "abuse",
     "postmaster", "hostmaster", "webmaster", "noreply", "security", "localhost", "test", "staging",
     "dev", "owen", "owencosta", "ocaccount", "ocaccounts", "account", "accounts", "login", "auth",
-    "oauth", "patreon", "xenith", "xenithos", "hostmc", "cloud", "mc", "minecraft", "play", "server",
+    "oauth", "patreon", "xenith", "xenithos", "hostmc", "minenest", "cloud", "mc", "minecraft", "play", "server",
     "official", "staff", "mod", "moderator", "mojang", "microsoft", "xbox",
 }
 RELAY_HOLD_LAPSED = 30 * 86400     # a membership that ends: the name waits this long for them
@@ -2118,6 +2139,223 @@ def ocaccount_supporter(url, key, gamertag, timeout=10):
     if data.get("patreon") is not True:
         return "patreon", ""
     return ("ok" if data.get("supporter") is True else "tier"), clean(data.get("tier") or "", 40)
+
+
+class OCSignIn:
+    """Signing in to XenithOS Cloud with an OCAccount, for MineNest on any PC.
+
+    MineNest asks /v1/oc/start for a sign-in: a session and a key only it knows, and the
+    OCAccounts page to open in the browser ("Sign in with OCAccounts", client_id and
+    redirect_uri this server's). After the person agrees there, OCAccounts sends the browser back
+    to /v1/oc/callback with a code, which this server trades (with its client secret, which never
+    leaves it) for {"id", "name", "xenithos"}: the XenithOS profile linked to the account is the one
+    signed in, with a new session token, as a name and PIN would. MineNest polls with its key and
+    gets the token once. An account without a linked profile is told to link or make one on its
+    OCAccounts page. Sign-ins wait ten minutes at most."""
+
+    TTL = 600
+    MAX = 500
+
+    def __init__(self, state, base, client_id, client_secret, redirect):
+        self.state = state
+        self.base = (base or "https://owencosta.diy").rstrip("/")
+        self.client_id, self.client_secret, self.redirect = client_id, client_secret, redirect
+        self.lock = threading.Lock()
+        self.sessions = {}
+
+    def ready(self):
+        return bool(self.client_id and self.client_secret and self.redirect)
+
+    def _sweep(self, now):
+        for sid in [k for k, v in self.sessions.items() if now - v["t"] > self.TTL]:
+            del self.sessions[sid]
+
+    def start(self, browser=False):
+        now = time.time()
+        with self.lock:
+            self._sweep(now)
+            if len(self.sessions) >= self.MAX:
+                return None
+            sid, key = secrets.token_hex(16), secrets.token_hex(16)
+            self.sessions[sid] = {"t": now, "key_hash": token_hash(key), "state": "waiting", "browser": browser}
+        url = self.base + "/account/?" + urlencode({"client_id": self.client_id, "redirect_uri": self.redirect, "state": sid})
+        return {"session": sid, "key": key, "url": url}
+
+    def exchange(self, code):
+        """OCAccounts' answer for a code: (account dict, None) or (None, why)."""
+        form = urlencode({"client_id": self.client_id, "client_secret": self.client_secret, "code": code,
+                          "redirect_uri": self.redirect}).encode()
+        req = urllib.request.Request(self.base + "/api/oauth/token", data=form, method="POST",
+                                     headers={"Content-Type": "application/x-www-form-urlencoded",
+                                              "User-Agent": "XenithOS-Cloud/" + VERSION})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return json.loads(r.read().decode()), None
+        except urllib.error.HTTPError as e:
+            return None, f"OCAccounts didn't accept the sign-in ({e.code}). Try again."
+        except (OSError, ValueError) as e:
+            return None, f"OCAccounts didn't answer ({e.__class__.__name__}). Try again in a minute."
+
+    def callback(self, sid, code, error=""):
+        """Finishes a sign-in: (ok, the words for the browser, the profile when it was a browser's
+        own sign-in (MineNest from anywhere), else None)."""
+        with self.lock:
+            sess = self.sessions.get(sid or "")
+        if not sess or sess["state"] != "waiting":
+            return False, "This sign-in has run out. Start it again in MineNest.", None
+        if error or not code:
+            with self.lock:
+                sess.update(state="error", error="The sign-in was cancelled on OCAccounts.")
+            return False, "The sign-in was cancelled. You can close this tab.", None
+        oc, why = self.exchange(code)
+        result = {"state": "error", "error": why}
+        if oc:
+            xname = (oc.get("xenithos") or "").strip()
+            acc = self.state.account(xname) if xname else None
+            if not xname:
+                result["error"] = ("Your OCAccount isn't linked to a XenithOS profile yet. Link one, or make one, "
+                                   "on your account page at owencosta.diy, then sign in again.")
+            elif not acc:
+                result["error"] = f"The XenithOS profile {xname} linked to your OCAccount isn't here any more."
+            elif sess.get("browser"):
+                with self.lock:
+                    self.sessions.pop(sid, None)
+                return True, "", acc
+            else:
+                with self.state.lock:
+                    token = self.state._new_session(acc)
+                    self.state.save()
+                result = {"state": "done", "name": acc["name"], "token": token, "avatar": acc["avatar"],
+                          "joined": acc["joined"], "account": clean(oc.get("name", ""), 40)}
+        with self.lock:
+            sess.update(result)
+        if result["state"] == "done":
+            return True, f"Signed in as {result['name']}. You can close this tab and go back to MineNest.", None
+        return False, result["error"], None
+
+    def poll(self, sid, key):
+        with self.lock:
+            self._sweep(time.time())
+            sess = self.sessions.get(sid or "")
+            if not sess or not key or not hmac.compare_digest(sess["key_hash"], token_hash(key)):
+                return None
+            out = {k: v for k, v in sess.items() if k not in ("t", "key_hash", "browser")}
+            if sess["state"] != "waiting":
+                del self.sessions[sid]               # handed over once
+            return out
+
+
+class Remote:
+    """MineNest from anywhere: a supporter's MineNest keeps asking /v1/remote/poll (as its profile)
+    for what browsers want, and answers at /v1/remote/reply. A browser signed in at /remote/ with
+    the OCAccount linked to that profile gets the dashboard: each request is queued for that
+    MineNest and the answer handed back. Nothing on the supporter's router has to change.
+
+    Who may: supporters on Patreon, checked the way the relay checks (OCAccounts), unless
+    XENITH_REMOTE_ANYONE says everyone (tests). Off without the relay set up."""
+
+    POLL = 25            # how long a MineNest's ask waits for something to do
+    ONLINE = 70          # a MineNest that asked within this long counts as connected
+    ANSWER = 60          # how long a browser waits for its MineNest's answer
+    BROWSER_DAYS = 30
+    MAX_BODY = 64 << 20
+
+    def __init__(self, state, relay=None, anyone=False):
+        self.state, self.relay, self.anyone = state, relay, anyone
+        self.cond = threading.Condition()
+        self.links = {}          # profile (lower) -> {"t": last ask, "queue": [request]}
+        self.answers = {}        # request id -> answer dict, once it's in
+        self.browsers = {}       # hashed cookie -> (profile, until)
+
+    def allowed(self, acc):
+        """(True, "") or (False, why) for a profile."""
+        if self.anyone:
+            return True, ""
+        if not self.relay or not self.relay.ready():
+            return False, "MineNest from anywhere isn't open yet."
+        step, _tier = self.relay.supporter(acc["name"].lower(), acc["name"])
+        if step == "ok":
+            return True, ""
+        return False, ("Using MineNest from anywhere is a perk for supporters on Patreon. "
+                       + self.relay.message(step))
+
+    def poll(self, acc, wait=None):
+        who = acc["name"].lower()
+        end = time.time() + (self.POLL if wait is None else wait)
+        with self.cond:
+            link = self.links.setdefault(who, {"t": 0, "queue": []})
+            while True:
+                link["t"] = time.time()
+                if link["queue"]:
+                    out, link["queue"] = link["queue"], []
+                    return out
+                left = end - time.time()
+                if left <= 0:
+                    return []
+                self.cond.wait(min(left, 5))
+
+    def online(self, who):
+        with self.cond:
+            link = self.links.get(who)
+            return bool(link) and time.time() - link["t"] < self.ONLINE
+
+    def reply(self, acc, rid, answer):
+        who = acc["name"].lower()
+        with self.cond:
+            if self.answers.get(rid, {}).get("who") != who:
+                return False
+            self.answers[rid] = dict(answer, who=who, done=True)
+            self.cond.notify_all()
+            return True
+
+    def forward(self, who, request, wait=None):
+        """Queues a browser's request for who's MineNest and waits for the answer (None: none came)."""
+        rid = secrets.token_hex(12)
+        request = dict(request, id=rid)
+        end = time.time() + (self.ANSWER if wait is None else wait)
+        with self.cond:
+            self.links.setdefault(who, {"t": 0, "queue": []})["queue"].append(request)
+            self.answers[rid] = {"who": who, "done": False}
+            self.cond.notify_all()
+            while not self.answers[rid]["done"]:
+                left = end - time.time()
+                if left <= 0:
+                    self.answers.pop(rid, None)
+                    link = self.links.get(who)
+                    if link:
+                        link["queue"] = [q for q in link["queue"] if q["id"] != rid]
+                    return None
+                self.cond.wait(min(left, 5))
+            return self.answers.pop(rid)
+
+    def new_browser(self, acc):
+        token = secrets.token_hex(24)
+        with self.cond:
+            now = time.time()
+            for k in [k for k, (_, until) in self.browsers.items() if until < now]:
+                del self.browsers[k]
+            self.browsers[token_hash(token)] = (acc["name"].lower(), now + self.BROWSER_DAYS * 86400)
+        return token
+
+    def browser(self, token):
+        if not token or len(token) > 128:
+            return None
+        with self.cond:
+            who, until = self.browsers.get(token_hash(token), (None, 0))
+        return who if who and until > time.time() else None
+
+    def sign_out(self, token):
+        with self.cond:
+            self.browsers.pop(token_hash(token or ""), None)
+
+
+REMOTE_CSP = ("default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; "
+              "frame-ancestors 'none'; form-action 'self' https://owencosta.diy")
+
+OC_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>MineNest</title><body style="font:16px system-ui,sans-serif;background:#1d1e21;color:#e6e4df;
+display:flex;align-items:center;justify-content:center;height:90vh;margin:0"><div style="max-width:440px;padding:20px">
+<h2 style="color:%s;margin:0 0 8px">%s</h2><p>%s</p></div>"""
 
 
 class Relay:
@@ -2430,7 +2668,7 @@ def kv(d):
 
 
 def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=None, public="",
-                 downloads="downloads", lan="", server_id="", relay=None):
+                 downloads="downloads", lan="", server_id="", relay=None, oc=None, remote=None):
     last_score = {}
     last_score_lock = threading.Lock()
     creates = RateLimit(CREATE_PER_HOUR, 3600)
@@ -2495,6 +2733,100 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
             return self.reply(200, kv({"name": acc["name"], "token": token, "avatar": acc["avatar"],
                                        "joined": acc["joined"]}))
 
+        # -------------------------------------------------------------- MineNest from anywhere
+
+        def remote_page(self, code, title, words, link=None):
+            body = OC_PAGE % ("#d9a441", title, words.replace("&", "&amp;").replace("<", "&lt;"))
+            if link:
+                body += f'<p style="text-align:center"><a style="color:#7aa6d6" href="{link[0]}">{link[1]}</a></p>'
+            return self.reply(code, body, "text/html; charset=utf-8", "no-store")
+
+        def remote_cookie(self):
+            for part in (self.headers.get("Cookie") or "").split(";"):
+                k, _, v = part.strip().partition("=")
+                if k == "xremote":
+                    return v
+            return ""
+
+        def remote_browser(self):
+            """A browser at /remote/...: its MineNest's answer, once signed in and allowed."""
+            url = urlparse(self.path)
+            sub = url.path[len("/remote"):] or "/"
+            is_api = sub.startswith("/api/")
+            if not remote or not oc or not oc.ready():
+                return self.remote_page(404, "Not open yet", "Using MineNest from anywhere isn't open yet.")
+            if sub == "/signout":
+                remote.sign_out(self.remote_cookie())
+                return self.reply(303, "", headers={"Location": "/remote/", "Set-Cookie": "xremote=; Path=/remote; Max-Age=0"})
+            who = remote.browser(self.remote_cookie())
+            if not who:
+                if is_api or self.command != "GET":
+                    return self.reply(401, json.dumps({"error": "Sign in again."}), "application/json")
+                got = oc.start(browser=True)
+                if not got:
+                    return self.remote_page(503, "Busy", "Too many sign-ins at once. Try again in a few minutes.")
+                return self.reply(303, "", headers={"Location": got["url"]})
+            acc = state.account(who)
+            if not acc:
+                return self.remote_page(404, "Not signed in", "That XenithOS profile isn't here any more.", ("/remote/signout", "Sign out"))
+            ok, why = remote.allowed(acc)
+            if not ok:
+                if is_api:
+                    return self.reply(403, json.dumps({"error": why}), "application/json")
+                link = (relay.patreon_url, "Become a supporter on Patreon") if relay and relay.patreon_url else ("/remote/signout", "Sign out")
+                return self.remote_page(403, "A supporter perk", why, link)
+            if not remote.online(who):
+                words = (f"Signed in as {acc['name']}, but your MineNest isn't connected. On the computer it runs on, open "
+                         "MineNest's Settings and turn on 'Let me use MineNest through the website'.")
+                if is_api:
+                    return self.reply(503, json.dumps({"error": words}), "application/json")
+                return self.remote_page(503, "MineNest isn't connected", words, ("/remote/signout", "Sign out"))
+            n = int(self.headers.get("Content-Length") or 0)
+            if n < 0 or n > Remote.MAX_BODY:
+                return self.reply(413, json.dumps({"error": "That's too big to send through the website."}), "application/json")
+            data = self.rfile.read(n) if n else b""
+            answer = remote.forward(who, {"method": self.command, "path": sub, "query": url.query,
+                                          "ctype": self.headers.get("Content-Type", ""),
+                                          "changes": self.headers.get("X-MineNest") == "1",
+                                          "body": base64.b64encode(data).decode()})
+            if answer is None:
+                return self.reply(504, json.dumps({"error": "Your MineNest didn't answer in time."}), "application/json")
+            try:
+                body = base64.b64decode(answer.get("body") or "")
+            except ValueError:
+                body = b""
+            status = int(answer.get("status") or 502)
+            ctype = str(answer.get("ctype") or "application/octet-stream")[:100]
+            headers = {"X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer"}
+            if ctype.startswith("text/html"):
+                headers["Content-Security-Policy"] = REMOTE_CSP
+            if status in (301, 302, 303):
+                status = 200                            # MineNest's own redirects mean nothing here
+            return self.reply(status, body, ctype, "no-store", headers)
+
+        def remote_reply(self):
+            acc = state.by_token(self.headers.get("X-Xenith-Token", ""))
+            if not remote or not acc:
+                return self.error(401, "Sign in first.")
+            n = int(self.headers.get("Content-Length") or 0)
+            if n < 0 or n > Remote.MAX_BODY * 2:
+                return self.error(413, "Too large.")
+            try:
+                answer = json.loads(self.rfile.read(n).decode("utf-8"))
+            except ValueError:
+                return self.error(400, "That wasn't JSON.")
+            if not isinstance(answer, dict) or not remote.reply(acc, str(answer.get("id", "")), answer):
+                return self.error(404, "No browser is waiting for that.")
+            return self.reply(200, "ok=1\n")
+
+        def do_PUT(self):
+            if self.path.startswith("/remote/"):
+                return self.remote_browser()
+            return self.error(405, "Not here.")
+
+        do_PATCH = do_PUT
+        do_DELETE = do_PUT
+
         # -------------------------------------------------------------- GET
         def do_GET(self):
             url = urlparse(self.path)
@@ -2503,6 +2835,24 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
 
             if parts == ["v1", "ping"]:
                 return self.reply(200, "pong\n")
+
+            if url.path == "/remote":
+                return self.reply(301, "", headers={"Location": "/remote/"})
+            if url.path.startswith("/remote/"):
+                return self.remote_browser()
+
+            if parts == ["v1", "oc", "callback"]:
+                if not oc or not oc.ready():
+                    return self.error(404, "Signing in with an OCAccount isn't on here.")
+                ok, words, acc = oc.callback(q.get("state", [""])[0], q.get("code", [""])[0], q.get("error", [""])[0])
+                if ok and acc and remote:            # a browser for MineNest from anywhere
+                    token = remote.new_browser(acc)
+                    cookie = (f"xremote={token}; Path=/remote; HttpOnly; SameSite=Lax; Max-Age={Remote.BROWSER_DAYS * 86400}"
+                              + ("; Secure" if self.secure or self.https else ""))
+                    return self.reply(303, "", headers={"Location": "/remote/", "Set-Cookie": cookie})
+                page = OC_PAGE % ("#6fb04a" if ok else "#d9a441", "Signed in" if ok else "Not signed in",
+                                  words.replace("&", "&amp;").replace("<", "&lt;"))
+                return self.reply(200, page, "text/html; charset=ascii", "no-store")
 
             if parts == ["v1", "lan"]:
                 return self.reply(200, kv({"id": server_id, **({"lan": lan} if lan else {}),
@@ -2711,12 +3061,44 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
             parts = [p for p in urlparse(self.path).path.split("/") if p]
             if parts == ["v1", "saves", "put"]:         # a file, bigger than a form
                 return self.saves_put()
+            if self.path.startswith("/remote/"):         # a browser using its MineNest
+                return self.remote_browser()
+            if parts == ["v1", "remote", "reply"]:
+                return self.remote_reply()
             body = self.body(CRASH_MAX_BODY if parts == ["v1", "crash"] else MAX_BODY)
             if body is None:
                 return self.error(413, "Too large.")
             form = {k: v[0] for k, v in parse_qs(body, keep_blank_values=True).items()}
             ip = self.client_address[0]
             limit_key = rate_key(ip)
+
+            if parts == ["v1", "oc", "start"]:
+                if not oc or not oc.ready():
+                    return self.error(404, "Signing in with an OCAccount isn't on here yet.")
+                if not logins.allow(limit_key):
+                    return self.error(429, "Too many sign-in attempts. Wait a few minutes.")
+                got = oc.start()
+                if not got:
+                    return self.error(503, "Too many sign-ins at once. Try again in a few minutes.")
+                return self.reply(200, kv(got), cache="no-store")
+
+            if parts == ["v1", "remote", "poll"]:
+                acc = state.by_token(form.get("token", ""))
+                if not remote or not acc:
+                    return self.error(401 if remote else 404, "Sign in first." if remote else "Not open here.")
+                ok, why = remote.allowed(acc)
+                if not ok:
+                    return self.error(403, why)
+                got = remote.poll(acc, 0 if form.get("hello") == "1" else None)   # hello: answer at once
+                if not got:
+                    return self.reply(204, "")
+                return self.reply(200, json.dumps(got), "application/json", "no-store")
+
+            if parts == ["v1", "oc", "poll"]:
+                got = oc.poll(form.get("session", ""), form.get("key", "")) if oc else None
+                if got is None:
+                    return self.error(404, "That sign-in isn't here (it may have run out). Start it again.")
+                return self.reply(200, kv(got), cache="no-store")
 
             if parts == ["v1", "accounts", "create"]:
                 name, pin, avatar = form.get("name", "").strip(), form.get("pin", ""), form.get("avatar", "")
@@ -3162,8 +3544,15 @@ def serve():
                     log(f"relay: {e!r}")
     threading.Thread(target=reaper, daemon=True).start()
 
+    oc_redirect = os.environ.get("XENITH_OC_REDIRECT", "") or (f"https://{https}/v1/oc/callback" if https else "")
+    oc = OCSignIn(state, os.environ.get("XENITH_OC_URL", ""), os.environ.get("XENITH_OC_CLIENT_ID", ""),
+                  os.environ.get("XENITH_OC_CLIENT_SECRET", ""), oc_redirect)
+    if not oc.ready():
+        log("Signing in with an OCAccount is off: set XENITH_OC_CLIENT_ID and XENITH_OC_CLIENT_SECRET "
+            "(and XENITH_PUBLIC_HTTPS or XENITH_OC_REDIRECT)")
+    remote = Remote(state, relay, os.environ.get("XENITH_REMOTE_ANYONE") == "1")
     handler = make_handler(state, store, admin_key, web_dir, console_key, tube, public, downloads, lan, server_id,
-                           relay)
+                           relay, oc, remote)
     httpd = ThreadingHTTPServer(("0.0.0.0", port), handler)
     handler.https = https
     httpd.daemon_threads = True
@@ -3381,6 +3770,167 @@ def selftest_saves(base, kvparse, check, state):
           and listing(tb)[0].get("used") == "0" and os.listdir(folder) == [])
     sent = [put(ta, "volt", "best.txt", b"1", force=1)[0] for _ in range(SAVE_PUTS_PER_MIN)]
     check("saves: only so many uploads a minute", sent[0] == 200 and sent[-1] == 429)
+
+
+def selftest_oc(kvparse, check, state, store, web_dir):
+    """Signing in with an OCAccount (MineNest), against a stand-in for OCAccounts."""
+    codes = {"good": {"id": "a1", "name": "OwenOC", "xenithos": "Owen"},
+             "unlinked": {"id": "a2", "name": "Nolink", "xenithos": ""}}
+    seen = []
+
+    class FakeOC(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            form = {k: v[0] for k, v in parse_qs(self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()).items()}
+            seen.append(form)
+            ok = (self.path == "/api/oauth/token" and form.get("client_id") == "mn" and form.get("client_secret") == "s3cret"
+                  and form.get("redirect_uri") == "https://cloud.example/v1/oc/callback" and form.get("code") in codes)
+            out = json.dumps(codes.pop(form["code"]) if ok else {"error": "invalid_grant"}).encode()
+            self.send_response(200 if ok else 400)
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+
+    fo = ThreadingHTTPServer(("127.0.0.1", 0), FakeOC)
+    threading.Thread(target=fo.serve_forever, daemon=True).start()
+    oc = OCSignIn(state, f"http://127.0.0.1:{fo.server_address[1]}", "mn", "s3cret", "https://cloud.example/v1/oc/callback")
+    hs = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state, store, "k3y", web_dir, oc=oc))
+    threading.Thread(target=hs.serve_forever, daemon=True).start()
+
+    def r(method, path, body=None):
+        q = urllib.request.Request(f"http://127.0.0.1:{hs.server_address[1]}{path}", method=method,
+                                   data=body.encode() if body is not None else None)
+        try:
+            with urllib.request.urlopen(q) as resp:
+                return resp.status, resp.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    off = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state, store, "k3y", web_dir))
+    threading.Thread(target=off.serve_forever, daemon=True).start()
+    q = urllib.request.Request(f"http://127.0.0.1:{off.server_address[1]}/v1/oc/start", method="POST", data=b"")
+    try:
+        urllib.request.urlopen(q)
+        check("oc: off without a client", False)
+    except urllib.error.HTTPError as e:
+        check("oc: off without a client", e.code == 404)
+    off.shutdown()
+
+    code, body = r("POST", "/v1/oc/start", "")
+    st = kvparse(body)
+    check("oc: start gives a session, key and the OCAccounts page", code == 200 and st.get("session") and st.get("key")
+          and "/account/?client_id=mn&redirect_uri=https%3A%2F%2Fcloud.example%2Fv1%2Foc%2Fcallback&state=" + st["session"] in st.get("url", ""))
+    check("oc: waiting before the browser comes back",
+          kvparse(r("POST", "/v1/oc/poll", f"session={st['session']}&key={st['key']}")[1]).get("state") == "waiting")
+    check("oc: the wrong key gets nothing", r("POST", "/v1/oc/poll", f"session={st['session']}&key=nope")[0] == 404)
+    code, page = r("GET", f"/v1/oc/callback?code=good&state={st['session']}")
+    check("oc: the callback signs in", code == 200 and b"Signed in as Owen" in page and seen[-1]["client_secret"] == "s3cret")
+    got = kvparse(r("POST", "/v1/oc/poll", f"session={st['session']}&key={st['key']}")[1])
+    check("oc: poll hands over the linked profile's sign-in", got.get("state") == "done" and got.get("name") == "Owen"
+          and got.get("account") == "OwenOC" and state.by_token(got.get("token", "")) is state.account("Owen"))
+    check("oc: handed over once", r("POST", "/v1/oc/poll", f"session={st['session']}&key={st['key']}")[0] == 404)
+    check("oc: a used state can't finish again", b"run out" in r("GET", f"/v1/oc/callback?code=good&state={st['session']}")[1])
+
+    st2 = kvparse(r("POST", "/v1/oc/start", "")[1])
+    r("GET", f"/v1/oc/callback?code=unlinked&state={st2['session']}")
+    got = kvparse(r("POST", "/v1/oc/poll", f"session={st2['session']}&key={st2['key']}")[1])
+    check("oc: an account without a profile is told to link one", got.get("state") == "error" and "isn't linked" in got.get("error", ""))
+    st3 = kvparse(r("POST", "/v1/oc/start", "")[1])
+    r("GET", f"/v1/oc/callback?code=bogus&state={st3['session']}")
+    got = kvparse(r("POST", "/v1/oc/poll", f"session={st3['session']}&key={st3['key']}")[1])
+    check("oc: a refused code is an error", got.get("state") == "error" and "didn't accept" in got.get("error", ""))
+    st4 = kvparse(r("POST", "/v1/oc/start", "")[1])
+    r("GET", f"/v1/oc/callback?error=access_denied&state={st4['session']}")
+    check("oc: cancelled on OCAccounts", "cancelled" in kvparse(r("POST", "/v1/oc/poll", f"session={st4['session']}&key={st4['key']}")[1]).get("error", ""))
+    hs.shutdown()
+
+    # ---- MineNest from anywhere: a browser signs in with its OCAccount, its MineNest answers.
+    remote = Remote(state, None, anyone=True)
+    rs = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state, store, "k3y", web_dir, oc=oc, remote=remote))
+    threading.Thread(target=rs.serve_forever, daemon=True).start()
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **k):
+            return None
+    opener = urllib.request.build_opener(NoRedirect)
+
+    def b(method, path, body=None, cookie="", headers=None):
+        q = urllib.request.Request(f"http://127.0.0.1:{rs.server_address[1]}{path}", method=method,
+                                   data=body.encode() if body is not None else None, headers=dict(headers or {}, Cookie=cookie))
+        try:
+            with opener.open(q) as resp:
+                return resp.status, resp.read(), resp.headers
+        except urllib.error.HTTPError as e:
+            return e.code, e.read(), e.headers
+
+    owen_token = state._new_session(state.account("Owen"))
+    code, _, hd = b("GET", "/remote/")
+    loc = hd.get("Location", "")
+    check("remote: a browser without a sign-in goes to OCAccounts", code == 303 and "/account/?client_id=mn" in loc)
+    sid = parse_qs(urlparse(loc).query)["state"][0]
+    codes["goodb"] = {"id": "a1", "name": "OwenOC", "xenithos": "Owen"}
+    code, _, hd = b("GET", f"/v1/oc/callback?code=goodb&state={sid}")
+    cookie = (hd.get("Set-Cookie") or "").split(";")[0]
+    check("remote: OCAccounts' answer gives the browser its cookie", code == 303 and hd.get("Location") == "/remote/"
+          and cookie.startswith("xremote=") and "HttpOnly" in hd.get("Set-Cookie", ""))
+    code, page, _ = b("GET", "/remote/", cookie=cookie)
+    check("remote: says when the MineNest isn't connected", code == 503 and b"isn't connected" in page)
+    check("remote: the API says so too", b("GET", "/remote/api/servers", cookie=cookie)[0] == 503)
+    check("remote: no cookie, no API", b("GET", "/remote/api/servers")[0] == 401)
+
+    # The MineNest: it asks, answers what's asked, and asks again.
+    seen_req = []
+
+    def minenest():
+        for _ in range(4):
+            q = urllib.request.Request(f"http://127.0.0.1:{rs.server_address[1]}/v1/remote/poll", method="POST",
+                                       data=f"token={owen_token}".encode())
+            with urllib.request.urlopen(q, timeout=40) as resp:
+                if resp.status == 204:
+                    continue
+                for rq in json.loads(resp.read()):
+                    seen_req.append(rq)
+                    out = json.dumps({"id": rq["id"], "status": 200, "ctype": "application/json",
+                                      "body": base64.b64encode(json.dumps({"echo": rq["path"], "q": rq["query"],
+                                                                           "changes": rq["changes"]}).encode()).decode()})
+                    rep = urllib.request.Request(f"http://127.0.0.1:{rs.server_address[1]}/v1/remote/reply", method="POST",
+                                                 data=out.encode(), headers={"X-Xenith-Token": owen_token,
+                                                                             "Content-Type": "application/json"})
+                    urllib.request.urlopen(rep).read()
+    t = threading.Thread(target=minenest, daemon=True)
+    remote.POLL = 1
+    t.start()
+    time.sleep(0.5)
+    code, out, hd = b("GET", "/remote/api/servers?x=1", cookie=cookie)
+    check("remote: the browser's request reaches its MineNest and comes back", code == 200
+          and json.loads(out) == {"echo": "/api/servers", "q": "x=1", "changes": False})
+    code, out, _ = b("POST", "/remote/api/servers/a/start", "{}", cookie=cookie, headers={"X-MineNest": "1"})
+    check("remote: changes carry X-MineNest through", code == 200 and json.loads(out)["changes"] is True
+          and base64.b64decode(seen_req[-1]["body"]) == b"{}")
+    check("remote: a reply for another profile's request is refused",
+          not remote.reply(state.account("Owen"), "nope", {"status": 200}))
+    remote.ANSWER = 1
+    remote.links["owen"]["t"] = time.time()
+    t.join(10)
+    remote.links["owen"]["t"] = time.time()
+    check("remote: no answer in time is a 504", b("GET", "/remote/api/servers", cookie=cookie)[0] == 504)
+    check("remote: signing out drops the cookie", b("GET", "/remote/signout", cookie=cookie)[0] == 303
+          and b("GET", "/remote/api/servers", cookie=cookie)[0] == 401)
+    rs.shutdown()
+
+    picky = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state, store, "k3y", web_dir, oc=oc, remote=Remote(state, None)))
+    threading.Thread(target=picky.serve_forever, daemon=True).start()
+    q = urllib.request.Request(f"http://127.0.0.1:{picky.server_address[1]}/v1/remote/poll", method="POST",
+                               data=f"token={owen_token}".encode())
+    try:
+        urllib.request.urlopen(q)
+        check("remote: only for supporters (closed without the relay)", False)
+    except urllib.error.HTTPError as e:
+        check("remote: only for supporters (closed without the relay)", e.code == 403 and b"isn't open" in e.read())
+    picky.shutdown()
+    fo.shutdown()
 
 
 def selftest_achievements(req, kvparse, check, state):
@@ -3913,6 +4463,7 @@ else:
     selftest_friends(req, kvparse, check, state, httpd.RequestHandlerClass.friends)
     selftest_saves(base, kvparse, check, state)
     selftest_achievements(req, kvparse, check, state)
+    selftest_oc(kvparse, check, state, store, web_dir)
 
     # Tube, with stand-in yt-dlp and ffmpeg
     calls_file = os.path.join(tmp, "calls.txt")

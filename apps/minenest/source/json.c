@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "hostmc.h"
+#include "mn.h"
 
 static const char *ws(const char *p)
 {

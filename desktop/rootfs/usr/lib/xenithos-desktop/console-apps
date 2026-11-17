@@ -23,9 +23,9 @@
 # ~/.local/share/applications/xenithos-app-APP.desktop; console-menu.list says which group each
 # app goes in.
 #
-# HostMC also gets an icon on the desktop itself, next to Brave's and Files', while it's on the
-# home screen: xenithos-app-hostmc.desktop on the desktop, the same as its Apps menu entry. It's
-# put there the first time HostMC is on the home screen and goes when HostMC does. One you delete
+# MineNest also gets an icon on the desktop itself, next to Brave's and Files', while it's on the
+# home screen: xenithos-app-minenest.desktop on the desktop, the same as its Apps menu entry. It's
+# put there the first time MineNest is on the home screen and goes when MineNest does. One you delete
 # stays deleted, and one you change is yours (~/.config/xenithos/desktop-icons keeps track).
 set -u
 LIST=/usr/share/xenithos-desktop/console-apps.list
@@ -38,7 +38,7 @@ CHOSEN="${XDG_CONFIG_HOME:-$HOME/.config}/xenithos/console-apps"
 MENU="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 MENU_LIST=/usr/share/xenithos-desktop/console-menu.list
 ICONS=/usr/share/icons/XenithOS/scalable/apps
-ON_DESKTOP="hostmc"             # the apps with an icon on the desktop too
+ON_DESKTOP="minenest"             # the apps with an icon on the desktop too
 PLACED="${XDG_CONFIG_HOME:-$HOME/.config}/xenithos/desktop-icons"    # "APP SHA-256" of each icon put there
 DESK=$(xdg-user-dir DESKTOP 2>/dev/null)
 [ -n "$DESK" ] && [ "$DESK" != "$HOME" ] || DESK="$HOME/Desktop"

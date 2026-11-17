@@ -27,7 +27,7 @@ fi
 
 for app in apps/*/; do
     name=$(basename "$app")
-    # Apps without a Makefile are for PCs only (HostMC runs a Minecraft server): linux/Makefile builds them.
+    # Apps without a Makefile are for PCs only (MineNest runs Minecraft servers): linux/Makefile builds them.
     [ -f "$app/Makefile" ] || continue
     echo "== $name"
     make --no-print-directory -C "$app"

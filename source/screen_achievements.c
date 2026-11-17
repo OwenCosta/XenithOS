@@ -20,7 +20,7 @@ struct achievement ach_list[MAX_ACHIEVEMENTS];
 int nach;
 
 static const struct { const char *id, *title; } app_titles[] = {
-    {"volt", "VOLT"}, {"doom", "DOOM"}, {"tube", "Tube"}, {"hostmc", "HostMC"},
+    {"volt", "VOLT"}, {"doom", "DOOM"}, {"tube", "Tube"}, {"hostmc", "MineNest"},
 };
 
 const char *achievement_app(const char *id)
@@ -140,7 +140,7 @@ void screen_achievements(void)
             achievements_fetch(prof.signed_in ? prof.name : NULL);
         }
         ui_bg();
-        snprintf(sub, sizeof sub, "%d of %d earned, in VOLT, DOOM, Tube and HostMC", achievements_earned(), nach);
+        snprintf(sub, sizeof sub, "%d of %d earned, in VOLT, DOOM, Tube and MineNest", achievements_earned(), nach);
         ui_header("Achievements", sub);
         draw_app(M, top, w, h, "volt");
         draw_app(M + w + gap, top, w, h, "doom");
