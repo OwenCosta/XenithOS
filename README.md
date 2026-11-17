@@ -183,7 +183,8 @@ sim/run.sh sim/scripts/tour.txt tour          # offline screens -> sim/out/tour/
 
 ## Checks
 
-GitHub runs these on every push and pull request (`.github/workflows/ci.yml`), and they work the same on a PC:
+GitHub runs these on every push to a branch and every pull request (`.github/workflows/ci.yml`), and they work
+the same on a PC:
 
 ```bash
 make -C linux                                 # the PC version, as Ubuntu 24.04 and Debian 12 build it
