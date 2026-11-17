@@ -49,6 +49,10 @@ What comes with it:
 
 - **Brave** as the browser, **Mullvad VPN**, Files, Terminal, a text editor, picture, PDF and video
   viewers, an archive tool, a calculator, screenshots, a task manager, Disks, and Bluetooth.
+- **On the desktop itself**, not only in the Apps menu: Return to XenithOS Console, Brave, Files, Terminal,
+  Settings and Mullvad VPN (`rootfs/usr/share/xenithos-desktop/launchers/`, put there by `desktop-start` the
+  first time and by `user-migrate` when a later version adds one), and HostMC while it's on XenithOS
+  Console's home screen (`console-apps menu`). An icon you delete stays deleted.
 - **Security tools** from Ubuntu's archive, for networks, the web, passwords, Wi-Fi, forensics and privacy.
   `packages/security.list` is the whole list, and it's also how they're sorted in the Apps menu.
 - **Settings**, XenithOS Desktop's own: Wi-Fi (join, forget, hidden networks), Sound (volume, output,
