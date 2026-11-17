@@ -1,0 +1,24 @@
+# Settings > Bluetooth controllers when it can't work: run it with XSIM_BT=none (no adapter),
+# XSIM_BT=blocked (switched off) or XSIM_BLUETOOTHCTL=/nowhere (BlueZ isn't installed).
+#   XSIM_KIND=pc XSIM_THREAD=1 XSIM_BT=none sim/run.sh sim/scripts/bluetooth_off.txt bluetooth_none
+wait 240
+press right
+press right
+press right
+press right
+wait 5
+press a
+wait 30
+press down
+press down
+press down
+press down
+press down
+press down
+wait 10
+press a
+wait 90
+shot why
+press b
+wait 20
+quit

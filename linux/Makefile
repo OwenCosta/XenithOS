@@ -11,7 +11,7 @@ CFLAGS_ALL  := $(OPT) -std=gnu11 -Wall -Wno-format-truncation -I../shared -I../s
 LIBS        := $(SDL_LIBS) -lX11 -lz -lm -lpthread -ldl
 
 SHARED      := $(filter-out ../shared/platform_xenon.c ../shared/net_xenon.c, $(wildcard ../shared/*.c))
-PLATFORM    := platform_sdl.c apps_linux.c kiosk.c net_posix.c
+PLATFORM    := platform_sdl.c apps_linux.c kiosk.c net_posix.c bluetooth_linux.c
 HEADERS     := $(wildcard ../shared/*.h ../source/*.h) platform_linux.h
 
 SHELL_SRC   := $(wildcard ../source/*.c) $(SHARED) $(PLATFORM)

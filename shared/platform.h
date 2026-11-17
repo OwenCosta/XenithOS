@@ -194,4 +194,40 @@ const char *plat_next_launch(void);      /* what Switch game chose, once; NULL w
 int  plat_has_desktop(void);
 void plat_switch_to_desktop(void);
 
+/* Bluetooth controllers (PCs and Pis), paired with the controller alone, through BlueZ
+ * (linux/bluetooth_linux.c drives its bluetoothctl). The Xbox has none.
+ *   plat_bt_open()       turns Bluetooth on and starts looking for devices nearby; 0 when it
+ *                        can't (plat_bt_poll's why says what's missing)
+ *   plat_bt_poll()       once a frame while it's open: takes in what BlueZ said, and says how
+ *                        it's going
+ *   plat_bt_devices()    the devices it knows: paired ones, and ones heard nearby
+ *   plat_bt_pair()       pairs a device, trusts it (so it reconnects by itself whenever it's
+ *                        turned on) and connects it, one step after another
+ *   plat_bt_connect(), plat_bt_disconnect(), plat_bt_forget() (unpairs it)
+ *   plat_bt_close()      stops looking; paired devices stay paired */
+struct plat_bt_device {
+    char addr[18];            /* "AA:BB:CC:DD:EE:FF" */
+    char name[48];            /* "" when it hasn't said */
+    int paired, trusted, connected;
+    int gamepad;              /* it says it's a game controller */
+    int rssi;                 /* its signal in dBm, 0 when it hasn't been heard just now */
+};
+enum { BT_CLOSED, BT_STARTING, BT_READY, BT_FAILED };
+enum { BT_IDLE, BT_PAIRING, BT_TRUSTING, BT_CONNECTING, BT_DISCONNECTING, BT_FORGETTING, BT_DONE, BT_STEP_FAILED };
+struct plat_bt_status {
+    int state;                /* BT_CLOSED..BT_FAILED */
+    int scanning;             /* looking for devices right now */
+    int step;                 /* BT_IDLE..BT_STEP_FAILED: what's being done to addr */
+    char addr[18];
+    char why[200];            /* when state is BT_FAILED or step BT_STEP_FAILED */
+};
+int  plat_bt_open(void);
+void plat_bt_poll(struct plat_bt_status *s);
+int  plat_bt_devices(struct plat_bt_device *out, int max);
+void plat_bt_pair(const char *addr);
+void plat_bt_connect(const char *addr);
+void plat_bt_disconnect(const char *addr);
+void plat_bt_forget(const char *addr);
+void plat_bt_close(void);
+
 #endif

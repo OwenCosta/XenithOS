@@ -64,6 +64,19 @@ Any controller SDL knows works: Xbox, PlayStation, Switch Pro and most others. O
 
 In the on-screen keyboard you can type on the real keyboard: letters type, Backspace deletes, Enter finishes.
 
+### Bluetooth controllers
+
+**Settings > Bluetooth controllers** pairs one with the controller alone, no keyboard needed: put it in
+pairing mode, and choose it when it shows up. XenithOS pairs it, trusts it (so from then on it connects by
+itself whenever it's turned on) and connects it. A paired one can be connected, disconnected or forgotten
+there too, and Y lists every device nearby, for a controller that doesn't say what it is.
+
+It drives BlueZ's `bluetoothctl` (`linux/bluetooth_linux.c`) in a terminal of its own, with an agent that
+needs no PIN or confirming, and switches Bluetooth on (and out of rfkill's block) when it's off. The
+installer adds BlueZ, starts its service and puts your user in the `bluetooth` group; a machine installed
+before this needs the install command once more, which the screen says. No Bluetooth at all? A USB
+Bluetooth adapter works.
+
 ## Where things are
 
 | Path | What |

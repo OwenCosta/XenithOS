@@ -25,8 +25,9 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
 - Cloud: who's playing, XenithOS news, and the VOLT leaderboard with avatars
 - Profile: a gamertag and passcode, saved to XenithOS Cloud so it follows you to any machine
 - Avatar editor: thirteen parts in three tabs (face, hair, outfit), colour swatches, random looks
-- Settings: volume, interface sounds, start-up chime, theme, accessibility, network, system info (with
-  start-up times and sound stats), controller test, about
+- Settings: volume, interface sounds, start-up chime, theme, accessibility, Bluetooth controllers (PCs and
+  Pis: pair one with the controller alone), network, system info (with start-up times and sound stats),
+  controller test, about
 - Themes: six colour themes for XenithOS and its apps (XenithOS's red, Ocean, Forest, Ember, Violet, Teal) and
   six wallpapers for the home screen, all flat and dark and drawn in code, picked in Settings > Theme
 - Accessibility, for XenithOS and every app: bigger text, high contrast, and the controller's buttons moved to

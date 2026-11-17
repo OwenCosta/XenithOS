@@ -42,6 +42,12 @@ More switches:
   (`sim/scripts/hostmc.txt`). It runs in real time, since the stand-in does. Without `XSIM_HOSTMC`, HostMC
   downloads Java and a real server and runs it. A server a script leaves running is stopped afterwards.
   The stand-in answers server list pings on its port (127.0.0.1 only), and `sim/hostmc/ping.py` sends one.
+- Bluetooth (`XSIM_KIND=pc`, Settings > Bluetooth controllers) runs the PC's own code
+  (`linux/bluetooth_linux.c`) against a stand-in for BlueZ's `bluetoothctl` (`sim/bluetooth/bluetoothctl`),
+  never this PC's Bluetooth: an 8BitDo controller already paired but asleep, an Xbox controller, a DualSense
+  that turns the first pairing down, a TV and a device with no name. `XSIM_BT=none` has no adapter,
+  `XSIM_BT=blocked` has Bluetooth switched off, and `XSIM_BLUETOOTHCTL=/nowhere` has no BlueZ. Use
+  `XSIM_THREAD=1`, since the stand-in runs in real time (`sim/scripts/bluetooth.txt`, `bluetooth_off.txt`).
 - `sim/hostmc/test-vps.sh` runs HostMC's own-VPS route through the `hostmc_vps*.txt` scripts, with a private
   sshd (run as you, on spare ports) standing in for the VPS, and checks each step; screenshots go to
   `sim/out/hostmc-vps`.

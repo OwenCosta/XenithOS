@@ -85,6 +85,8 @@ apt-get install -y $PKGS
 # DOOM's free game data (Freedoom: Phase 1 and 2, in /usr/share/games/doom). Not every
 # system has the package; DOOM can get it from the Store instead.
 apt-get install -y freedoom || say "No freedoom package here; DOOM can get Freedoom from the Store"
+# Pairing Bluetooth controllers in Settings: BlueZ, and rfkill to switch Bluetooth on.
+apt-get install -y bluez rfkill || say "Couldn't install BlueZ; XenithOS works without it, but can't pair Bluetooth controllers"
 # Apps from Flathub and Steam (the Store's Apps and Steam sections): Flatpak; cage, a small
 # compositor that shows one app full screen in console mode; Xwayland for apps that still
 # need X11; a D-Bus for the user's apps; and a sound server the apps and XenithOS can share,
@@ -156,9 +158,11 @@ done
 if [ -f /usr/share/xenithos/config.txt ] && [ ! -f "$DATA/uda:/xenith/config.txt" ]; then
     sudo -u "$USER_NAME" cp /usr/share/xenithos/config.txt "$DATA/uda:/xenith/config.txt"
 fi
-for g in video render input audio; do
+for g in video render input audio bluetooth; do
     if getent group "$g" >/dev/null; then usermod -aG "$g" "$USER_NAME"; fi
 done
+# Bluetooth's service, for pairing controllers in Settings (a machine without Bluetooth just has it idle)
+systemctl enable --now bluetooth >/dev/null 2>&1 || true
 # Flathub for the user's apps (the Store also adds it before the first install).
 if command -v flatpak >/dev/null; then
     sudo -u "$USER_NAME" -H flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo \

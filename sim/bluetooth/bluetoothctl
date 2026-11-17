@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""A stand-in for BlueZ's bluetoothctl, for the simulator's Bluetooth screen (sim/README.md).
+
+It talks the way the real one does at a terminal, which is how XenithOS runs it
+(linux/bluetooth_linux.c): coloured [NEW]/[CHG]/[DEL], its prompt, and each line printed by
+clearing the prompt's line and drawing the prompt again after it. Nearby: an 8BitDo controller
+that's already paired (asleep, so connecting it fails once), an Xbox controller, a DualSense that
+turns down the first pairing, a TV and a device with no name.
+
+    XSIM_BT=none     no adapter ("No default controller available")
+    XSIM_BT=blocked  Bluetooth switched off (rfkill), and it stays off
+"""
+import os
+import select
+import sys
+import time
+
+ESC = "\x1b"
+PROMPT = "\x01" + ESC + "[0;94m\x02[bluetooth]\x01" + ESC + "[0m\x02# "
+CONTROLLER = "00:1A:7D:DA:71:13"
+
+
+def col(code, s):
+    return f"{ESC}[0;{code}m{s}{ESC}[0m"
+
+
+NEW, CHG, DEL = col(92, "NEW"), col(93, "CHG"), col(91, "DEL")
+
+
+def out(line):
+    sys.stdout.write("\r" + ESC + "[K" + line + "\n" + PROMPT)
+    sys.stdout.flush()
+
+
+DEVICES = {
+    "E4:17:D8:2A:91:0C": {"name": "8BitDo Pro 2", "icon": "input-gaming", "cls": "0x00002508",
+                          "paired": True, "trusted": True, "known": True, "asleep": 1},
+    "98:7A:14:3C:55:E1": {"name": "Xbox Wireless Controller", "icon": "input-gaming", "cls": "0x00002508", "at": 0.6},
+    "F4:6A:DD:01:02:03": {"name": "Living Room TV", "icon": "video-display", "cls": "0x00080410", "at": 1.0},
+    "5C:E1:22:9B:44:77": {"name": None, "at": 1.3},
+    "A0:5A:5D:12:34:56": {"name": "DualSense Wireless Controller", "icon": "input-gaming", "cls": "0x00002508",
+                          "at": 1.8, "refuse": 1},
+}
+for d in DEVICES.values():
+    d.setdefault("paired", False)
+    d.setdefault("trusted", False)
+    d.setdefault("connected", False)
+    d.setdefault("known", False)
+    d.setdefault("rssi", None)
+    d.setdefault("icon", None)
+
+events = []          # (when, function)
+mode = os.environ.get("XSIM_BT", "")
+scanning = False
+
+
+def later(seconds, fn):
+    events.append((time.monotonic() + seconds, fn))
+
+
+def shown_name(addr):
+    return DEVICES[addr]["name"] or addr.replace(":", "-")
+
+
+def discover(addr):
+    d = DEVICES[addr]
+    if not scanning or d["known"]:
+        return
+    d["known"] = True
+    d["rssi"] = -48 if d["icon"] == "input-gaming" else -71
+    out(f"[{NEW}] Device {addr} {shown_name(addr)}")
+
+
+def rssi_tick():
+    if scanning:
+        for addr, d in DEVICES.items():
+            if d["known"] and d["rssi"] is not None:
+                d["rssi"] += 3 if d["rssi"] < -60 else -2
+                out(f"[{CHG}] Device {addr} RSSI: 0x{d['rssi'] & 0xffffffff:08x} ({d['rssi']})")
+        later(2.0, rssi_tick)
+
+
+def info(addr):
+    d = DEVICES.get(addr)
+    if not d or not d["known"]:
+        out(f"Device {addr} not available")
+        return
+    out(f"Device {addr} (public)")
+    if d["name"]:
+        out(f"\tName: {d['name']}")
+        out(f"\tAlias: {d['name']}")
+    else:
+        out(f"\tAlias: {shown_name(addr)}")
+    if d.get("cls"):
+        out(f"\tClass: {d['cls']}")
+    if d.get("icon"):
+        out(f"\tIcon: {d['icon']}")
+    yn = lambda v: "yes" if v else "no"
+    out(f"\tPaired: {yn(d['paired'])}")
+    out(f"\tBonded: {yn(d['paired'])}")
+    out(f"\tTrusted: {yn(d['trusted'])}")
+    out("\tBlocked: no")
+    out(f"\tConnected: {yn(d['connected'])}")
+    out("\tLegacyPairing: no")
+    if d["rssi"] is not None:
+        out(f"\tRSSI: 0x{d['rssi'] & 0xffffffff:08x} ({d['rssi']})")
+
+
+def pair(addr):
+    d = DEVICES.get(addr)
+    if not d or not d["known"]:
+        out(f"Device {addr} not available")
+        return
+    out(f"Attempting to pair with {addr}")
+
+    def done():
+        out(f"[{CHG}] Device {addr} Connected: yes")
+        if d.get("refuse"):
+            d["refuse"] = 0
+            out("Failed to pair: org.bluez.Error.AuthenticationCanceled")
+            out(f"[{CHG}] Device {addr} Connected: no")
+            d["connected"] = False
+            return
+        d["paired"] = d["connected"] = True
+        out(f"[{CHG}] Device {addr} Bonded: yes")
+        out(f"[{CHG}] Device {addr} ServicesResolved: yes")
+        out(f"[{CHG}] Device {addr} Paired: yes")
+        out("Pairing successful")
+    later(1.2, done)
+
+
+def trust(addr):
+    d = DEVICES[addr]
+    d["trusted"] = True
+    out(f"[{CHG}] Device {addr} Trusted: yes")
+    out(f"Changing {addr} trust succeeded")
+
+
+def connect(addr):
+    d = DEVICES[addr]
+    out(f"Attempting to connect to {addr}")
+
+    def done():
+        if d.get("asleep"):
+            d["asleep"] = 0
+            out("Failed to connect: org.bluez.Error.Failed br-connection-page-timeout")
+            return
+        d["connected"] = True
+        out(f"[{CHG}] Device {addr} Connected: yes")
+        out("Connection successful")
+    later(0.8, done)
+
+
+def disconnect(addr):
+    d = DEVICES[addr]
+    out(f"Attempting to disconnect from {addr}")
+    d["connected"] = False
+    out(f"[{CHG}] Device {addr} ServicesResolved: no")
+    out("Successful disconnected")
+    out(f"[{CHG}] Device {addr} Connected: no")
+
+
+def remove(addr):
+    d = DEVICES[addr]
+    d["paired"] = d["trusted"] = d["connected"] = False
+    d["known"] = False
+    out(f"[{DEL}] Device {addr} {shown_name(addr)}")
+    out("Device has been removed")
+
+
+def command(line):
+    global scanning
+    words = line.split()
+    if not words:
+        return True
+    cmd, arg = words[0], (words[1].upper() if len(words) > 1 else "")
+    if mode == "none" and cmd in ("power", "scan", "pair", "devices", "default-agent"):
+        out("No default controller available")
+        return True
+    if cmd == "power":
+        if mode == "blocked":
+            out("Failed to set power on: org.bluez.Error.Blocked")
+        else:
+            out(f"[{CHG}] Controller {CONTROLLER} Powered: yes")
+            out("Changing power on succeeded")
+    elif cmd == "agent":
+        out("Agent unregistered" if arg == "OFF" else "Agent registered")
+    elif cmd == "default-agent":
+        out("Default agent request successful")
+    elif cmd == "devices":
+        for addr, d in DEVICES.items():
+            if d["known"]:
+                out(f"Device {addr} {shown_name(addr)}")
+    elif cmd == "scan":
+        if arg == "ON":
+            scanning = True
+            out("Discovery started")
+            out(f"[{CHG}] Controller {CONTROLLER} Discovering: yes")
+            for addr, d in DEVICES.items():
+                if "at" in d:
+                    later(d["at"], lambda a=addr: discover(a))
+            later(2.0, rssi_tick)
+        else:
+            scanning = False
+            out("Discovery stopped")
+            out(f"[{CHG}] Controller {CONTROLLER} Discovering: no")
+    elif cmd in ("info", "pair", "trust", "connect", "disconnect", "remove"):
+        if arg not in DEVICES:
+            out(f"Device {arg} not available")
+        else:
+            {"info": info, "pair": pair, "trust": trust, "connect": connect, "disconnect": disconnect,
+             "remove": remove}[cmd](arg)
+    elif cmd in ("quit", "exit"):
+        return False
+    elif cmd == "yes":
+        pass
+    else:
+        out("Invalid command")
+    return True
+
+
+def main():
+    if os.isatty(0):
+        # like readline: the terminal doesn't echo or wait for lines, this does
+        import termios
+        attrs = termios.tcgetattr(0)
+        attrs[3] &= ~(termios.ECHO | termios.ICANON)
+        termios.tcsetattr(0, termios.TCSANOW, attrs)
+    sys.stdout.write("Agent registered\n" + PROMPT)
+    out(f"[{CHG}] Controller {CONTROLLER} Pairable: yes")
+    pending = ""
+    while True:
+        now = time.monotonic()
+        due = sorted((e for e in events if e[0] <= now), key=lambda e: e[0])
+        for e in due:
+            events.remove(e)
+            e[1]()
+        wait = min([e[0] for e in events], default=now + 0.5) - time.monotonic()
+        ready, _, _ = select.select([sys.stdin], [], [], max(0.0, min(wait, 0.5)))
+        if not ready:
+            continue
+        try:
+            chunk = os.read(sys.stdin.fileno(), 4096).decode(errors="replace")
+        except OSError:
+            return
+        if not chunk:
+            return
+        pending += chunk
+        while "\n" in pending:
+            line, pending = pending.split("\n", 1)
+            sys.stdout.write(line + "\n")             # the line as it was typed, then its answer
+            sys.stdout.flush()
+            if not command(line.strip()):
+                return
+
+
+if __name__ == "__main__":
+    main()

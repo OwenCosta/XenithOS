@@ -447,6 +447,21 @@ void plat_mouse(struct plat_mouse *m) { memset(m, 0, sizeof *m); m->x = m->y = -
 void plat_mouse_grab(int on) { (void)on; }
 int plat_key_event(int *key, int *down) { (void)key; (void)down; return 0; }
 
+/* No Bluetooth for controllers on the 360: its own wireless controllers aren't Bluetooth. */
+int plat_bt_open(void) { return 0; }
+void plat_bt_poll(struct plat_bt_status *s)
+{
+    memset(s, 0, sizeof *s);
+    s->state = BT_FAILED;
+    snprintf(s->why, sizeof s->why, "The Xbox 360 has no Bluetooth.");
+}
+int plat_bt_devices(struct plat_bt_device *out, int max) { (void)out; (void)max; return 0; }
+void plat_bt_pair(const char *addr) { (void)addr; }
+void plat_bt_connect(const char *addr) { (void)addr; }
+void plat_bt_disconnect(const char *addr) { (void)addr; }
+void plat_bt_forget(const char *addr) { (void)addr; }
+void plat_bt_close(void) { }
+
 void plat_reboot(void)
 {
     if (hook_before) hook_before();

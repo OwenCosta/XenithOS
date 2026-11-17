@@ -83,6 +83,11 @@ if [ "$XSIM_KIND" = pc ]; then
     for app in ${XSIM_UNINSTALLED:-}; do rm -f "$work/uda:/apps/$app".*; done
 fi
 
+# Bluetooth (XSIM_KIND=pc) always talks to the stand-in, never to this PC's own: two controllers
+# to pair, one already paired, a TV. XSIM_BT=none or blocked: no adapter, or one switched off.
+# XSIM_BLUETOOTHCTL: another program in its place (a path that isn't there: BlueZ missing).
+export XENITHOS_BLUETOOTHCTL="${XSIM_BLUETOOTHCTL:-$here/bluetooth/bluetoothctl}"
+
 bin="${XSIM_BIN:-xsim}"
 make -s -C "$here" "$bin"
 cd "$work"
