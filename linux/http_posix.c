@@ -30,6 +30,9 @@
 
 #include "http_posix.h"
 #include "net.h"
+#ifdef XENITH_SIM
+#include "platform.h"                       /* plat_sleep_us, for XSIM_NET_TIME */
+#endif
 
 #define IDLE_TIMEOUT_MS 10000
 #define TRY_MS          3000     /* how long one of a name's addresses gets before the next is tried */
@@ -163,12 +166,31 @@ struct conn {
 #define IO_WAIT  -1                 /* nothing moved: wait for *want (POLLIN or POLLOUT), then try again */
 #define IO_ERROR -2
 
-/* Waits up to POLL_MS for fd, keeping the screen and sound going: 1 ready, 0 not yet, -1 broken. */
+#define WAIT_CANCELLED -2
+
+#ifdef XENITH_SIM
+/* XSIM_NET_TIME=1: virtual time passes while waiting on the network, as real time does on a
+ * console, so a screen that draws during a download (the Store's downloads) gets its frames and
+ * reads its buttons then. Off, a request takes no virtual time at all. */
+static int net_time(void)
+{
+    static int on = -1;
+    if (on < 0) on = getenv("XSIM_NET_TIME") && !strcmp(getenv("XSIM_NET_TIME"), "1");
+    return on;
+}
+#endif
+
+/* Waits up to POLL_MS for fd, keeping the screen and sound going: 1 ready, 0 not yet, -1 broken,
+ * WAIT_CANCELLED when net_cancel() was called (the Store's downloads queue stopping one). */
 static int wait_fd(int fd, short ev)
 {
     struct pollfd p = {fd, ev, 0};
     int r = poll(&p, 1, POLL_MS);
+#ifdef XENITH_SIM
+    if (r == 0 && net_time()) plat_sleep_us(POLL_MS * 1000);
+#endif
     net_idle();
+    if (net_cancel_asked()) return WAIT_CANCELLED;
     if (r < 0) return errno == EINTR ? 0 : -1;
     return r > 0;
 }
@@ -192,6 +214,11 @@ static int connect_any(const struct target *t, int connect_ms, int *fd_out)
             for (;;) {
                 int r = wait_fd(fd, POLLOUT), e = 0;
                 socklen_t el = sizeof e;
+                if (r == WAIT_CANCELLED) {
+                    close(fd);
+                    freeaddrinfo(res);
+                    return NE_CANCELLED;
+                }
                 if (r < 0) break;
                 if (r == 0) {
                     if ((waited += POLL_MS) > limit) break;
@@ -244,6 +271,7 @@ static int tls_start(struct conn *c, const struct target *t, int *idle)
             return NE_SECURE;
         }
         r = wait_fd(c->fd, e == OSSL_ERROR_WANT_READ ? POLLIN : POLLOUT);
+        if (r == WAIT_CANCELLED) return NE_CANCELLED;
         if (r < 0) return NE_SECURE;
         if (r == 0 && (*idle += POLL_MS) > IDLE_TIMEOUT_MS) return NE_TIMEOUT;
     }
@@ -324,7 +352,9 @@ int posix_http_once(const char *host, const char *method, const char *path,
     while (sent < req_len) {
         int n = io_send(&c, req + sent, req_len - sent, &want);
         if (n > 0) { sent += n; idle = 0; continue; }
-        if (n == IO_ERROR || (r = wait_fd(c.fd, want)) < 0) { err = NE_RESET; goto fail; }
+        if (n == IO_ERROR) { err = NE_RESET; goto fail; }
+        if ((r = wait_fd(c.fd, want)) == WAIT_CANCELLED) { err = NE_CANCELLED; goto fail; }
+        if (r < 0) { err = NE_RESET; goto fail; }
         if (r == 0 && (idle += POLL_MS) > IDLE_TIMEOUT_MS) { err = NE_TIMEOUT; goto fail; }
     }
 
@@ -343,11 +373,13 @@ int posix_http_once(const char *host, const char *method, const char *path,
         }
         n = io_recv(&c, buf + len, cap - len - 1, &want);
         if (n == IO_WAIT) {
-            if ((r = wait_fd(c.fd, want)) < 0) { err = NE_RESET; goto fail; }
+            if ((r = wait_fd(c.fd, want)) == WAIT_CANCELLED) { err = NE_CANCELLED; goto fail; }
+            if (r < 0) { err = NE_RESET; goto fail; }
             if (r == 0 && (idle += POLL_MS) > IDLE_TIMEOUT_MS) { err = NE_TIMEOUT; goto fail; }
             continue;
         }
         net_idle();                           /* a reply that keeps coming mustn't stop the screen */
+        if (net_cancel_asked()) { err = NE_CANCELLED; goto fail; }   /* nor a stop asked for meanwhile */
         if (n == 0) break;                    /* the server closed: that's the reply */
         if (n == IO_ERROR) {
             /* Over TLS, a server that closes without TLS's goodbye has ended its reply too, once

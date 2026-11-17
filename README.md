@@ -20,8 +20,10 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
 - Home: your profile and avatar at the top, five tiles (Apps, Store, Cloud, Profile, Settings), and a row of
   installed apps with thumbnails
 - Apps: a thumbnail grid of everything installed
-- Store: apps, game data and system updates from XenithOS Cloud. Each download's SHA-256 is checked before
-  anything is written. On PCs it has sections: apps from Flathub, Steam and games on Steam, and XenithOS.
+- Store: apps, game data and system updates from XenithOS Cloud. Its lists come signed by XenithOS Cloud, and
+  each download's SHA-256 is checked against them before anything is written. Pick several with X and START
+  downloads them one after another. On PCs it has sections: apps from Flathub, Steam and games on Steam, and
+  XenithOS.
 - Cloud: who's playing, XenithOS news, and the VOLT leaderboard with avatars
 - Profile: a gamertag and passcode, saved to XenithOS Cloud so it follows you to any machine
 - Avatar editor: thirteen parts in three tabs (face, hair, outfit), colour swatches, random looks
@@ -129,6 +131,16 @@ rate limited per address (an IPv6 address by its /64). Because the Xbox speaks p
 passcode from anywhere else. Tube needs a signed-in profile, plays one video per profile and a few at a time
 overall, so the server can't be used as an open proxy.
 
+The Store is signed. XenithOS Cloud signs every Store list, the Store bundle and each thumbnail with its own
+ed25519 key, in an `X-Xenith-Sig` header older consoles never read, and XenithOS checks it before it shows the
+Store, so nobody between a console and the server can swap a file along with the SHA-256 it's checked against.
+The key is a file of its own (`XENITH_STORE_KEY`), made once with `xenith_cloud.py store-key new <file>` and
+kept out of every folder the server serves; its public half is built into XenithOS (`source/store_key.h`).
+`xenith_cloud.py store-key check <host:port>` checks a running server's signatures against it. A XenithOS
+Cloud of your own needs a key of its own and XenithOS built with its public half; a build with no key in
+`store_key.h` doesn't check, as older versions didn't. A XenithOS update older than the version running is
+never installed, so an old signed list played back can't take a console back to a version without the check.
+
 Running your own copy (the unit runs as a throwaway user on a read-only system):
 
 ```bash
@@ -142,6 +154,10 @@ umask 077
 echo "XENITH_ADMIN_KEY=$(openssl rand -hex 32)" > /etc/xenith-cloud.env
 echo "XENITH_PUBLIC_ADDR=<this server's ip>:8795" >> /etc/xenith-cloud.env
 # store files: the .elf32/.wad files, art/thumbs/*.png and *.ximg, and a store.json (see server/store.example.json)
+# the Store's signing key: put the public half it prints in source/store_key.h, and give the
+# service the file with `systemctl edit xenith-cloud`: LoadCredential=store-key:/etc/xenith-store.key
+# and Environment=XENITH_STORE_KEY=%d/store-key under [Service]
+python3 /opt/xenith-cloud/xenith_cloud.py store-key new /etc/xenith-store.key
 systemctl daemon-reload && systemctl enable --now xenith-cloud
 ufw allow 8795/tcp
 # Tube: ffmpeg, Deno, yt-dlp and the PO token helper (run it again later to update them)
@@ -199,6 +215,7 @@ shared/ui.c, keyboard.c  input, frame pacing, headers, hints, loading screens, t
 shared/avatar.c          the avatar renderer (server/web/static/avatar.js is the website copy)
 shared/startlog.c        start-up timing for System info
 shared/net_*.c           HTTP client: lwIP on the Xbox (linux/net_posix.c and sim/net_sim.c elsewhere)
+source/store_sig.c       checks the Store's signatures (the key: store_key.h; ed25519: shared/monocypher*.c)
 apps/volt, doom, tube,   the apps
   photos, hostmc         (hostmc is for PCs only: it has no Xbox Makefile)
 linux/apps_linux.c       apps from Flathub (Flatpak) and Steam's library, on PCs
@@ -229,6 +246,8 @@ XenithOS is licensed under the **GNU GPL v3.0**, see [LICENSE](LICENSE).
   `i_sound.c` doesn't use SDL_mixer, and `i_video.c` reports reads for the loading screen.
 - `shared/stb_image.h` is [stb_image](https://github.com/nothings/stb) 2.32 by Sean Barrett (public domain or
   MIT, see the end of the file).
+- `shared/monocypher.c`, `monocypher-ed25519.c` and their headers are [Monocypher](https://monocypher.org)
+  4.0.2 by Loup Vaillant, unchanged (BSD 2-Clause or CC0 1.0, [third_party/monocypher/LICENCE.md](third_party/monocypher/LICENCE.md)).
 - Apps from Flathub and Steam aren't part of XenithOS: Flatpak downloads them from Flathub on your machine,
   under their own licenses. Sober is a VinegarHQ project, not affiliated with Roblox.
 - Freedoom (served by the Store, not included here) is BSD licensed, see [freedoom.github.io](https://freedoom.github.io).

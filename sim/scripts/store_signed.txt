@@ -1,0 +1,18 @@
+# The Store with its lists signed by XenithOS Cloud: they check out against the key this build
+# trusts, so the Store opens as it always has. On the Xbox the XenithOS update in the Store is
+# older than this version, so it's shown as installed and isn't offered.
+# Run by sim/store/test-store.sh (Xbox and PC), with a XenithOS Cloud and a key of its own.
+wait 200
+press right
+press a
+wait 90
+shot store_signed
+press down
+press down
+press down
+press down
+wait 20
+shot store_last_item
+press b
+wait 30
+quit
