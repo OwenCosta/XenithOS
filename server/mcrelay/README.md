@@ -42,10 +42,11 @@ Everything here is done by hand by the owner; nothing in this repository has the
    `sudo sh setup.sh`. It says what it will do and asks first, then asks for XenithOS Cloud's address
    (the one consoles use). At the end it prints the lines for step 2 and the secret. Run it again later to
    update; the host key, the secret and tunnels that are up stay.
-2. **XenithOS Cloud**: add the printed lines to `/etc/xenith-cloud.env`, plus where OCAccounts answers
-   (`XENITH_OCACCOUNT_URL`, `XENITH_OCACCOUNT_KEY`) and the Patreon page (`XENITH_RELAY_PATREON`), then
-   `systemctl restart xenith-cloud`. The relay opens to supporters once its first sync arrives.
-   Words no name may contain go in `relay-blocked-words.txt` in its state folder, one a line.
+2. **XenithOS Cloud**: give it the printed settings and the relay's secret where it keeps its others
+   (`/etc/xenith-cloud.env` for the systemd service, or a Docker setup's env file), plus where OCAccounts
+   answers (`XENITH_OCACCOUNT_URL`, `XENITH_OCACCOUNT_KEY`) and the Patreon page (`XENITH_RELAY_PATREON`),
+   then start it again. The relay opens to supporters once its first sync arrives. Words no name may
+   contain go in `relay-blocked-words.txt` in its state folder, one a line.
 3. **DNS** for owencosta.diy: `*.mc.owencosta.diy` as an A record to the relay's VPS, DNS only (Cloudflare's
    proxy can't carry Minecraft or SSH). It covers `tunnel.mc.owencosta.diy`, which HostMC's tunnels use.
 4. **OCAccounts and Patreon**: "Link Patreon" on the account page and the one endpoint XenithOS Cloud asks,

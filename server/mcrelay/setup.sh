@@ -91,17 +91,18 @@ cat <<EOF
 
 Done: the relay is running. It has no names until XenithOS Cloud gives it some.
 
-1. On the machine that runs XenithOS Cloud, add these lines to /etc/xenith-cloud.env, then
-   run systemctl restart xenith-cloud:
+1. Give XenithOS Cloud these settings where it keeps its others (/etc/xenith-cloud.env for the
+   systemd service; a Docker setup's env file or compose file), then start it again:
 
      XENITH_RELAY_DOMAIN=$domain
      XENITH_RELAY_SSH=tunnel.$domain:$ssh_port
-     XENITH_RELAY_SECRET=$(cat /etc/mcrelay/secret)
+     XENITH_RELAY_SECRET=<this machine's secret: sudo cat /etc/mcrelay/secret>
      XENITH_OCACCOUNT_URL=<where OCAccounts answers, from its owner>
      XENITH_OCACCOUNT_KEY=<the key OCAccounts gives XenithOS Cloud>
      XENITH_RELAY_PATREON=<your Patreon page>
 
-   The secret works like a password: keep it out of chats and the repository.
+   The secret works like a password: copy it straight across, and keep it out of chats and the
+   repository.
 
 2. DNS, as DNS only (Cloudflare's proxy can't carry Minecraft or SSH):
 
