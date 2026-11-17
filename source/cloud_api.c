@@ -306,6 +306,7 @@ void cloud_sync(int quiet)
     }
     check_in(1);
     cloud_saves_sync(NULL, 0);              /* saves and settings, both ways; clashes wait for the app */
+    social_flush();                         /* achievements earned while the network was down */
     toast_next();
 }
 
@@ -326,7 +327,9 @@ void cloud_poll_inbox(void)
 void cloud_playing(const char *app_id)
 {
     struct http_resp r;
-    if (!prof.signed_in || no_hello) return;
+    if (!prof.signed_in) return;
+    if (!app_id) social_flush();            /* what the app earned, if it couldn't send it itself */
+    if (no_hello) return;
     if (social_hello(app_id ? app_id : "", app_id != NULL, NULL, &r) == 200 && !app_id) read_friends(r.body, 0);
     http_free(&r);
 }

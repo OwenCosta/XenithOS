@@ -19,4 +19,16 @@ void social_tick(const char *app, const char *mc);
 /* Going offline (turning off, restarting): friends see it at once. */
 void social_bye(void);
 
+/* Achievements: a small set for each of XenithOS's own apps, earned on the machine. Each one is
+ * kept on the stick (uda:/xenith/achievements.txt) until XenithOS Cloud has it, so the network
+ * never has to be up for it; social_flush() sends what's waiting when it is (XenithOS does when
+ * it starts). Guests don't earn them.
+ *   social_earn()   1 if the signed-in profile hadn't earned it here yet: a notification says so
+ *   social_count()  a running count kept with them (Tube's videos watched); the new value */
+int  social_earn(const char *id);
+void social_flush(void);
+int  social_count(const char *counter, int add);
+const char *social_achievement_name(const char *id);   /* NULL if there's no such achievement */
+int  social_achievement_total(void);                   /* how many there are */
+
 #endif

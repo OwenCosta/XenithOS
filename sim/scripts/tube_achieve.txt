@@ -1,0 +1,12 @@
+# Tube earning achievements against stand-ins for yt-dlp and ffmpeg (a stream of one picture that
+# ends at once): a video started, watched to the end, and the tenth one. Part of
+# sim/social/test-achievements.sh (XSIM_BIN=xtube XSIM_THREAD=1).
+wait 30
+press down
+press a
+wait 120
+shot ta_results
+press a
+wait 300
+shot ta_earned
+quit

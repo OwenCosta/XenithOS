@@ -1,0 +1,24 @@
+# Achievements in XenithOS: the count on Profile, the Achievements screen, and the ones just
+# earned on the Cloud screen. Part of sim/social/test-achievements.sh.
+wait 260
+press right
+press right
+press right
+press right
+press a
+wait 40
+shot ac_profile
+press down
+press a
+wait 40
+shot ac_achievements
+press b
+wait 20
+press b
+wait 20
+press left
+press left
+press a
+wait 60
+shot ac_cloud
+quit

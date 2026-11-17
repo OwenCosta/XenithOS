@@ -7,8 +7,8 @@ its Store also installs apps from Flathub (Roblox through Sober, Minecraft, Kodi
 with its games. It's written in C: on the Xbox on [libxenon](https://github.com/Free60Project/libxenon), on PCs
 and Pis on SDL2.
 
-XenithOS Cloud is the free online service every copy uses for profiles, friends, the Store, news, leaderboards
-and YouTube. Nothing to set up: the downloads come with its address.
+XenithOS Cloud is the free online service every copy uses for profiles, friends, cloud saves, achievements,
+the Store, news, leaderboards and YouTube. Nothing to set up: the downloads come with its address.
 
 I'm building it on a 360 S (Trinity board). The 0.4 redesign runs on the real console. 0.5.0 (sound fixes, faster
 app starts, PC and Pi support, Tube, the new avatar editor) has so far been tested in the simulator and on Linux.
@@ -32,6 +32,9 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
   sharing a console never mix saves. If a save changed on two machines before they matched up, XenithOS
   asks which one to keep; nothing is replaced without asking. Profile, Cloud saves shows what's kept (up to
   4 MB) and deletes it; Settings turns them off for one machine.
+- Achievements: fifteen across VOLT, DOOM, Tube and HostMC, earned on the machine (offline too: they wait on
+  the stick until XenithOS is online) and kept on your profile. Profile shows yours, the Cloud screen the ones
+  just earned by anyone, and the website everyone's.
 - Avatar editor: thirteen parts in three tabs (face, hair, outfit), colour swatches, random looks
 - Settings: volume, interface sounds, start-up chime, showing friends what you play, cloud saves on this
   machine, network, system info (with start-up times and sound stats), controller test, about
@@ -125,7 +128,7 @@ updates all of it (ffmpeg, Deno, the yt-dlp standalone build, the plugin and the
 download against its published checksum.
 
 ```bash
-python3 server/xenith_cloud.py --selftest      # 182 checks, no network needed
+python3 server/xenith_cloud.py --selftest      # 192 checks, no network needed
 ```
 
 Profiles: passcodes are stored as salted PBKDF2 hashes and sign-in tokens as SHA-256 hashes, so the state
@@ -146,6 +149,10 @@ not the gamertag), up to 512 KB a file and 4 MB a profile. Every file has a revi
 its copy was last in step with, and XenithOS Cloud refuses a change based on an older one instead of
 replacing what another machine sent, so XenithOS can ask which to keep. Deleting leaves a marker, so the
 machines that still have a copy keep it without sending it back.
+
+Achievements: the set is in `ACHIEVEMENTS` (the console's notifications name them from `shared/social.c`, and
+the self-test checks the two agree). They're public like the leaderboards: each profile's, with when it was
+earned, and the newest fifty anyone earned.
 
 Running your own copy (the unit runs as a throwaway user on a read-only system):
 

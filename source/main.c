@@ -231,7 +231,15 @@ static void draw_home(void)
     ui_hints(prof.signed_in ? "A=Select;Y=Profile;BACK=Power" : "A=Select;Y=Sign in;BACK=Power");
 }
 
-/* Bring the network up after the first home frame, then sync the profile and inbox. */
+/* The home screen, drawn while XenithOS Cloud answers (net_idle calls it). */
+static void home_idle(void)
+{
+    draw_home();
+    ui_end_frame();
+}
+
+/* Bring the network up after the first home frame, then sync the profile and inbox, friends,
+ * cloud saves and achievements. The home screen keeps moving meanwhile. */
 static void go_online(void)
 {
     if (!cfg.server[0]) return;
@@ -243,8 +251,10 @@ static void go_online(void)
         if (!net_up()) { status_line = NULL; return; }
         status_line = NULL;
     }
+    net_set_idle_hook(home_idle);
     cloud_route_check();
     cloud_sync(1);
+    net_set_idle_hook(NULL);
 }
 
 /* Returns 1 to leave XenithOS (back to XeLL on the Xbox). */

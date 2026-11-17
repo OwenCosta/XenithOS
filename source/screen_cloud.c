@@ -1,6 +1,7 @@
-/* CLOUD: XenithOS Cloud's status and your friends who are on, the news, and the VOLT
- * leaderboard. XenithOS Cloud is the free online service every copy of XenithOS uses for
- * profiles, friends, the Store and leaderboards. */
+/* CLOUD: XenithOS Cloud's status and your friends who are on, the news and the achievements
+ * just earned, and the VOLT leaderboard. XenithOS Cloud is the free online service every copy of
+ * XenithOS uses for profiles, friends, the Store and leaderboards. */
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +26,8 @@ static int nnews;
 static struct { char rank[6], name[20], score[16], avatar[16]; } board[MAX_ROWS];
 static int nboard;
 static int have_friends;          /* the friends list came, so the first card can show who's on */
+static struct { char name[20], avatar[16], id[24]; long ago; } earned[3];   /* just earned, by anyone */
+static int nearned;
 
 /* "3 days ago" style, from a unix time and the server's clock. */
 static void ago(long t, long now, char *out, int n)
@@ -112,8 +115,45 @@ static int refresh(void)
     }
     http_free(&r);
 
+    nearned = 0;
+    if (cloud_get("/v1/achievements/recent", 16 * 1024, &r) == 200) {
+        char *line = r.body;
+        while (line && *line && nearned < 3) {
+            char *next = strchr(line, '\n'), *f[4];
+            if (next) *next++ = 0;
+            if (split_fields(line, f, 4) == 4 && social_achievement_name(f[2])) {
+                snprintf(earned[nearned].name, sizeof earned[0].name, "%s", f[0]);
+                snprintf(earned[nearned].avatar, sizeof earned[0].avatar, "%s", avatar_valid(f[1]) ? f[1] : AVATAR_DEFAULT);
+                snprintf(earned[nearned].id, sizeof earned[0].id, "%s", f[2]);
+                earned[nearned].ago = atol(f[3]);
+                nearned++;
+            }
+            line = next;
+        }
+    }
+    http_free(&r);
+
     have_friends = prof.signed_in && friends_fetch() == 200;
     return 1;
+}
+
+/* Achievements anyone has just earned, under the news. */
+static void draw_earned(int x, int y, int w)
+{
+    int i;
+    char line[96], ago[40];
+    gfx_str(FONT_BODY_SB, x, y, C_TEXT, "Just earned");
+    y += 40;
+    for (i = 0; i < nearned; i++) {
+        avatar_draw(earned[i].avatar, x, y, 40);
+        snprintf(line, sizeof line, "%s: %s", earned[i].name, social_achievement_name(earned[i].id));
+        gfx_str_fit(FONT_BODY_SB, x + 54, y - 3, C_TEXT, line, w - 54);
+        cloud_ago(earned[i].ago, ago, sizeof ago);
+        ago[0] = (char)tolower((unsigned char)ago[0]);
+        snprintf(line, sizeof line, "%s, %s", achievement_app(earned[i].id), ago);
+        gfx_str_fit(FONT_SMALL, x + 54, y + 22, C_SUB, line, w - 54);
+        y += 52;
+    }
 }
 
 /* Friends who are on, under the service's numbers: up to rows of them. */
@@ -201,19 +241,28 @@ static void draw(void)
         draw_friends(x1 + pad, y + 22, iw, top + h - pad);
     }
 
-    /* News */
+    /* News, then the achievements just earned when there are some */
     ui_panel(x2, top, w, h);
     card_title(x2 + pad, top + pad, ICON_MAIL, "News");
     y = top + pad + 56;
     if (!nnews) gfx_str(FONT_BODY, x2 + pad, y, C_SUB, "Nothing new right now");
-    for (i = 0; i < nnews && y < top + h - 70; i++) {
-        int lines;
-        if (news_when[i][0]) {
-            gfx_str(FONT_SMALL, x2 + pad, y, C_DIM, news_when[i]);
-            y += gfx_line_h(FONT_SMALL) + 2;
+    {
+        /* Where the news has to stop: room for an item is its date and up to three lines */
+        int earned_y = top + h - pad - 40 - nearned * 52, news_end = nearned ? earned_y - 30 : top + h - pad;
+        int item_h = gfx_line_h(FONT_SMALL) + 2 + 3 * (gfx_line_h(FONT_BODY) + 2);
+        if (nearned) {
+            gfx_rect(x2 + pad, earned_y - 18, w - 2 * pad, 1, C_LINE);
+            draw_earned(x2 + pad, earned_y, w - 2 * pad);
         }
-        lines = gfx_wrap(FONT_BODY, x2 + pad, y, w - 2 * pad, 2, i == 0 ? C_TEXT : C_SUB, news[i], 3);
-        y += lines * (gfx_line_h(FONT_BODY) + 2) + 18;
+        for (i = 0; i < nnews && y + item_h <= news_end; i++) {
+            int lines;
+            if (news_when[i][0]) {
+                gfx_str(FONT_SMALL, x2 + pad, y, C_DIM, news_when[i]);
+                y += gfx_line_h(FONT_SMALL) + 2;
+            }
+            lines = gfx_wrap(FONT_BODY, x2 + pad, y, w - 2 * pad, 2, i == 0 ? C_TEXT : C_SUB, news[i], 3);
+            y += lines * (gfx_line_h(FONT_BODY) + 2) + 18;
+        }
     }
 
     /* Leaderboard */

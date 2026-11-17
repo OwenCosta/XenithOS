@@ -8,6 +8,7 @@ press right
 press a
 wait 40
 press down
+press down
 press a
 wait 40
 press down

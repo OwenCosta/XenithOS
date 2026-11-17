@@ -57,6 +57,10 @@ More switches:
   following the profile, and a save deleted from XenithOS Cloud staying on both machines. It checks the
   sticks and the API; screenshots go to `sim/out/saves-*`. DOOM itself isn't started (the simulator can't),
   so its saves are stand-ins with a save's name in the first 24 bytes.
+- `sim/social/test-achievements.sh` runs achievements: ones an offline Xbox earned going up when XenithOS
+  starts, Tube's against stand-ins for yt-dlp and ffmpeg (`tube_achieve.txt`; the test server's requests to
+  anywhere else go to a closed port), HostMC's with its stand-in server (`hostmc.txt`), and XenithOS showing
+  them (`ach_screens.txt`). Screenshots go to `sim/out/ach-*`.
 
 ## Scripts
 

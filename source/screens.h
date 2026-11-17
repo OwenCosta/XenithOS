@@ -39,6 +39,20 @@ int  cloud_saves_sync(const char *app_id, int ask);   /* NULL: every app. ask: a
 const char *cloud_saves_problem(void);
 void screen_saves(void);                    /* Profile, Cloud saves: what's kept, deleting it */
 
+/* screen_achievements.c: the apps' achievements on XenithOS Cloud (earned in shared/social.c) */
+struct achievement {
+    char id[24], app[12], name[32], what[100];
+    int players, earned;                    /* how many profiles have it; this one has */
+    long ago;                               /* seconds since it was earned */
+};
+#define MAX_ACHIEVEMENTS 40
+extern struct achievement ach_list[MAX_ACHIEVEMENTS];
+extern int nach;
+int  achievements_fetch(const char *player);   /* the whole set, and what player has (NULL: nobody) */
+int  achievements_earned(void);
+const char *achievement_app(const char *id);   /* "VOLT", from "volt-100" or "volt" */
+void screen_achievements(void);
+
 /* cloud_api.c: talking to XenithOS Cloud */
 int  cloud_ready(const char *title);        /* server set and network up, or explains why not */
 int  cloud_post(const char *path, const char *form, struct http_resp *r);

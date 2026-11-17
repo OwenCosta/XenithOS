@@ -25,8 +25,11 @@ Public
   GET  /v1/store/file/<id>            the file bytes
   GET  /v1/store/icon/<id>.ximg|.png  the item's thumbnail
   GET  /v1/scores/<game>              rank|name|score|avatar
-  GET  /v1/players                    name|avatar|joined|volt_best   (most recently seen first)
+  GET  /v1/players                    name|avatar|joined|volt_best|achievements   (most recently seen first)
   GET  /v1/players/<name>             key=value
+  GET  /v1/players/<name>/achievements  id|seconds since it was earned   (newest first)
+  GET  /v1/achievements               id|app|name|how it's earned|how many profiles have it
+  GET  /v1/achievements/recent        name|avatar|id|seconds since   (the newest anyone earned)
   GET  /v1/inbox?key=<console key>    the news, for 0.4 consoles
   GET  /download/xenithos-xbox360.zip XenithOS, its apps and a config, ready for a USB stick
   GET  /download/config.txt           a config with this server's address
@@ -67,11 +70,14 @@ Cloud saves (a profile's saves and settings, the same on every machine; see Clou
                                       or gone) when it changed elsewhere since base
   POST /v1/saves/delete               token, app[, name], or all=1  -> deleted
 
+Achievements (earned on the machine; see Achievements)
+  POST /v1/achievements/earn          token, ids (comma-separated)  -> new (the ones it didn't have), count
+
 Accounts (form posts; errors come back as "error=<message>")
   POST /v1/accounts/create            name, pin, avatar   -> name, token, avatar, joined
   POST /v1/accounts/login             name, pin           -> name, token, avatar, joined
   POST /v1/accounts/me                token               -> name, avatar, joined, volt_best, volt_rank,
-                                                             sharing
+                                                             sharing, achievements
   POST /v1/accounts/avatar            token, avatar
   POST /v1/accounts/logout            token
   POST /v1/scores/<game>              token, score  (or legacy: name, score, for names without a profile)
@@ -617,6 +623,9 @@ class Friends:
         names, now, key = self.app_names(), self.clock(), acc["name"].lower()
         with self.state.lock:
             sharing = acc.get("sharing", True)
+            if len(self.presence) > 500:          # the ones that went quiet: nothing to keep
+                for k in [k for k, p in self.presence.items() if p["until"] < now]:
+                    del self.presence[k]
             if bye:
                 self.presence.pop(key, None)
             else:
@@ -887,6 +896,90 @@ class CloudSaves:
             if n:
                 self.state.save()
         return n
+
+
+# ---------------------------------------------------------------------- achievements
+
+# A small set for each of XenithOS's own apps. The app decides when one is earned, on the machine
+# itself, and it comes here when the machine is online, to be kept with when it was earned. They're
+# public like the leaderboards: on profiles, the Cloud screen and the website. shared/social.c has
+# the same names for the notification a console shows (the self-test checks they agree).
+ACHIEVEMENTS = [
+    # id, app, name, how it's earned
+    ("volt-100", "volt", "Charged up", "Score 100 in one run of VOLT."),
+    ("volt-500", "volt", "High voltage", "Score 500 in one run of VOLT."),
+    ("volt-1000", "volt", "Overload", "Score 1,000 in one run of VOLT."),
+    ("volt-board", "volt", "On the board", "Put a VOLT score on the leaderboard."),
+    ("doom-exit", "doom", "Way out", "Finish a level of DOOM."),
+    ("doom-secret", "doom", "Off the map", "Find a secret area in DOOM."),
+    ("doom-sweep", "doom", "Clean sweep", "Finish a DOOM level with every monster in it beaten."),
+    ("doom-episode", "doom", "The end", "Finish an episode of DOOM, or the whole of DOOM II."),
+    ("tube-first", "tube", "Now playing", "Watch a video in Tube."),
+    ("tube-end", "tube", "Every second", "Watch a Tube video all the way through."),
+    ("tube-ten", "tube", "Channel surfer", "Watch 10 videos in Tube."),
+    ("hostmc-start", "hostmc", "Server's up", "Start a Minecraft server with HostMC."),
+    ("hostmc-online", "hostmc", "Open doors", "Make your HostMC server reachable from the internet."),
+    ("hostmc-join", "hostmc", "Company", "Have a player join your HostMC server."),
+    ("hostmc-backup", "hostmc", "Safe keeping", "Back up your Minecraft world in HostMC."),
+]
+ACHIEVEMENT_IDS = {a[0] for a in ACHIEVEMENTS}
+UNLOCKS_KEEP = 50                # the newest ones everyone's earned, for "just earned"
+EARNS_PER_MIN = 20               # sends, per profile
+
+
+class Achievements:
+    def __init__(self, state):
+        self.state = state
+        self.earns = RateLimit(EARNS_PER_MIN, 60)
+        self.clock = time.time
+
+    def earn(self, acc, ids):
+        """Keeps the ones the profile doesn't have yet, and returns them."""
+        now, new = int(self.clock()), []
+        with self.state.lock:
+            have = acc.setdefault("achievements", {})
+            for i in ids:
+                if i in ACHIEVEMENT_IDS and i not in have:
+                    have[i] = now
+                    new.append(i)
+            if new:
+                feed = self.state.data.setdefault("unlocks", [])
+                feed.extend({"who": acc["name"].lower(), "id": i, "t": now} for i in new)
+                del feed[:-UNLOCKS_KEEP]
+                self.state.save()
+        return new
+
+    @staticmethod
+    def count(acc):
+        return sum(1 for i in acc.get("achievements", {}) if i in ACHIEVEMENT_IDS)
+
+    def catalogue(self):
+        """id|app|name|how it's earned|how many profiles have it, in the catalogue's order."""
+        counts = {}
+        with self.state.lock:
+            for acc in self.state.data["accounts"].values():
+                for i in acc.get("achievements", {}):
+                    counts[i] = counts.get(i, 0) + 1
+        return "".join(f"{i}|{app}|{name}|{what}|{counts.get(i, 0)}\n" for i, app, name, what in ACHIEVEMENTS)
+
+    def of(self, acc):
+        """id|seconds since it was earned, newest first."""
+        now = self.clock()
+        with self.state.lock:
+            got = sorted(acc.get("achievements", {}).items(), key=lambda e: -e[1])
+        return "".join(f"{i}|{max(0, int(now - t))}\n" for i, t in got if i in ACHIEVEMENT_IDS)
+
+    def recent(self, n=20):
+        """name|avatar|id|seconds since: the newest earned by anyone, newest first."""
+        now, rows = self.clock(), []
+        with self.state.lock:
+            for u in reversed(self.state.data.get("unlocks", [])):
+                acc = self.state.data["accounts"].get(u["who"])
+                if acc and u["id"] in ACHIEVEMENT_IDS:
+                    rows.append(f"{acc['name']}|{acc['avatar']}|{u['id']}|{max(0, int(now - u['t']))}\n")
+                if len(rows) == n:
+                    break
+        return "".join(rows)
 
 
 # ---------------------------------------------------------------------- stats
@@ -1452,6 +1545,7 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
     feedback_by_name = RateLimit(6, 3600)
     friends = Friends(state, store)
     saves = CloudSaves(state)
+    achievements = Achievements(state)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "XenithOS-Cloud/" + VERSION
@@ -1642,8 +1736,8 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
             if parts == ["v1", "players"]:
                 accs = sorted(state.data["accounts"].values(), key=lambda a: -a.get("last_seen", 0))[:100]
                 return self.reply(200, "".join(
-                    f"{a['name']}|{a['avatar']}|{a['joined']}|{state.best_of('volt', a['name'])[0]}\n"
-                    for a in accs))
+                    f"{a['name']}|{a['avatar']}|{a['joined']}|{state.best_of('volt', a['name'])[0]}|"
+                    f"{Achievements.count(a)}\n" for a in accs))
 
             if len(parts) == 3 and parts[:2] == ["v1", "players"]:
                 acc = state.account(parts[2])
@@ -1651,7 +1745,20 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                     return self.error(404, "No such player.")
                 best, rank = state.best_of("volt", acc["name"])
                 return self.reply(200, kv({"name": acc["name"], "avatar": acc["avatar"], "joined": acc["joined"],
-                                           "volt_best": best, "volt_rank": rank}))
+                                           "volt_best": best, "volt_rank": rank,
+                                           "achievements": Achievements.count(acc)}))
+
+            if len(parts) == 4 and parts[:2] == ["v1", "players"] and parts[3] == "achievements":
+                acc = state.account(parts[2])
+                if not acc:
+                    return self.error(404, "No such player.")
+                return self.reply(200, achievements.of(acc), cache="no-store")
+
+            if parts == ["v1", "achievements"]:
+                return self.reply(200, achievements.catalogue(), cache="no-store")
+
+            if parts == ["v1", "achievements", "recent"]:
+                return self.reply(200, achievements.recent(), cache="no-store")
 
             if len(parts) == 2 and parts[0] == "static" and STATIC_RE.match(parts[1]):
                 path = os.path.join(web_dir, "static", parts[1])
@@ -1726,6 +1833,15 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
             if parts[:2] == ["v1", "saves"]:
                 return self.saves_post(parts, form)
 
+            if parts == ["v1", "achievements", "earn"]:
+                acc = state.by_token(form.get("token", ""))
+                if not acc:
+                    return self.error(401, "Your sign-in expired. Sign in again.")
+                if not achievements.earns.allow(acc["name"].lower()):
+                    return self.error(429, "That's a lot of achievements at once. Wait a minute.")
+                new = achievements.earn(acc, [i for i in form.get("ids", "").split(",")[:32] if i])
+                return self.reply(200, kv({"new": ",".join(new), "count": Achievements.count(acc)}))
+
             if parts in (["v1", "tube", "search"], ["v1", "tube", "start"]):
                 if not tube or not tube.available():
                     return self.error(503, "Tube isn't available on this server.")
@@ -1770,7 +1886,8 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                     best, rank = state.best_of("volt", acc["name"])
                     return self.reply(200, kv({"name": acc["name"], "avatar": acc["avatar"], "joined": acc["joined"],
                                                "volt_best": best, "volt_rank": rank,
-                                               "sharing": 1 if acc.get("sharing", True) else 0}))
+                                               "sharing": 1 if acc.get("sharing", True) else 0,
+                                               "achievements": Achievements.count(acc)}))
                 if parts[2] == "avatar":
                     if not valid_avatar(form.get("avatar", "")):
                         return self.error(400, "That avatar code isn't valid.")
@@ -2199,6 +2316,41 @@ def selftest_saves(base, kvparse, check, state):
     check("saves: only so many uploads a minute", sent[0] == 200 and sent[-1] == 429)
 
 
+def selftest_achievements(req, kvparse, check, state):
+    """Achievements, for selftest()."""
+    (_, token), _ = state.create("Earner", "1357", "22020010000000")
+    (_, other), _ = state.create("Second", "1357", "1202001000")
+    check("achievements: need a profile", req("POST", "/v1/achievements/earn", "token=nope&ids=volt-100")[0] == 401)
+    code, body = req("POST", "/v1/achievements/earn", f"token={token}&ids=volt-100,volt-500,not-one,..%2Fx")
+    check("achievements: earned, the real ones only", code == 200 and kvparse(body) == {"new": "volt-100,volt-500", "count": "2"})
+    check("achievements: earning one again changes nothing",
+          kvparse(req("POST", "/v1/achievements/earn", f"token={token}&ids=volt-100")[1]) == {"new": "", "count": "2"})
+    req("POST", "/v1/achievements/earn", f"token={other}&ids=volt-100,doom-exit")
+    code, body = req("GET", "/v1/players/earner/achievements")
+    check("achievements: a player's, newest first", code == 200
+          and {r.split("|")[0] for r in body.decode().splitlines()} == {"volt-100", "volt-500"})
+    check("achievements: a player nobody has", req("GET", "/v1/players/nobody/achievements")[0] == 404)
+    rows = [r.split("|") for r in req("GET", "/v1/achievements")[1].decode().splitlines()]
+    check("achievements: the whole set, with how many have each", len(rows) == len(ACHIEVEMENTS)
+          and rows[0] == ["volt-100", "volt", "Charged up", "Score 100 in one run of VOLT.", "2"]
+          and {r[0]: r[4] for r in rows}["doom-exit"] == "1" and {r[0]: r[4] for r in rows}["tube-ten"] == "0")
+    recent = [r.split("|") for r in req("GET", "/v1/achievements/recent")[1].decode().splitlines()]
+    check("achievements: just earned, by anyone, newest first", [r[0] for r in recent[:2]] == ["Second", "Second"]
+          and recent[2][:3] == ["Earner", "22020010000000", "volt-500"] and len(recent) == 4)
+    players = {r.split("|")[0]: r.split("|") for r in req("GET", "/v1/players")[1].decode().splitlines()}
+    check("achievements: counted on the players list, profiles and me", players["Earner"][4] == "2"
+          and kvparse(req("GET", "/v1/players/earner")[1]).get("achievements") == "2"
+          and kvparse(req("POST", "/v1/accounts/me", f"token={token}")[1]).get("achievements") == "2")
+    sent = [req("POST", "/v1/achievements/earn", f"token={other}&ids=tube-first")[0] for _ in range(EARNS_PER_MIN)]
+    check("achievements: only so many sends a minute", sent[0] == 200 and sent[-1] == 429)
+    # The console's notification names the achievement from shared/social.c: the same names
+    console = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shared", "social.c")
+    if os.path.exists(console):
+        with open(console, encoding="utf-8") as f:
+            named = dict(re.findall(r'\{"([a-z0-9-]+)", "([^"]+)"\}', f.read()))
+        check("achievements: the console names them the same", named == {i: name for i, _, name, _ in ACHIEVEMENTS})
+
+
 def selftest():
     import tempfile
     import urllib.error
@@ -2520,6 +2672,7 @@ else:
 
     selftest_friends(req, kvparse, check, state, httpd.RequestHandlerClass.friends)
     selftest_saves(base, kvparse, check, state)
+    selftest_achievements(req, kvparse, check, state)
 
     # Tube, with stand-in yt-dlp and ffmpeg
     calls_file = os.path.join(tmp, "calls.txt")
