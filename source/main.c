@@ -14,6 +14,7 @@
 #include "audio.h"
 #include "avatar.h"
 #include "config.h"
+#include "crash.h"
 #include "gfx.h"
 #include "handoff.h"
 #include "icons.h"
@@ -319,6 +320,8 @@ int main(int argc, char **argv)
     ui_end_frame();
     startlog_mark("boot screen");
     if (st.auto_connect) go_online();
+    draw_home();                         /* behind a crash report's question, if there is one */
+    crash_check(1);
 
     for (;;) {
         int dx, dy;
@@ -340,6 +343,8 @@ int main(int argc, char **argv)
                 app_launch(&apps[card]);
                 apps_scan();             /* a PC's app may have changed what's installed (Steam games) */
                 card = 0;                /* what was just played is first now */
+                draw_home();
+                crash_check(0);          /* the app crashed (PCs): send its report, or ask */
             } else open_tile(T_STORE);
         } else if (PRESSED(y)) {
             sfx(SFX_SELECT);

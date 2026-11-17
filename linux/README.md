@@ -70,6 +70,7 @@ In the on-screen keyboard you can type on the real keyboard: letters type, Backs
 |---|---|
 | `/usr/lib/xenithos/` | XenithOS and its apps |
 | `~/.local/share/xenithos/uda:/` | your settings, profile, game data and saves (same layout as the Xbox's USB stick) |
+| `~/.local/share/xenithos/uda:/xenith/crash/` | crash files waiting to be sent, one a program (see Crash reports) |
 | `~/.config/xenithos/` | the mode file and logs |
 | `~/.local/share/xenithos/hostmc/` | HostMC's Minecraft server, its world, Java and backups |
 
@@ -187,6 +188,18 @@ into the new program. If the build fails, nothing is replaced, and the build's o
 `update.log` in `uda:/xenith`. Machines installed before 0.5.3 have a root-owned `/usr/lib/xenithos`:
 run the install command once more and the Store takes over after that.
 
+## Crash reports
+
+XenithOS and every app catch the signals a crash ends in (SIGSEGV, SIGABRT, SIGBUS, SIGFPE, SIGILL;
+`crash_linux.c`, set up in `plat_init`) and leave a crash file in `uda:/xenith/crash/<program>.txt`: the
+version, the signal and the address it was about, how far the program's start got, the program's build id
+and where it was loaded, the stack, and for a glibc abort its message (`*** buffer overflow detected ***` is
+how HostMC's crash on Ubuntu looked). The handler only makes async-signal-safe calls; it runs `addr2line` in a
+child process, so the file names functions and source lines (the programs are built with `-g` and aren't
+stripped). Then the program ends just as it would have. Next time XenithOS starts, or as soon as it's back
+from the app, it sends the report to XenithOS Cloud, or asks first: Settings > Send crash reports, "Ask
+first" until it's set to "Always". Paths in the home folder are cut down to file names before anything goes.
+
 ## Building by hand
 
 ```bash
@@ -212,6 +225,11 @@ x11-apps imagemagick`): it boots XenithOS, starts the app, leaves it, and moves 
 taking screenshots through each switch and recording the sound to a file. It prints how bright every
 screenshot is (0 would be a black screen) and how loud each quarter second was, so a black gap or missing
 sound after coming back shows up straight away.
+
+`linux/test-crash.sh` crashes VOLT and XenithOS on purpose (`XENITHOS_TEST_CRASH=segv`, `abort`, `fortify`,
+`stack`, `fpe`, `ill` or `bus`, or `volt:segv` for only that program, at frame `XENITHOS_TEST_CRASH_FRAME`)
+in a virtual display against a local XenithOS Cloud: a report sent by itself, one sent once asked, and one
+the answer was no to. Each that arrives must say where it stopped and have nothing from the home folder in it.
 
 ## Apps inside XenithOS
 

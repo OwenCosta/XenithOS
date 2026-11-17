@@ -33,6 +33,10 @@ More switches:
   the Store).
 - `XSIM_TYPE="text"` types that text the first time the on-screen keyboard opens, as a real keyboard would
   (`|` is Enter).
+- `XSIM_CRASH="file ..."` puts crash files (shared/crash.h) in `uda:/xenith/crash`, as if those programs had
+  crashed last time: `sim/scripts/crash.txt` with `sim/crash/hostmc.txt` and a local XenithOS Cloud asks about
+  it, sends it, and turns Settings > Send crash reports to "Always". The simulator doesn't catch crashes
+  itself (AddressSanitizer does); `linux/test-crash.sh` crashes real programs on purpose.
 - `XSIM_BIN=xdoom XSIM_WAD=path/to/freedoom1.wad` runs DOOM (`sim/scripts/doom.txt`), and `XSIM_BIN=xtube`
   runs Tube against a XenithOS Cloud with yt-dlp and ffmpeg (`sim/scripts/tube.txt`, use `XSIM_THREAD=1`).
 - `XSIM_BIN=xhostmc XSIM_KIND=pc XSIM_THREAD=1 XSIM_HOSTMC=1` runs HostMC with a stand-in for the Minecraft

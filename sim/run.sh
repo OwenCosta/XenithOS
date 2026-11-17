@@ -43,6 +43,13 @@ if [ -n "$XSIM_OTHER" ]; then
         [ -f "$here/../art/thumbs/$id.ximg" ] && cp "$here/../art/thumbs/$id.ximg" "$work/uda:/apps/$id.ximg"
     done
 fi
+# XSIM_CRASH: crash files (space-separated) as programs leave them (shared/crash.h), for XenithOS
+# to find at the start, as if those had crashed last time
+if [ -n "$XSIM_CRASH" ]; then
+    mkdir -p "$work/uda:/xenith/crash"
+    # shellcheck disable=SC2086
+    for c in $XSIM_CRASH; do cp "$c" "$work/uda:/xenith/crash/"; done
+fi
 # XSIM_PHOTOS: a folder of pictures for Photos (copied to uda:/photos)
 if [ -n "$XSIM_PHOTOS" ]; then
     mkdir -p "$work/uda:/photos"

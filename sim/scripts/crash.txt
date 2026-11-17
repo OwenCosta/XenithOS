@@ -1,0 +1,32 @@
+# Crash reports (shared/crash.h): HostMC's crash file from last time (sim/crash/hostmc.txt, the abort
+# HostMC had on Ubuntu, with paths in a home folder in it) is asked about at the start and sent to a
+# test server, which keeps it cleaned up (GET /v1/crash and /v1/crash/1 with the admin key). Then
+# Settings > Send crash reports is turned to "Always".
+#   XSIM_KIND=pc XSIM_CRASH=sim/crash/hostmc.txt sim/run.sh sim/scripts/crash.txt crash 127.0.0.1:8795
+wait 520
+shot crash_asks
+press a
+wait 60
+shot crash_sent
+press right
+press right
+press right
+press right
+wait 25
+press a
+wait 40
+press down
+press down
+press down
+press down
+wait 25
+shot settings_crash
+press a
+wait 40
+shot settings_crash_confirm
+press a
+wait 40
+shot settings_crash_always
+press b
+wait 30
+quit

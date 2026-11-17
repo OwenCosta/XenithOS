@@ -25,8 +25,11 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
 - Cloud: who's playing, XenithOS news, and the VOLT leaderboard with avatars
 - Profile: a gamertag and passcode, saved to XenithOS Cloud so it follows you to any machine
 - Avatar editor: thirteen parts in three tabs (face, hair, outfit), colour swatches, random looks
-- Settings: volume, interface sounds, start-up chime, network, system info (with start-up times and sound
-  stats), controller test, about
+- Settings: volume, interface sounds, start-up chime, crash reports, network, system info (with start-up times
+  and sound stats), controller test, about
+- Crash reports: when XenithOS or one of its apps crashes, where it stopped is saved, and when XenithOS is back
+  it asks to send a crash report to the people who make it (or sends it by itself, if Settings says to). No
+  gamertag goes with one unless you add it, and nothing from your home folder.
 
 **Apps** (`apps/`)
 - VOLT: a light-trail game. Scores go to your profile on the leaderboard.
@@ -124,6 +127,13 @@ rate limited per address. Because the Xbox speaks plain HTTP, don't reuse a pass
 needs a signed-in profile, plays one video per profile and a few at a time overall, so the server can't be used
 as an open proxy.
 
+Crash reports (`POST /v1/crash`) are kept like feedback, with each report in `crashes/<id>.txt` next to
+`state.json`, and the first of each kind a day goes to Discord (`crash=<webhook>` in `feedback-webhooks.txt`,
+or the bug reports' webhook). Read them with the admin key:
+`curl -H "X-Xenith-Key: $XENITH_ADMIN_KEY" http://<server>/v1/crash` lists them, `/v1/crash/<id>` is one. On a
+PC a report names the function and source line it stopped at. An Xbox report has addresses: `xenon-addr2line -f
+-e xenith.elf <address>` (or the app's `.elf`) with that release's unstripped build turns them into names.
+
 Running your own copy (the unit runs as a throwaway user on a read-only system):
 
 ```bash
@@ -193,6 +203,8 @@ shared/audio.c           synthesized sounds, the mixer (on its own CPU thread) a
 shared/ui.c, keyboard.c  input, frame pacing, headers, hints, loading screens, toasts, dialogs, keyboard
 shared/avatar.c          the avatar renderer (server/web/static/avatar.js is the website copy)
 shared/startlog.c        start-up timing for System info
+shared/crash.h           crash reports: crash files (linux/crash_linux.c on PCs, crashdump() in
+                         platform_xenon.c on the Xbox), sent from source/crash_report.c
 shared/net_*.c           HTTP client: lwIP on the Xbox (linux/net_posix.c and sim/net_sim.c elsewhere)
 apps/volt, doom, tube,   the apps
   photos, hostmc         (hostmc is for PCs only: it has no Xbox Makefile)

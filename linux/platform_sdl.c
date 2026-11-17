@@ -283,6 +283,7 @@ void plat_init(void)
 {
     const char *s;
     ssize_t n;
+    linux_crash_watch();                     /* a crash leaves a crash file, in apps too */
     signal(SIGPIPE, SIG_IGN);
     if (guest_attach()) return;              /* an app inside XenithOS: no screen of its own */
     /* Where this program is, before an update can replace the file (after that,
@@ -357,6 +358,7 @@ static void save_png(const char *path, const uint32_t *px)
 
 void plat_present(const uint32_t *px)
 {
+    linux_crash_test();
     if (guest) {
         uint32_t seq = __atomic_load_n(&guest->frame_seq, __ATOMIC_RELAXED) + 1;   /* only we write it */
         memcpy(guest->pixels[seq % GUEST_FRAMES], px, sizeof guest->pixels[0]);
