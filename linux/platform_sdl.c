@@ -68,6 +68,14 @@ static char self_path[600];                  /* this program, to restart into an
 static void (*hook_before)(void), (*hook_failed)(void);
 static void (*launch_progress)(int done, int total);
 
+/* A desktop app (see plat_desktop in platform.h): one of XenithOS Console's apps opened by
+ * itself from a desktop's menu. The mouse adds up here until plat_mouse() reads it, and the
+ * keyboard's presses and releases wait in key_queue for plat_key_event(). */
+static int desktop, focused = 1, grabbed, want_grab;
+static struct plat_mouse mouse_now = {-1, -1, 0, 0, 0, 0, 0};
+#define KEY_QUEUE 64
+static int key_queue[KEY_QUEUE], key_head, key_tail;
+
 /* ---------------------------------------------------- apps inside XenithOS
  *
  * XenithOS starts an app as its own program with XENITHOS_GUEST_FD set to this shared memory.
@@ -133,11 +141,32 @@ static int guest_attach(void)
 
 static int in_kiosk;                          /* console mode on XenithOS's own X server */
 
+/* The window's name: the app's own, from the <program>.txt next to it (name=VOLT), so the
+ * desktop's task list and window switcher say which app it is. */
+static void window_title(char *out, int n)
+{
+    char path[640], line[128];
+    FILE *f;
+    snprintf(out, n, "XenithOS");
+    if (!desktop || !self_path[0]) return;
+    snprintf(path, sizeof path, "%s.txt", self_path);
+    if (!(f = fopen(path, "r"))) return;
+    while (fgets(line, sizeof line, f))
+        if (!strncmp(line, "name=", 5)) {
+            line[strcspn(line, "\r\n")] = 0;
+            if (line[5]) snprintf(out, n, "%s", line + 5);
+            break;
+        }
+    fclose(f);
+}
+
 static void video_open(void)
 {
     Uint32 flags = windowed ? SDL_WINDOW_RESIZABLE : SDL_WINDOW_FULLSCREEN_DESKTOP;
     int x = SDL_WINDOWPOS_CENTERED, y = SDL_WINDOWPOS_CENTERED, w = SCREEN_W, h = SCREEN_H;
     SDL_DisplayMode dm;
+    SDL_Rect room;
+    char title[64];
     if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
         fprintf(stderr, "xenithos: no display: %s\n", SDL_GetError());
         exit(1);
@@ -150,11 +179,26 @@ static void video_open(void)
         w = dm.w;
         h = dm.h;
     }
-    win = SDL_CreateWindow("XenithOS", x, y, w, h, flags);
+    /* A desktop app's window fits the screen with room round it, at most the picture's own size. */
+    if (desktop && windowed && SDL_GetDisplayUsableBounds(0, &room) == 0 && room.w > 0 && room.h > 0) {
+        w = room.w * 85 / 100;
+        h = w * 9 / 16;
+        if (h > room.h * 85 / 100) {
+            h = room.h * 85 / 100;
+            w = h * 16 / 9;
+        }
+        if (w > SCREEN_W) {
+            w = SCREEN_W;
+            h = SCREEN_H;
+        }
+    }
+    window_title(title, sizeof title);
+    win = SDL_CreateWindow(title, x, y, w, h, flags);
     if (!win) {
         fprintf(stderr, "xenithos: can't open a window: %s\n", SDL_GetError());
         exit(1);
     }
+    if (desktop) SDL_SetWindowMinimumSize(win, SCREEN_W / 2, SCREEN_H / 2);
     ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
     if (!ren) ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
     if (!ren) {
@@ -163,7 +207,7 @@ static void video_open(void)
     }
     SDL_RenderSetLogicalSize(ren, SCREEN_W, SCREEN_H);
     tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STREAMING, SCREEN_W, SCREEN_H);
-    SDL_ShowCursor(SDL_DISABLE);
+    SDL_ShowCursor(desktop ? SDL_ENABLE : SDL_DISABLE);
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderClear(ren);
     SDL_RenderPresent(ren);
@@ -294,6 +338,8 @@ void plat_init(void)
      * whole screen. */
     windowed = (getenv("DISPLAY") || getenv("WAYLAND_DISPLAY")) && !getenv("XENITHOS_FULLSCREEN") && !in_kiosk;
     if (getenv("XENITHOS_WINDOW")) windowed = 1;
+    s = getenv("XENITHOS_DESKTOP");
+    desktop = s && !strcmp(s, "1") && (getenv("DISPLAY") || getenv("WAYLAND_DISPLAY")) && !in_kiosk;
     shot_path = getenv("XENITHOS_SHOT");
     if ((s = getenv("XENITHOS_SHOT_FRAME"))) shot_frame = atoi(s);
     if (SDL_Init(SDL_INIT_EVENTS | SDL_INIT_GAMECONTROLLER) != 0) {
@@ -462,9 +508,133 @@ static int btn(SDL_GameControllerButton b)
     return (pad_dev && SDL_GameControllerGetButton(pad_dev, b)) || tapped_btn[b];
 }
 
+/* ------------------------------------------------------------ desktop apps */
+
+int plat_desktop(void)
+{
+    return desktop;
+}
+
+/* A key as plat_key_event() names it (platform.h), or 0 for one it doesn't. */
+static int key_code(SDL_Keycode k)
+{
+    if ((k >= SDLK_a && k <= SDLK_z) || (k >= SDLK_0 && k <= SDLK_9)) return (int)k;   /* ASCII in SDL */
+    if (k >= SDLK_F1 && k <= SDLK_F12) return PLAT_KEY_F1 + (int)(k - SDLK_F1);
+    switch (k) {
+    case SDLK_SPACE: return ' ';
+    case SDLK_MINUS: case SDLK_KP_MINUS: return '-';
+    case SDLK_EQUALS: case SDLK_KP_PLUS: return '=';
+    case SDLK_ESCAPE: return PLAT_KEY_ESC;
+    case SDLK_RETURN: case SDLK_KP_ENTER: return PLAT_KEY_ENTER;
+    case SDLK_TAB: return PLAT_KEY_TAB;
+    case SDLK_BACKSPACE: return PLAT_KEY_BACKSPACE;
+    case SDLK_DELETE: return PLAT_KEY_DELETE;
+    case SDLK_UP: return PLAT_KEY_UP;
+    case SDLK_DOWN: return PLAT_KEY_DOWN;
+    case SDLK_LEFT: return PLAT_KEY_LEFT;
+    case SDLK_RIGHT: return PLAT_KEY_RIGHT;
+    case SDLK_LSHIFT: case SDLK_RSHIFT: return PLAT_KEY_SHIFT;
+    case SDLK_LCTRL: case SDLK_RCTRL: return PLAT_KEY_CTRL;
+    case SDLK_LALT: case SDLK_RALT: return PLAT_KEY_ALT;
+    case SDLK_PAUSE: return PLAT_KEY_PAUSE;
+    default: return 0;
+    }
+}
+
+static void queue_key(int key, int down)
+{
+    int next = (key_head + 1) % KEY_QUEUE;
+    if (!key || next == key_tail) return;            /* full: the app isn't reading them */
+    key_queue[key_head] = down ? key : -key;
+    key_head = next;
+}
+
+int plat_key_event(int *key, int *down)
+{
+    if (!desktop || key_tail == key_head) return 0;
+    *down = key_queue[key_tail] > 0;
+    *key = *down ? key_queue[key_tail] : -key_queue[key_tail];
+    key_tail = (key_tail + 1) % KEY_QUEUE;
+    return 1;
+}
+
+void plat_mouse(struct plat_mouse *m)
+{
+    *m = mouse_now;
+    if (!desktop || m->x < 0 || m->y < 0 || m->x >= SCREEN_W || m->y >= SCREEN_H) m->x = m->y = -1;
+    mouse_now.clicks = mouse_now.wheel = mouse_now.dx = mouse_now.dy = 0;
+}
+
+/* The pointer is held while the app wants it and its window is in front. */
+static void apply_grab(void)
+{
+    int on = desktop && want_grab && focused;
+    if (on == grabbed || !win) return;
+    grabbed = on;
+    SDL_SetRelativeMouseMode(on ? SDL_TRUE : SDL_FALSE);
+    mouse_now.dx = mouse_now.dy = 0;
+}
+
+void plat_mouse_grab(int on)
+{
+    want_grab = on;
+    apply_grab();
+}
+
+static int mouse_bit(Uint8 button)
+{
+    return button == SDL_BUTTON_LEFT ? 1 : button == SDL_BUTTON_RIGHT ? 2 : button == SDL_BUTTON_MIDDLE ? 4 : 0;
+}
+
+/* The mouse, the keyboard's own presses and the window, for a desktop app. */
+static void desktop_event(const SDL_Event *e)
+{
+    switch (e->type) {
+    case SDL_MOUSEMOTION:
+        mouse_now.x = e->motion.x;
+        mouse_now.y = e->motion.y;
+        mouse_now.dx += e->motion.xrel;
+        mouse_now.dy += e->motion.yrel;
+        break;
+    case SDL_MOUSEBUTTONDOWN:
+        mouse_now.x = e->button.x;
+        mouse_now.y = e->button.y;
+        mouse_now.buttons |= mouse_bit(e->button.button);
+        mouse_now.clicks |= mouse_bit(e->button.button);
+        break;
+    case SDL_MOUSEBUTTONUP:
+        mouse_now.buttons &= ~mouse_bit(e->button.button);
+        break;
+    case SDL_MOUSEWHEEL:
+        mouse_now.wheel += e->wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e->wheel.y : e->wheel.y;
+        break;
+    case SDL_WINDOWEVENT:
+        if (e->window.event == SDL_WINDOWEVENT_LEAVE) mouse_now.x = mouse_now.y = -1;
+        if (e->window.event == SDL_WINDOWEVENT_FOCUS_LOST || e->window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
+            focused = e->window.event == SDL_WINDOWEVENT_FOCUS_GAINED;
+            mouse_now.buttons = 0;
+            apply_grab();
+        }
+        break;
+    case SDL_KEYDOWN:
+        if (e->key.repeat) break;
+        if (e->key.keysym.sym == SDLK_F11) {             /* full screen and back */
+            Uint32 f = SDL_GetWindowFlags(win);
+            SDL_SetWindowFullscreen(win, (f & SDL_WINDOW_FULLSCREEN_DESKTOP) ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+            break;
+        }
+        queue_key(key_code(e->key.keysym.sym), 1);
+        break;
+    case SDL_KEYUP:
+        if (e->key.keysym.sym != SDLK_F11) queue_key(key_code(e->key.keysym.sym), 0);
+        break;
+    }
+}
+
 /* Controllers coming and going, and typed text. Returns 1 for a request to close. */
 static int handle_event(const SDL_Event *e, void (*put)(char c))
 {
+    if (desktop) desktop_event(e);
     switch (e->type) {
     case SDL_QUIT:
         return 1;

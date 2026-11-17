@@ -440,6 +440,12 @@ static int sim_is_pc(void)
 int plat_kind(void) { return sim_is_pc() ? PLAT_PC : PLAT_XBOX; }
 int plat_can_exit_to_loader(void) { return !sim_is_pc(); }
 int plat_has_desktop(void) { return sim_is_pc(); }
+
+/* The simulator runs apps as they are inside XenithOS: not as desktop apps. */
+int plat_desktop(void) { return 0; }
+void plat_mouse(struct plat_mouse *m) { memset(m, 0, sizeof *m); m->x = m->y = -1; }
+void plat_mouse_grab(int on) { (void)on; }
+int plat_key_event(int *key, int *down) { (void)key; (void)down; return 0; }
 void plat_switch_to_desktop(void)
 {
     if (hook_before) hook_before();

@@ -75,7 +75,7 @@ take() {
 
 # The Apps menu's entry for an app, as text.
 entry() {
-    local app=$1 kinds words icon=xenithos
+    local app=$1 kinds words icon=xenithos action action_name
     kinds=$(sed -n "s/^$app[[:space:]]\{1,\}\([^[:space:]]\{1,\}\).*/\1/p" "$MENU_LIST" 2>/dev/null | head -n 1)
     words=$(sed -n "s/^$app[[:space:]]\{1,\}[^[:space:]]\{1,\}[[:space:]]\{1,\}//p" "$MENU_LIST" 2>/dev/null | head -n 1)
     if [ -f "$ICONS/xenithos-app-$app.svg" ]; then icon=xenithos-app-$app; fi
@@ -83,15 +83,31 @@ entry() {
     echo "Type=Application"
     echo "Name=$(title "$app")"
     if [ -n "$words" ]; then echo "Comment=$words"; fi
-    echo "Exec=/usr/lib/xenithos-desktop/console-app $app"
+    # An app with a desktop version (console-app says which) opens that, and keeps the console
+    # version on the right-click menu. The others open as on the console, or in a window.
+    if /usr/lib/xenithos-desktop/console-app --has-desktop-version "$app"; then
+        if [ "$app" = photos ]; then
+            # Photos opens pictures from Files too ("Open With"); the PC's own picture viewer stays.
+            echo "Exec=/usr/lib/xenithos-desktop/console-app $app %f"
+            echo "MimeType=image/jpeg;image/png;image/gif;image/bmp;image/webp;image/tiff;"
+        else
+            echo "Exec=/usr/lib/xenithos-desktop/console-app $app"
+        fi
+        action=console
+        action_name="Open the console version"
+    else
+        echo "Exec=/usr/lib/xenithos-desktop/console-app $app --console"
+        action=window
+        action_name="Open in a window"
+    fi
     echo "Icon=$icon"
     echo "Categories=${kinds:-Game;}"
     echo "StartupWMClass=$app"
-    echo "Actions=window;"
+    echo "Actions=$action;"
     echo
-    echo "[Desktop Action window]"
-    echo "Name=Open in a window"
-    echo "Exec=/usr/lib/xenithos-desktop/console-app $app --window"
+    echo "[Desktop Action $action]"
+    echo "Name=$action_name"
+    echo "Exec=/usr/lib/xenithos-desktop/console-app $app --$action"
 }
 
 # Makes the Apps menu match the home screen: an entry for each of XenithOS Console's apps that's

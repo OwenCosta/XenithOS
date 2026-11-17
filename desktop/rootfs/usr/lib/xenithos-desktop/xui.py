@@ -2,6 +2,8 @@
 look as GTK CSS, the user's desktop choices (~/.config/xenithos/desktop.conf), and a few helpers.
 """
 import os
+import re
+import shutil
 import subprocess
 import threading
 
@@ -193,6 +195,25 @@ def run(cmd, timeout=30, stdin=None):
         return p.returncode, (p.stdout + p.stderr).strip()
     except (OSError, subprocess.TimeoutExpired) as e:
         return 1, str(e)
+
+
+def set_wallpaper(path):
+    """Makes the picture at path the desktop's wallpaper on every screen (Settings > Look's and
+    Photos' "Use as wallpaper"), and remembers it for the moments between the desktop and
+    XenithOS Console (xsession paints it)."""
+    write_conf(wallpaper=path)
+    _, props = run(["xfconf-query", "-c", "xfce4-desktop", "-l"])
+    images = [p for p in props.splitlines() if p.endswith("/last-image")]
+    if not images:
+        _, screens = run(["xrandr", "--query"])
+        outputs = re.findall(r"^(\S+) connected", screens, re.M) or ["0"]
+        images = [f"/backdrop/screen0/monitor{o}/workspace0/last-image" for o in outputs]
+    for prop in images:
+        run(["xfconf-query", "-c", "xfce4-desktop", "-p", prop, "-n", "-t", "string", "-s", path])
+        run(["xfconf-query", "-c", "xfce4-desktop", "-p", prop.replace("/last-image", "/image-style"),
+             "-n", "-t", "int", "-s", "5"])
+    if shutil.which("xwallpaper"):
+        run(["xwallpaper", "--zoom", path])
 
 
 def later(work, done=None):

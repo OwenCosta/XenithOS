@@ -1,27 +1,53 @@
 #!/bin/bash
 # Opens one of XenithOS Console's apps on the desktop, by itself: what its entry in the Apps menu
-# runs (console-apps makes those entries). The app is the same program XenithOS Console starts
-# and keeps the same data, so a game's scores or HostMC's servers are the same in both.
+# runs (console-apps makes those entries).
 #
-#   console-app APP             full screen, as on XenithOS Console
-#   console-app APP --window    in a window
+#   console-app APP [FILE]                its desktop version, when it has one; Photos opens FILE
+#   console-app APP --console             the console version: full screen, for a controller
+#   console-app APP --window              the console version in a window
+#   console-app --has-desktop-version APP     exit 0 when APP has a desktop version
 #
-# Leaving the app (B, or Esc on a keyboard) closes it. That needs XenithOS Console 0.6.6 or
-# newer: before, an app started by itself came straight back.
+# The desktop versions: VOLT and DOOM are the same programs as on XenithOS Console, run as
+# desktop apps (XENITHOS_DESKTOP=1: a window, the mouse and the keyboard, from the XenithOS
+# Console that has desktop mode on; an older one just opens in a window). Photos and Tube are
+# desktop apps of their own, photos.py and tube.py in this folder. The others (HostMC) open as on
+# the console.
+#
+# Everything keeps XenithOS Console's data, so a game's scores or HostMC's servers are the same
+# in both. Leaving an app closes it (XenithOS Console 0.6.6 and newer).
+LIB=/usr/lib/xenithos-desktop
+
+has_desktop_version() {
+    case "$1" in volt|doom|photos|tube) return 0 ;; *) return 1 ;; esac
+}
+
+if [ "${1:-}" = --has-desktop-version ]; then
+    has_desktop_version "${2:-}"
+    exit
+fi
 app=${1:-}
 case "$app" in
-    ''|xenithos|*/*|.*) echo "usage: console-app APP [--window]   (one of XenithOS Console's apps)" >&2; exit 2 ;;
+    ''|xenithos|*/*|.*) echo "usage: console-app APP [FILE | --console | --window]   (one of XenithOS Console's apps)" >&2; exit 2 ;;
 esac
 prog=/usr/lib/xenithos/$app
 if [ ! -x "$prog" ]; then
     echo "$app isn't on this PC any more." >&2
-    /usr/lib/xenithos-desktop/ask "It isn't on this PC any more" \
+    "$LIB/ask" "It isn't on this PC any more" \
         "This app of XenithOS Console's has been removed from the PC. Settings > Updates may bring it back." "OK" "" \
         >/dev/null 2>&1
     exit 1
 fi
-if [ "${2:-}" != --window ]; then export XENITHOS_FULLSCREEN=1; fi
 # Its sound goes to PipeWire through SDL's own driver for it, as XenithOS Console's does
 # (xsession says why: SDL's other drivers can wait for ever on a stalled sound card as they close).
 export SDL_AUDIODRIVER=pipewire,pulseaudio,alsa
+
+how=${2:-}
+if [ "$how" != --console ] && [ "$how" != --window ] && ! has_desktop_version "$app"; then how=--console; fi
+case "$how" in
+    --console) export XENITHOS_FULLSCREEN=1; exec "$prog" ;;
+    --window) exec "$prog" ;;
+esac
+if [ "$app" = photos ] && [ -x "$LIB/photos.py" ]; then exec "$LIB/photos.py" ${2:+"$2"}; fi
+if [ "$app" = tube ] && [ -x "$LIB/tube.py" ]; then exec "$LIB/tube.py"; fi
+export XENITHOS_DESKTOP=1
 exec "$prog"

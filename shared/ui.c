@@ -18,6 +18,8 @@
 
 struct pad cur, prev;
 int M, HEADER_H;
+int ui_desktop;
+struct plat_mouse mouse = {-1, -1, 0, 0, 0, 0, 0};
 
 static uint64_t next_frame, fade_start;
 static int fading;
@@ -28,6 +30,17 @@ void ui_init(void)
 {
     M = SCR_W * 6 / 100;
     HEADER_H = 112;
+    ui_desktop = plat_desktop();
+}
+
+int ui_mouse_in(int x, int y, int w, int h)
+{
+    return mouse.x >= x && mouse.y >= y && mouse.x < x + w && mouse.y < y + h;
+}
+
+int ui_clicked(int x, int y, int w, int h)
+{
+    return (mouse.clicks & 1) && ui_mouse_in(x, y, w, h);
 }
 
 uint64_t ui_ms(void)
@@ -54,6 +67,7 @@ void ui_poll(void)
     audio_update();
     prev = cur;
     plat_poll(&cur);
+    plat_mouse(&mouse);
     if (settle) {
         settle = 0;
         prev = cur;
@@ -312,10 +326,25 @@ void ui_header(const char *title, const char *subtitle)
     ui_profile_chip(SCR_W - M, 54);
 }
 
+/* On the desktop the hints name the keys that do what the controller's buttons do (the
+ * keyboard map in linux/platform_sdl.c). */
+static const char *desktop_key(const char *b)
+{
+    static const char *const map[][2] = {
+        {"A", "Enter"}, {"B", "Esc"}, {"START", "F1"}, {"BACK", "Tab"}, {"LB", "Q"}, {"RB", "E"},
+        {"LT", "PgUp"}, {"RT", "PgDn"},
+    };
+    int i;
+    for (i = 0; i < (int)(sizeof map / sizeof map[0]); i++)
+        if (!strcmp(b, map[i][0])) return map[i][1];
+    return b;
+}
+
 int ui_button_glyph(int x, int cy, const char *b)
 {
     uint32_t c = 0;
-    if (!strcmp(b, "A")) c = C_BTN_A;
+    if (ui_desktop) b = desktop_key(b);              /* a key, drawn as a key cap below */
+    else if (!strcmp(b, "A")) c = C_BTN_A;
     else if (!strcmp(b, "B")) c = C_BTN_B;
     else if (!strcmp(b, "X")) c = C_BTN_X;
     else if (!strcmp(b, "Y")) c = C_BTN_Y;
@@ -410,6 +439,11 @@ int ui_launch(const char *path, const char *title, const char *detail)
 
 void ui_back_to_xenithos(const char *app_id)
 {
+    /* A desktop app has no XenithOS to go back to: it just closes (plat_launch does that). */
+    if (ui_desktop) {
+        plat_launch(XENITH_SHELL_PATH);
+        return;
+    }
     handoff_set("from", app_id);
     ui_launch(XENITH_SHELL_PATH, "XenithOS", "Going back");
 }
@@ -499,13 +533,24 @@ int ui_dialog(const char *title, const char *body, const char *const *options, i
     hl = (float)sel;
 
     for (;;) {
-        int d, oy;
+        int d, oy, clicked = -1;
         ui_poll();
         d = ui_nav_y();
         if (d) {
             int nsel = sel + d;
             if (nsel >= 0 && nsel < n) { sel = nsel; sfx(SFX_MOVE); }
         }
+        if (ui_desktop) {
+            /* The pointer picks a choice when it moves onto it (so it doesn't fight the arrow
+             * keys while it rests), and a click chooses it. */
+            int top = y + 32 + title_lines * (gfx_line_h(FONT_TITLE) + 2) + 8 + body_lines * (gfx_line_h(FONT_BODY) + 4) + 22;
+            for (i = 0; i < n; i++)
+                if (ui_mouse_in(x + 20, top + i * row, w - 40, row - 8)) {
+                    if ((mouse.dx || mouse.dy) && sel != i) { sel = i; sfx(SFX_MOVE); }
+                    if (mouse.clicks & 1) clicked = i;
+                }
+        }
+        if (clicked >= 0) { sfx(SFX_SELECT); result = clicked; break; }
         if (PRESSED(a)) { sfx(SFX_SELECT); result = sel; break; }
         if (PRESSED(b)) { sfx(SFX_BACK); result = -1; break; }
 

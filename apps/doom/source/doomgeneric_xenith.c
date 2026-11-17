@@ -11,6 +11,14 @@
  *   X               map                    Y                    "yes" in prompts
  *   LB / RB         previous / next weapon START                menu
  *   hold BACK       quit to XenithOS
+ *
+ * On the desktop (opened from the Apps menu, ui_desktop), the usual PC controls instead:
+ *   Mouse           turn; left button fires, right held strafes, middle walks
+ *   W A S D         move and strafe        Arrows               move and turn
+ *   E or Space      use                    Ctrl                 fire
+ *   Shift           run                    1 to 7               weapons
+ *   Tab             map                    Esc                  Doom's menu (and lets go of the mouse)
+ * The game holds the mouse while you play and lets go of it in menus. F11 is full screen.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +27,8 @@
 
 #include "doomgeneric.h"
 #include "doomkeys.h"
+#include "d_event.h"
+#include "doomstat.h"                   /* gamestate, menuactive, paused: where the mouse goes */
 
 #include "audio.h"
 #include "../../../shared/config.h"     /* doomgeneric has a config.h of its own */
@@ -120,6 +130,114 @@ static void poll_pad(void)
     }
 }
 
+/* ------------------------------------------------------ desktop: keys and mouse */
+
+/* In the game the keys are its controls (W walks, E uses); in menus and while a savegame's name
+ * is typed they're themselves. Each key's release goes out as what its press went out as, so a
+ * key held while the menu opens doesn't keep walking afterwards. */
+static unsigned char sent_as[512];
+static int mouse_dx, mouse_buttons, mouse_sent_buttons;
+
+/* The keys are the game's controls whenever no menu is up and a game is on: a level, the
+ * screen between levels (where Space or Ctrl goes on), the story's text. */
+static int controls_on(void)
+{
+    return !menuactive && !demoplayback && gamestate != GS_DEMOSCREEN;
+}
+
+/* The game holds the mouse only while a level is played. */
+static int playing(void)
+{
+    return gamestate == GS_LEVEL && !menuactive && !paused && !demoplayback;
+}
+
+static int doom_key(int k, int in_game)
+{
+    if (k >= 'a' && k <= 'z') {
+        if (in_game)
+            switch (k) {
+            case 'w': return KEY_UPARROW;
+            case 's': return KEY_DOWNARROW;
+            case 'a': return KEY_STRAFE_L;
+            case 'd': return KEY_STRAFE_R;
+            case 'e': return KEY_USE;
+            }
+        return k;
+    }
+    if ((k >= '0' && k <= '9') || k == '-' || k == '=') return k;      /* weapons; the view's size */
+    if (k == ' ') return in_game ? KEY_USE : ' ';
+    if (k >= PLAT_KEY_F1 && k < PLAT_KEY_F1 + 10) return KEY_F1 + (k - PLAT_KEY_F1);   /* save, load... */
+    if (k == PLAT_KEY_F1 + 11) return KEY_F12;                            /* (F11 is full screen) */
+    switch (k) {
+    case PLAT_KEY_ESC: return KEY_ESCAPE;
+    case PLAT_KEY_ENTER: return KEY_ENTER;
+    case PLAT_KEY_TAB: return KEY_TAB;
+    case PLAT_KEY_BACKSPACE: return KEY_BACKSPACE;
+    case PLAT_KEY_DELETE: return KEY_DEL;
+    case PLAT_KEY_UP: return KEY_UPARROW;
+    case PLAT_KEY_DOWN: return KEY_DOWNARROW;
+    case PLAT_KEY_LEFT: return KEY_LEFTARROW;
+    case PLAT_KEY_RIGHT: return KEY_RIGHTARROW;
+    case PLAT_KEY_SHIFT: return KEY_RSHIFT;
+    case PLAT_KEY_CTRL: return in_game ? KEY_FIRE : KEY_RCTRL;
+    case PLAT_KEY_ALT: return KEY_RALT;
+    case PLAT_KEY_PAUSE: return KEY_PAUSE;
+    }
+    return 0;
+}
+
+static void poll_desktop(void)
+{
+    struct plat_mouse m;
+    int key, down, in_game;
+
+    plat_poll(&pad);                     /* the window's events; the keys come below */
+    polls++;
+    in_game = controls_on();
+    while (plat_key_event(&key, &down)) {
+        int k = key < (int)sizeof sent_as ? key : 0;
+        if (down) {
+            int d = doom_key(key, in_game);
+            if (d && k) {
+                sent_as[k] = (unsigned char)d;
+                push_key(1, (unsigned char)d);
+            }
+        } else if (k && sent_as[k]) {
+            push_key(0, sent_as[k]);
+            sent_as[k] = 0;
+        }
+    }
+
+    /* The mouse turns and fires while the game holds it; menus get the pointer back. */
+    in_game = playing();
+    plat_mouse_grab(in_game);
+    plat_mouse(&m);
+    if (in_game) {
+        mouse_dx += m.dx;
+        mouse_buttons = m.buttons;
+    } else {
+        mouse_dx = 0;
+        mouse_buttons = 0;
+    }
+}
+
+/* One mouse event a tic, when there's something to say: Doom takes each ev_mouse as the
+ * whole movement since the last, and as which buttons are held. Called as Doom asks for the
+ * next key and there's none left. */
+static void post_mouse(void)
+{
+    event_t ev;
+    if (!mouse_dx && mouse_buttons == mouse_sent_buttons) return;
+    memset(&ev, 0, sizeof ev);
+    ev.type = ev_mouse;
+    ev.data1 = mouse_buttons;            /* left fires, right strafes, middle walks (Doom's own) */
+    ev.data2 = mouse_dx * 3;             /* turning, at about Doom's own speed for a PC mouse */
+    ev.data3 = 0;                        /* moving the mouse forward doesn't walk */
+    D_PostEvent(&ev);
+    mouse_dx = 0;
+    mouse_sent_buttons = mouse_buttons;
+}
+
 /* ---------------------------------------------------------- loading */
 
 /* Doom reads a lot of its WAD before the first frame. Until then a loading screen is shown,
@@ -168,7 +286,8 @@ void DG_DrawFrame(void)
         first_frame_done = 1;
         startlog_ready("DOOM");
     }
-    poll_pad();
+    if (ui_desktop) poll_desktop();
+    else poll_pad();
 }
 
 void DG_SleepMs(uint32_t ms)
@@ -183,7 +302,10 @@ uint32_t DG_GetTicksMs(void)
 
 int DG_GetKey(int *pressed, unsigned char *key)
 {
-    if (q_tail == q_head) return 0;
+    if (q_tail == q_head) {
+        if (ui_desktop) post_mouse();
+        return 0;
+    }
     *pressed = (queue[q_tail] >> 8) & 1;
     *key = (unsigned char)(queue[q_tail] & 0xff);
     q_tail = (q_tail + 1) % QSIZE;
@@ -274,6 +396,12 @@ static int pick_game(void)
         if (d && sel + d >= 0 && sel + d < nfound) sel += d;
         if (PRESSED(a) || PRESSED(start)) return sel;
         if (PRESSED(b) || PRESSED(back)) return -1;
+        /* On the desktop the pointer picks a game as it moves over it, and a click plays it. */
+        for (i = 0; ui_desktop && i < nfound; i++)
+            if (ui_mouse_in(x, top + i * rowh, w, rowh - 12)) {
+                if (mouse.dx || mouse.dy) sel = i;
+                if (mouse.clicks & 1) return i;
+            }
 
         ui_bg();
         gfx_str_c(FONT_HEAD, SCR_W / 2, top - 130, C_TEXT, "DOOM");
@@ -283,7 +411,7 @@ static int pick_game(void)
             gfx_fill_rrect((float)x, (float)y, (float)w, rowh - 12.0f, 14, i == sel ? C_ACCENT : C_SURFACE, 255);
             gfx_str_vc(FONT_BODY_SB, x + 26, y + (rowh - 12) / 2, i == sel ? 0xFFFFFF : C_TEXT, games[found_game[i]].name);
         }
-        ui_hints("A=Play;B=XenithOS");
+        ui_hints(ui_desktop ? "A=Play;B=Close" : "A=Play;B=XenithOS");
         ui_end_frame();
     }
 }
@@ -306,7 +434,7 @@ static void no_wad_screen(void)
         gfx_str_c(FONT_BODY, SCR_W / 2, y, C_SUB, "Or put your own doom.wad or doom2.wad in /usr/share/games/doom.");
     }
     y += 80;
-    gfx_str_c(FONT_BODY_SB, SCR_W / 2, y, C_ACCENT_HI, "Press A to go back to XenithOS");
+    gfx_str_c(FONT_BODY_SB, SCR_W / 2, y, C_ACCENT_HI, ui_desktop ? "Press Esc to close" : "Press A to go back to XenithOS");
     gfx_present();
 
     memset(&p, 0, sizeof p);
