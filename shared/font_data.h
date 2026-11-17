@@ -21,6 +21,9 @@ enum {
 #define FONT_FIRST 32
 #define FONT_LAST 126
 
-extern const struct font font_table[FONT_COUNT];
+/* The fonts in use: a copy of font_sizes[0] (normal) or font_sizes[1] (bigger text),
+ * which gfx_text_size() switches between. */
+extern struct font font_table[FONT_COUNT];
+extern const struct font font_sizes[2][FONT_COUNT];
 
 #endif

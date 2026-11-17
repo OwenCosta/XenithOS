@@ -13,6 +13,22 @@ extern struct pad cur, prev;
 #define PRESSED(f) (cur.f && !prev.f)
 #define STICK_TH 20000
 
+/* Settings > Accessibility > Buttons: any of the controller's buttons can do another one's job.
+ * cur and prev have the jobs (A is whatever does A's job); ui_raw is the controller as it is.
+ * The hints (ui_button_glyph) show the button that does each job. Not used by desktop apps,
+ * which are played with the keyboard. */
+enum { PADB_A, PADB_B, PADB_X, PADB_Y, PADB_LB, PADB_RB, PADB_LT, PADB_RT, PADB_START, PADB_BACK,
+       PADB_LS, PADB_RS, PADB_COUNT };
+extern struct pad ui_raw;
+void ui_pad_apply(struct pad *p);            /* the controller as it is -> the jobs (ui_poll does it) */
+int  ui_pad_from(int job);                   /* the button that does that job now */
+int  ui_pad_held(const struct pad *p, int b);   /* b held in p (a trigger halfway down) */
+const char *ui_pad_name(int b);              /* "A", "LB", "START"... */
+int  ui_pad_find(const char *name);          /* PADB_* by name, or -1 */
+const char *ui_pad_say(const char *job);     /* for words like "Press Y": the button that does it */
+void ui_pad_map_parse(const char *text, signed char map[PADB_COUNT]);   /* settings.txt's buttons= */
+void ui_pad_map_text(const signed char map[PADB_COUNT], char *out, int n);
+
 /* Desktop apps (plat_desktop() in platform.h): ui_desktop is 1, and mouse is the mouse as the
  * last ui_poll() saw it. The hints then name keys instead of the controller's buttons (A is
  * Enter, B is Esc...), dialogs can be clicked, and leaving the app closes it. */
@@ -39,7 +55,8 @@ void ui_bg(void);
 void ui_header(const char *title, const char *subtitle);
 void ui_profile_chip(int right_x, int cy);
 void ui_hints(const char *spec);                /* "A=Select;B=Back;Y=Refresh" */
-int  ui_button_glyph(int x, int cy, const char *btn);   /* returns width */
+int  ui_button_glyph(int x, int cy, const char *btn);   /* returns width; the button doing btn's job */
+int  ui_button_glyph_as(int x, int cy, const char *btn);   /* that button itself, wherever its job went */
 void ui_spinner(int cx, int cy, int r, uint32_t color);
 void ui_toast(const char *title, const char *body);
 void ui_toast_icon(int icon);                   /* icon for the next toast (ICON_*) */

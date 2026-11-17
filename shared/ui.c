@@ -1,4 +1,5 @@
 /* The XenithOS UI kit. See ui.h. */
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,7 +17,7 @@
 #include "ui.h"
 #include "logo_shape.h"
 
-struct pad cur, prev;
+struct pad cur, prev, ui_raw;
 int M, HEADER_H;
 int ui_desktop;
 struct plat_mouse mouse = {-1, -1, 0, 0, 0, 0, 0};
@@ -26,17 +27,161 @@ static int fading;
 
 /* --------------------------------------------------------------- input */
 
-/* The look (theme.h) goes along to the next program, so the frames it draws before it has read
- * the settings are in the same colours, and on the Xbox the switch still doesn't show. */
+/* The look (theme.h, and the text size) goes along to the next program as "theme.contrast.text",
+ * so the frames it draws before it has read the settings look the same, and on the Xbox the
+ * switch still doesn't show. */
 static void look_give(void)
 {
-    handoff_set("look", theme_id(theme_current()));
+    char look[40];
+    snprintf(look, sizeof look, "%s.%d.%d", theme_id(theme_current()), theme_contrast(), gfx_text_large());
+    handoff_set("look", look);
 }
 
 static void look_take(void)
 {
     const char *l = handoff_get("look");
-    if (l) theme_apply(theme_find(l));
+    char id[24];
+    int c = 0, t = 0;
+    if (!l || sscanf(l, "%23[a-z0-9].%d.%d", id, &c, &t) < 1) return;
+    theme_set_contrast(c);
+    theme_apply(theme_find(id));
+    gfx_text_size(t);
+}
+
+/* -------------------------------------------------------- moved buttons */
+
+typedef char pad_map_fits[sizeof st.pad_map == PADB_COUNT ? 1 : -1];
+
+static const char *const pad_names[PADB_COUNT] = {
+    "A", "B", "X", "Y", "LB", "RB", "LT", "RT", "START", "BACK", "LS", "RS",
+};
+
+const char *ui_pad_name(int b)
+{
+    return b >= 0 && b < PADB_COUNT ? pad_names[b] : "";
+}
+
+int ui_pad_find(const char *name)
+{
+    int b;
+    for (b = 0; name && b < PADB_COUNT; b++)
+        if (!strcmp(name, pad_names[b])) return b;
+    return -1;
+}
+
+int ui_pad_from(int job)
+{
+    int m;
+    if (job < 0 || job >= PADB_COUNT) return job;
+    m = st.pad_map[job];
+    return m > 0 && m <= PADB_COUNT ? m - 1 : job;
+}
+
+/* A button's state as 0..255, so a trigger and a button can stand in for each other. */
+static int pad_get(const struct pad *p, int b)
+{
+    switch (b) {
+    case PADB_A: return p->a ? 255 : 0;
+    case PADB_B: return p->b ? 255 : 0;
+    case PADB_X: return p->x ? 255 : 0;
+    case PADB_Y: return p->y ? 255 : 0;
+    case PADB_LB: return p->lb ? 255 : 0;
+    case PADB_RB: return p->rb ? 255 : 0;
+    case PADB_LT: return p->lt;
+    case PADB_RT: return p->rt;
+    case PADB_START: return p->start ? 255 : 0;
+    case PADB_BACK: return p->back ? 255 : 0;
+    case PADB_LS: return p->ls ? 255 : 0;
+    case PADB_RS: return p->rs ? 255 : 0;
+    }
+    return 0;
+}
+
+static void pad_set(struct pad *p, int b, int v)
+{
+    int on = v >= 128;
+    switch (b) {
+    case PADB_A: p->a = on; break;
+    case PADB_B: p->b = on; break;
+    case PADB_X: p->x = on; break;
+    case PADB_Y: p->y = on; break;
+    case PADB_LB: p->lb = on; break;
+    case PADB_RB: p->rb = on; break;
+    case PADB_LT: p->lt = v; break;
+    case PADB_RT: p->rt = v; break;
+    case PADB_START: p->start = on; break;
+    case PADB_BACK: p->back = on; break;
+    case PADB_LS: p->ls = on; break;
+    case PADB_RS: p->rs = on; break;
+    }
+}
+
+int ui_pad_held(const struct pad *p, int b)
+{
+    return pad_get(p, b) >= 128;
+}
+
+void ui_pad_apply(struct pad *p)
+{
+    struct pad in = *p;
+    int b;
+    for (b = 0; b < PADB_COUNT; b++)
+        if (ui_pad_from(b) != b) pad_set(p, b, pad_get(&in, ui_pad_from(b)));
+    if (st.swap_sticks) {
+        p->lx = in.rx; p->ly = in.ry;
+        p->rx = in.lx; p->ry = in.ly;
+    }
+}
+
+const char *ui_pad_say(const char *job)
+{
+    int b = ui_pad_find(job);
+    return b < 0 || ui_desktop ? job : pad_names[ui_pad_from(b)];
+}
+
+/* "a:b,lt:rb": A's job is done by B, LT's by RB. Only the moved ones are written. */
+void ui_pad_map_parse(const char *text, signed char map[PADB_COUNT])
+{
+    char buf[96], *item, *save = NULL;
+    int b;
+    memset(map, 0, PADB_COUNT);
+    snprintf(buf, sizeof buf, "%s", text ? text : "");
+    for (item = strtok_r(buf, ",", &save); item; item = strtok_r(NULL, ",", &save)) {
+        char *colon = strchr(item, ':'), *k;
+        int job, from;
+        if (!colon) continue;
+        *colon = 0;
+        for (k = item; *k; k++) *k = (char)toupper((unsigned char)*k);
+        for (k = colon + 1; *k; k++) *k = (char)toupper((unsigned char)*k);
+        job = ui_pad_find(item);
+        from = ui_pad_find(colon + 1);
+        if (job >= 0 && from >= 0 && from != job) map[job] = (signed char)(from + 1);
+    }
+    /* Only whole swaps make sense (every job still has a button): anything else goes back. */
+    for (b = 0; b < PADB_COUNT; b++) {
+        int from = map[b] ? map[b] - 1 : b, k, used = 0;
+        for (k = 0; k < PADB_COUNT; k++)
+            if ((map[k] ? map[k] - 1 : k) == from) used++;
+        if (used != 1) { memset(map, 0, PADB_COUNT); return; }
+    }
+}
+
+void ui_pad_map_text(const signed char map[PADB_COUNT], char *out, int n)
+{
+    int b, o = 0;
+    out[0] = 0;
+    for (b = 0; b < PADB_COUNT && o < n; b++) {
+        char lower[2][8];
+        int k;
+        if (!map[b] || map[b] - 1 == b || map[b] > PADB_COUNT) continue;
+        for (k = 0; k < 2; k++) {
+            const char *s = pad_names[k ? map[b] - 1 : b];
+            int i;
+            for (i = 0; s[i] && i < 7; i++) lower[k][i] = (char)tolower((unsigned char)s[i]);
+            lower[k][i] = 0;
+        }
+        o += snprintf(out + o, n - o, "%s%s:%s", o ? "," : "", lower[0], lower[1]);
+    }
 }
 
 void ui_init(void)
@@ -81,6 +226,8 @@ void ui_poll(void)
     audio_update();
     prev = cur;
     plat_poll(&cur);
+    ui_raw = cur;
+    if (!ui_desktop) ui_pad_apply(&cur);
     plat_mouse(&mouse);
     if (settle) {
         settle = 0;
@@ -247,7 +394,7 @@ void ui_panel(int x, int y, int w, int h)
 void ui_select_box(float x, float y, float w, float h, float r)
 {
     gfx_fill_rrect(x, y, w, h, r, C_SEL, 255);
-    gfx_stroke_rrect(x, y, w, h, r, 2, 0xFFFFFF, 235);
+    gfx_stroke_rrect(x, y, w, h, r, (float)UI_EDGE, 0xFFFFFF, theme_contrast() ? 255 : 235);
 }
 
 /* The XenithOS mark. Two chevrons, one pointing down onto the middle and one pointing up at it,
@@ -354,24 +501,54 @@ static const char *desktop_key(const char *b)
     return b;
 }
 
-int ui_button_glyph(int x, int cy, const char *b)
+/* The buttons a hint names, each as the button that does that job now (Accessibility >
+ * Buttons): "A" is "B" once A and B have swapped, "LB/RB" each half on its own. */
+static const char *moved(const char *b, char *out, int n)
+{
+    char buf[48], *t, *save = NULL;
+    int o = 0;
+    snprintf(buf, sizeof buf, "%s", b);
+    out[0] = 0;
+    for (t = strtok_r(buf, "/", &save); t && o < n; t = strtok_r(NULL, "/", &save)) {
+        int k = ui_pad_find(t);
+        o += snprintf(out + o, n - o, "%s%s", o ? "/" : "", k >= 0 ? pad_names[ui_pad_from(k)] : t);
+    }
+    return out;
+}
+
+/* A, B, X and Y as the controller's coloured buttons, anything else as a key cap. Sized to the
+ * text (bigger with bigger text). */
+static int glyph(int x, int cy, const char *b, int caps_only)
 {
     uint32_t c = 0;
-    if (ui_desktop) b = desktop_key(b);              /* a key, drawn as a key cap below */
+    int r = (gfx_line_h(FONT_SMALL) + 4) / 2;
+    if (caps_only) c = 0;
     else if (!strcmp(b, "A")) c = C_BTN_A;
     else if (!strcmp(b, "B")) c = C_BTN_B;
     else if (!strcmp(b, "X")) c = C_BTN_X;
     else if (!strcmp(b, "Y")) c = C_BTN_Y;
     if (c) {
-        gfx_circle(x + 13.0f, (float)cy, 13, c, 255);
-        gfx_str_c(FONT_SMALL, x + 13, cy - gfx_line_h(FONT_SMALL) / 2, RGB(16, 18, 24), b);
-        return 26;
+        gfx_circle((float)(x + r), (float)cy, (float)r, c, 255);
+        gfx_str_c(FONT_SMALL, x + r, cy - gfx_line_h(FONT_SMALL) / 2, RGB(16, 18, 24), b);
+        return 2 * r;
     } else {
         int w = gfx_str_w(FONT_SMALL, b) + 20;
-        gfx_fill_rrect((float)x, cy - 13.0f, (float)w, 26, 13, C_SURFACE2, 255);
+        gfx_fill_rrect((float)x, (float)(cy - r), (float)w, (float)(2 * r), (float)r, C_SURFACE2, 255);
         gfx_str_c(FONT_SMALL, x + w / 2, cy - gfx_line_h(FONT_SMALL) / 2, C_SUB, b);
         return w;
     }
+}
+
+int ui_button_glyph(int x, int cy, const char *b)
+{
+    char m[48];
+    if (ui_desktop) return glyph(x, cy, desktop_key(b), 1);   /* a key, drawn as a key cap */
+    return glyph(x, cy, moved(b, m, sizeof m), 0);
+}
+
+int ui_button_glyph_as(int x, int cy, const char *b)
+{
+    return glyph(x, cy, b, 0);
 }
 
 void ui_hints(const char *spec)

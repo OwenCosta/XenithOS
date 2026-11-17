@@ -1203,7 +1203,8 @@ static const char *console_text(const char *line, char *stamp)
 
 static void draw_console(int px, int py, int pw, int ph)
 {
-    int x = px + 24, w = pw - 48 - 86, lh = gfx_line_h(FONT_SMALL) + 3, bottom = py + ph - 18, y = bottom, i, clip[4];
+    int sw = gfx_text_large() ? gfx_str_w(FONT_SMALL, "00:00:00") + 20 : 86;     /* the time, then the line */
+    int x = px + 24, w = pw - 48 - sw, lh = gfx_line_h(FONT_SMALL) + 3, bottom = py + ph - 18, y = bottom, i, clip[4];
     int skip = console_back;
     ui_panel(px, py, pw, ph);
     gfx_get_clip(clip);
@@ -1215,10 +1216,10 @@ static void draw_console(int px, int py, int pw, int ph)
         const char *t = console_text(l->text, stamp);
         int lines;
         if (skip > 0) { skip--; continue; }
-        lines = wrap(FONT_SMALL, x + 86, 0, w, 3, 0, t, 6, 0);
+        lines = wrap(FONT_SMALL, x + sw, 0, w, 3, 0, t, 6, 0);
         y -= lines * lh;
         if (stamp[0]) gfx_str(FONT_SMALL, x, y, C_DIM, stamp);
-        wrap(FONT_SMALL, stamp[0] ? x + 86 : x, y, stamp[0] ? w : w + 86, 3, line_color(l->kind), t, 6, 1);
+        wrap(FONT_SMALL, stamp[0] ? x + sw : x, y, stamp[0] ? w : w + sw, 3, line_color(l->kind), t, 6, 1);
     }
     gfx_set_clip(clip[0], clip[1], clip[2], clip[3]);
     if (console_back > 0) {

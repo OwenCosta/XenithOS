@@ -44,6 +44,12 @@ int  theme_current(void);
 /* A theme's own colours without switching to it, for its card in Settings. */
 void theme_colors(int theme, struct xenith_palette *out);
 
+/* High contrast (Settings > Accessibility), with any theme: black behind, white text, light
+ * grey for the quieter words, card edges that stand out and a thicker edge on what's selected. */
+void theme_set_contrast(int on);
+int  theme_contrast(void);
+#define UI_EDGE (theme_contrast() ? 3 : 2)    /* how thick a selected card's white edge is */
+
 /* Where XenithOS itself lives, so apps can return to it. */
 #define XENITH_SHELL_PATH "uda:/xenon.elf"
 #define XENITH_VERSION "0.6.9"

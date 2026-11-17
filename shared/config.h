@@ -28,6 +28,12 @@ struct xenith_settings {
     char last_app[96];        /* most recently launched app */
     char theme[16];           /* the colour theme's id (theme.h); "" is the first one */
     char wallpaper[16];       /* the home screen's wallpaper (source/wallpaper.c); "" is none */
+    int text_large;           /* Accessibility: bigger text */
+    int high_contrast;        /* Accessibility: high contrast */
+    /* Accessibility > Buttons: for each of ui.h's PADB_* jobs, the controller's button that
+     * does it, plus one (0: its own button). Kept in settings.txt as "buttons=a:b,b:a". */
+    signed char pad_map[12];
+    int swap_sticks;          /* the left stick does the right stick's job and back */
 };
 
 struct xenith_profile {
@@ -45,8 +51,9 @@ extern struct xenith_profile prof;
 void config_load(void);       /* needs storage; takes the route in route.txt when it's for this server */
 void route_save(const char *lan, const char *id);   /* use lan from now on, and remember it */
 void route_forget(void);                             /* back to server_main */
-void settings_load(void);
+void settings_load(void);    /* and settings_apply() */
 void settings_save(void);
+void settings_apply(void);   /* the theme, contrast and text size in st, put to use */
 void profile_load(void);
 void profile_save(void);
 void profile_clear(void);

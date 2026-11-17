@@ -137,7 +137,7 @@ static void tile_sub(int t, char *out, int n)
 
 static void draw_home(void)
 {
-    int asz = 72, tw, th = 210, gap = 16, ty = 150, i;
+    int asz = 72, tw, th = 210, gap = 16, ty = 150, i, big = gfx_text_large(), sy;
     int cw = 232, ch = cw * 9 / 16, cy, cgap = 18;
     char sub[48];
 
@@ -148,13 +148,15 @@ static void draw_home(void)
     gfx_str(FONT_TITLE, M + asz + 18, 38, C_TEXT, prof.signed_in ? prof.name : "Guest");
     if (status_line) snprintf(sub, sizeof sub, "%s", status_line);
     else if (net_is_up()) snprintf(sub, sizeof sub, "Online");
-    else if (!prof.signed_in) snprintf(sub, sizeof sub, "Press Y to create a profile");
+    else if (!prof.signed_in) snprintf(sub, sizeof sub, "Press %s to create a profile", ui_pad_say("Y"));
     else snprintf(sub, sizeof sub, "Offline");
-    gfx_circle(M + asz + 24.0f, 92, 4, net_is_up() ? C_OK : C_DIM, 255);
-    gfx_str(FONT_SMALL, M + asz + 36, 81, C_SUB, sub);
+    sy = big ? 38 + gfx_line_h(FONT_TITLE) : 81;
+    gfx_circle(M + asz + 24.0f, (float)(sy + font_table[FONT_SMALL].ascent - gfx_cap_h(FONT_SMALL) / 2), 4,
+               net_is_up() ? C_OK : C_DIM, 255);
+    gfx_str(FONT_SMALL, M + asz + 36, sy, C_SUB, sub);
     ui_brand(SCR_W - M - ui_brand(0, 0, FONT_LABEL, 1), 46, FONT_LABEL, 0);
 
-    /* Tiles */
+    /* Tiles. With bigger text the icon moves up, and what's under the name gets two lines. */
     tw = (SCR_W - 2 * M - gap * (T_COUNT - 1)) / T_COUNT;
     for (i = 0; i < T_COUNT; i++) {
         int sel = row == 0 && tile == i;
@@ -162,14 +164,16 @@ static void draw_home(void)
         int x = M + i * (tw + gap), y = ty - (int)(l * 8), w = tw, h = th;
         uint32_t fill = gfx_mix(C_SURFACE, C_SEL, (int)(256 * l)), fg = gfx_mix(C_SUB, 0xFFFFFF, (int)(256 * l));
         gfx_fill_rrect((float)x, (float)y, (float)w, (float)h, 12, fill, 255);
-        gfx_stroke_rrect((float)x, (float)y, (float)w, (float)h, 12, 1 + l, gfx_mix(C_LINE, 0xFFFFFF, (int)(235 * l)), 255);
+        gfx_stroke_rrect((float)x, (float)y, (float)w, (float)h, 12, 1 + l * (UI_EDGE - 1),
+                         gfx_mix(C_LINE, 0xFFFFFF, (int)(235 * l)), 255);
         if (i == T_PROFILE && prof.signed_in)
-            avatar_draw(prof.avatar, x + w / 2 - 40, y + h * 42 / 100 - 40, 80);
+            avatar_draw(prof.avatar, x + w / 2 - 40, y + h * (big ? 32 : 42) / 100 - 40, 80);
         else
-            icon_draw(tile_icon[i], x + w / 2.0f, y + h * 0.40f, 62, fg, fill);
-        gfx_str(FONT_LABEL, x + 16, y + h - 70, C_TEXT, tile_name[i]);
+            icon_draw(tile_icon[i], x + w / 2.0f, y + h * (big ? 0.31f : 0.40f), 62, fg, fill);
+        gfx_str(FONT_LABEL, x + 16, y + h - (big ? 104 : 70), C_TEXT, tile_name[i]);
         tile_sub(i, sub, sizeof sub);
-        gfx_str_fit(FONT_SMALL, x + 16, y + h - 38, C_SUB, sub, w - 28);   /* six tiles: 137 px for these words */
+        if (big) gfx_wrap(FONT_SMALL, x + 16, y + h - 66, w - 28, 0, C_SUB, sub, 2);
+        else gfx_str_fit(FONT_SMALL, x + 16, y + h - 38, C_SUB, sub, w - 28);   /* six tiles: 137 px for these words */
     }
 
     /* Jump back in */
@@ -188,6 +192,7 @@ static void draw_home(void)
      * card is like the streaming site's posters: the picture, then the name and kind inside it. */
     if (napps) {
         int fit = (SCR_W - 2 * M + cgap) / (cw + cgap), clip[4];
+        int kind_y = ch + 5 + gfx_line_h(FONT_BODY_SB), card_h = kind_y + gfx_line_h(FONT_SMALL) + 4;   /* 32 and 58 */
         const char *running = plat_running();
         if (fit < 1) fit = 1;
         if (card < card_first) card_first = card;
@@ -195,22 +200,23 @@ static void draw_home(void)
         if (card_first > napps - fit) card_first = napps - fit > 0 ? napps - fit : 0;
         card_scroll = card_scroll < 0 ? (float)(card_first * (cw + cgap)) : ui_ease(card_scroll, (float)(card_first * (cw + cgap)), 0.3f);
         gfx_get_clip(clip);
-        gfx_clip_intersect(M - 14, cy - 14, SCR_W - 2 * M + 28, ch + 80);
+        gfx_clip_intersect(M - 14, cy - 14, SCR_W - 2 * M + 28, card_h + 22);
         for (i = 0; i < napps; i++) {
             int x = M + i * (cw + cgap) - (int)(card_scroll + 0.5f), sel = row == 1 && card == i, ly;
             float l = lift_c[i] = ui_ease(lift_c[i], sel ? 1.0f : 0.0f, 0.35f);
             if (x + cw + 14 < M - 14) continue;
             if (x > SCR_W - M + 14) break;
             ly = cy - (int)(l * 8);
-            gfx_fill_rrect((float)x, (float)ly, (float)cw, ch + 58.0f, 10, C_SURFACE, 255);
-            gfx_stroke_rrect((float)x, (float)ly, (float)cw, ch + 58.0f, 10, 1 + l, gfx_mix(C_LINE, 0xFFFFFF, (int)(235 * l)), 255);
+            gfx_fill_rrect((float)x, (float)ly, (float)cw, (float)card_h, 10, C_SURFACE, 255);
+            gfx_stroke_rrect((float)x, (float)ly, (float)cw, (float)card_h, 10, 1 + l * (UI_EDGE - 1),
+                             gfx_mix(C_LINE, 0xFFFFFF, (int)(235 * l)), 255);
             app_card(&apps[i], x, ly, cw, ch, 0, 0);
             gfx_str_fit(FONT_BODY_SB, x + 12, ly + ch + 8, C_TEXT, apps[i].name, cw - 24);
             if (running && !strcmp(running, apps[i].path)) {     /* left running from the guide */
-                gfx_circle(x + 16.0f, ly + ch + 41.0f, 4, C_OK, 255);
-                gfx_str(FONT_SMALL, x + 26, ly + ch + 32, C_TEXT, "Running");
+                gfx_circle(x + 16.0f, ly + kind_y + gfx_line_h(FONT_SMALL) / 2 - 2.0f, 4, C_OK, 255);
+                gfx_str(FONT_SMALL, x + 26, ly + kind_y, C_TEXT, "Running");
             } else {
-                gfx_str(FONT_SMALL, x + 12, ly + ch + 32, C_SUB, apps[i].version[0] ? apps[i].version : "App");
+                gfx_str(FONT_SMALL, x + 12, ly + kind_y, C_SUB, apps[i].version[0] ? apps[i].version : "App");
             }
         }
         gfx_set_clip(clip[0], clip[1], clip[2], clip[3]);

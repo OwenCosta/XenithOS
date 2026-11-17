@@ -71,13 +71,42 @@ void theme_colors(int theme, struct xenith_palette *p)
     p->ink = RGB(8, 9, 11);
 }
 
+static int high_contrast;
+
+/* Black behind, the cards a shade off it so their light edges carry the shapes, the empty bars
+ * and key caps lifted, every word near white. The accent stays the theme's: white goes on it. */
+static void contrast(struct xenith_palette *p)
+{
+    p->bg = RGB(0, 0, 0);
+    p->surface = gfx_mix(p->surface, RGB(0, 0, 0), 100);
+    p->surface2 = RGB(50, 54, 62);
+    p->line = RGB(168, 174, 184);
+    p->sel = RGB(60, 65, 76);
+    p->text = RGB(255, 255, 255);
+    p->sub = RGB(224, 228, 234);
+    p->dim = RGB(182, 188, 198);
+    p->ink = RGB(0, 0, 0);
+}
+
 void theme_apply(int theme)
 {
     current = theme >= 0 && theme < THEME_COUNT ? theme : 0;
     theme_colors(current, &pal);
+    if (high_contrast) contrast(&pal);
 }
 
 int theme_current(void)
 {
     return current;
+}
+
+void theme_set_contrast(int on)
+{
+    high_contrast = on != 0;
+    theme_apply(current);
+}
+
+int theme_contrast(void)
+{
+    return high_contrast;
 }

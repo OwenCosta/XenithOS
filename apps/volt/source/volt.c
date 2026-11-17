@@ -235,7 +235,7 @@ static int button_clicked(int i, int n)
 static void draw(int uploaded)
 {
     int i;
-    char buf[64];
+    char buf[64], say[64];
     float t = (ui_ms() % 100000) / 1000.0f;
 
     ui_bg();
@@ -259,15 +259,18 @@ static void draw(int uploaded)
         cell(spark_x, spark_y, C_SPARK, pulse);
     }
 
-    if (state == S_TITLE)
+    if (state == S_TITLE) {
+        snprintf(say, sizeof say, "Press %s to start", ui_pad_say("A"));     /* the button doing A's job */
         overlay("XenithOS game", "VOLT", "Grab the sparks. Don't hit the walls or yourself.",
-                ui_desktop ? "Press Space or click to start" : "Press A to start");
-    else if (state == S_PAUSE)
-        overlay("Take a breather", "Paused", ui_desktop ? "Press Space to keep going" : "Press START to keep going", NULL);
-    else if (state == S_OVER) {
+                ui_desktop ? "Press Space or click to start" : say);
+    } else if (state == S_PAUSE) {
+        snprintf(say, sizeof say, "Press %s to keep going", ui_pad_say("START"));
+        overlay("Take a breather", "Paused", ui_desktop ? "Press Space to keep going" : say, NULL);
+    } else if (state == S_OVER) {
         snprintf(buf, sizeof buf, "%d", score);
+        snprintf(say, sizeof say, "%s uploads your score", ui_pad_say("X"));
         overlay("You crashed", buf, result_line[0] ? result_line : (score >= best && score ? "New best!" : "So close."),
-                !ui_desktop && cfg.server[0] && score && !result_line[0] ? "X uploads your score" : NULL);
+                !ui_desktop && cfg.server[0] && score && !result_line[0] ? say : NULL);
         if (ui_desktop) {
             int n = can_upload(uploaded) ? 2 : 1;
             draw_button(0, n, "Play again", 1);

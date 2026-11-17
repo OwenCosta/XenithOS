@@ -84,6 +84,7 @@ static void poll_pad(void)
 
     last_pad = pad;
     plat_poll(&pad);
+    ui_pad_apply(&pad);                  /* buttons moved in Settings > Accessibility */
     polls++;
 
     want[B_UP]        = pad.up || pad.ly > STICK_TH;

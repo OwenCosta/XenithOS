@@ -1,0 +1,56 @@
+# Settings > Accessibility: bigger text, high contrast, A and B swapped on the Buttons screen
+# (the next press after choosing a job is the button for it), then the home screen with all of
+# it on: the hints show B where A's job is now. Ends by putting the buttons back with B's new job.
+#   sim/run.sh sim/scripts/access.txt access          XSIM_TILED=1 for the tiled framebuffer check
+wait 240
+shot home_before
+press right
+press right
+press right
+press right
+wait 5
+press a
+wait 30
+press down
+press down
+press down
+press down
+press down
+wait 10
+shot settings_access_row
+press a
+wait 30
+shot access
+press a
+wait 20
+shot access_bigger
+press down
+press a
+wait 20
+shot access_bigger_contrast
+press down
+press a
+wait 30
+shot buttons
+press a
+wait 20
+shot buttons_asking
+press b
+wait 30
+shot buttons_swapped
+# A's job is on B now, so B chooses and A goes back
+press a
+wait 20
+shot access_after
+press a
+wait 30
+press a
+wait 20
+shot settings_after
+press a
+wait 30
+shot home_after
+press right
+wait 10
+shot home_after_store
+quit

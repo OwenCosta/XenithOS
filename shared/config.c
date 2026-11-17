@@ -6,8 +6,10 @@
 
 #include "avatar.h"
 #include "config.h"
+#include "gfx.h"
 #include "net.h"
 #include "theme.h"
+#include "ui.h"
 
 struct xenith_config cfg = {.name = "PLAYER"};
 struct xenith_settings st = {80, 1, 1, 1, 0, ""};
@@ -129,13 +131,25 @@ static void on_settings(const char *k, const char *v)
     else if (!strcmp(k, "last_app")) snprintf(st.last_app, sizeof st.last_app, "%s", v);
     else if (!strcmp(k, "theme")) copy_alnum(st.theme, sizeof st.theme, v, 0);
     else if (!strcmp(k, "wallpaper")) copy_alnum(st.wallpaper, sizeof st.wallpaper, v, 0);
+    else if (!strcmp(k, "text_large")) st.text_large = atoi(v) != 0;
+    else if (!strcmp(k, "high_contrast")) st.high_contrast = atoi(v) != 0;
+    else if (!strcmp(k, "buttons")) ui_pad_map_parse(v, st.pad_map);
+    else if (!strcmp(k, "swap_sticks")) st.swap_sticks = atoi(v) != 0;
+}
+
+/* The look and the controller as the settings have them (theme.h, gfx.h, ui.h). */
+void settings_apply(void)
+{
+    theme_set_contrast(st.high_contrast);
+    theme_apply(theme_find(st.theme));
+    gfx_text_size(st.text_large);
 }
 
 void settings_load(void)
 {
     read_kv(XENITH_SETTINGS_PATH, on_settings);
     /* Every program loads the settings, so every program takes the look from here. */
-    theme_apply(theme_find(st.theme));
+    settings_apply();
 }
 
 static FILE *open_write(const char *path)
@@ -151,6 +165,12 @@ void settings_save(void)
     fprintf(f, "# Written by XenithOS\nvolume=%d\nui_sounds=%d\nboot_sound=%d\nauto_connect=%d\nlast_inbox=%d\nlast_app=%s\n",
             st.volume, st.ui_sounds, st.boot_sound, st.auto_connect, st.last_inbox, st.last_app);
     fprintf(f, "theme=%s\nwallpaper=%s\n", st.theme, st.wallpaper);
+    {
+        char buttons[96];
+        ui_pad_map_text(st.pad_map, buttons, sizeof buttons);
+        fprintf(f, "text_large=%d\nhigh_contrast=%d\nbuttons=%s\nswap_sticks=%d\n",
+                st.text_large, st.high_contrast, buttons, st.swap_sticks);
+    }
     fclose(f);
 }
 

@@ -10,6 +10,7 @@ void screen_profile(void);
 void screen_settings(void);
 void screen_feedback(void);                 /* bugs and ideas, sent to XenithOS Cloud */
 void screen_theme(void);                    /* Settings > Theme: colours and the wallpaper */
+void screen_access(void);                   /* Settings > Accessibility */
 
 /* cloud_api.c: talking to XenithOS Cloud */
 int  cloud_ready(const char *title);        /* server set and network up, or explains why not */

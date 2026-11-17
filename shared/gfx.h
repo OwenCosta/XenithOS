@@ -52,6 +52,11 @@ int  gfx_line_h(int font);
 int  gfx_cap_h(int font);
 int  gfx_str_vc(int font, int x, int cy, uint32_t c, const char *s);     /* caps centred on cy */
 
+/* Bigger text (Settings > Accessibility): the smaller fonts a size up (font_data.h's
+ * font_sizes[1]). Layouts that measure their words with the functions above follow it. */
+void gfx_text_size(int large);
+int  gfx_text_large(void);
+
 /* The 5x7 pixel font, kept for the XenithOS wordmark. */
 int  gfx_text(int x, int y, int s, uint32_t c, const char *str);
 int  gfx_text_w(int s, const char *str);

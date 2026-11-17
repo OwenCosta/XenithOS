@@ -25,10 +25,13 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
 - Cloud: who's playing, XenithOS news, and the VOLT leaderboard with avatars
 - Profile: a gamertag and passcode, saved to XenithOS Cloud so it follows you to any machine
 - Avatar editor: thirteen parts in three tabs (face, hair, outfit), colour swatches, random looks
-- Settings: volume, interface sounds, start-up chime, theme, network, system info (with start-up times and
-  sound stats), controller test, about
+- Settings: volume, interface sounds, start-up chime, theme, accessibility, network, system info (with
+  start-up times and sound stats), controller test, about
 - Themes: six colour themes for XenithOS and its apps (XenithOS's red, Ocean, Forest, Ember, Violet, Teal) and
   six wallpapers for the home screen, all flat and dark and drawn in code, picked in Settings > Theme
+- Accessibility, for XenithOS and every app: bigger text, high contrast, and the controller's buttons moved to
+  other jobs (any button can do another one's, the hints show the button that does each job) or the sticks
+  swapped. The D-pad always moves around, so a layout can't lock you out.
 
 **Apps** (`apps/`)
 - VOLT: a light-trail game. Scores go to your profile on the leaderboard.
@@ -170,7 +173,8 @@ cd XenithOS
 The PC and Pi version: `make -C linux` (needs `libsdl2-dev` and `zlib1g-dev`).
 
 Fonts and thumbnails are generated and committed. To rebuild them: `python3 tools/mkfont.py` and
-`python3 tools/mkart.py` (needs Pillow and the Inter font: `apt install python3-pil fonts-inter`).
+`python3 tools/mkart.py` (needs Pillow and the Inter font: `apt install python3-pil fonts-inter`). The fonts
+come in two sets, the second for Settings > Accessibility > Bigger text.
 
 ## The simulator
 
@@ -210,7 +214,10 @@ tools/                   font and thumbnail generators
 ## Writing an app
 
 Copy `apps/volt`, rename the folder, and edit `source/`. Use `platform.h`, `gfx.h`, `ui.h` and `theme.h` so it
-looks and sounds like the rest of the system, and call `plat_launch(XENITH_SHELL_PATH)` to go back. `build.sh`
+looks and sounds like the rest of the system, and call `plat_launch(XENITH_SHELL_PATH)` to go back. Draw with
+theme.h's colours and lay text out with `gfx_line_h()` and `gfx_str_w()` rather than fixed sizes, so the colour
+themes, high contrast and bigger text work in it too; `ui_poll()` hands over the buttons as Accessibility has
+moved them. `build.sh`
 picks up every folder in `apps/` that has a Makefile; add `app.txt` (name, version) and `art/thumbs/<name>.ximg`
 for its tile, a target in `linux/Makefile` for PCs, and its name to the lists in `linux/install.sh` and
 `linux/update.sh`. An app for PCs only (like HostMC) leaves the Makefile out.

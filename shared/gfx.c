@@ -494,6 +494,19 @@ static const struct font *F(int font)
     return &font_table[font];
 }
 
+static int text_large;
+
+void gfx_text_size(int large)
+{
+    text_large = large != 0;
+    memcpy(font_table, font_sizes[text_large], sizeof font_table);
+}
+
+int gfx_text_large(void)
+{
+    return text_large;
+}
+
 static const struct font_glyph *G(const struct font *f, char ch)
 {
     unsigned char c = (unsigned char)ch;
