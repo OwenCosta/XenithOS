@@ -14,7 +14,7 @@ enum {
     NE_TOO_BIG    = -6,
     NE_MEMORY     = -7,
     NE_BAD_REPLY  = -8,
-    NE_CANCELLED  = -9,     /* net_cancel() while it waited */
+    NE_CANCELLED  = -10,    /* net_cancel() while it waited (-9 is pc-https's NE_SECURE) */
 };
 
 int net_up(void);                   /* bring the network up (DHCP) if needed; 1 with an address */
