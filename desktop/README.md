@@ -85,19 +85,26 @@ the Apps menu, under Games or Media, with an icon of its own. The entries follow
 desktop brings them in step each time it starts, and Settings > Console apps as it installs or removes
 one. `rootfs/usr/share/xenithos-desktop/console-menu.list` says which group each app goes in.
 
-VOLT, DOOM, Photos and Tube have **desktop versions**, made for the mouse and keyboard, which their entries
-open; each entry's right-click menu still has "Open the console version" (full screen, for a controller).
-The others (HostMC, for now) open as on XenithOS Console, or in a window from the right-click menu. All of
-them keep XenithOS Console's data, so scores, saves and HostMC's servers are the same in both.
+VOLT, DOOM, HostMC, Photos and Tube have **desktop versions**, made for the mouse and keyboard, which their
+entries open; each entry's right-click menu still has "Open the console version" (full screen, for a
+controller). An app without one would open as on XenithOS Console, or in a window from the right-click
+menu. All of them keep XenithOS Console's data, so scores, saves and HostMC's servers are the same in both.
 
-- **VOLT** and **DOOM** are XenithOS Console's own programs in desktop mode (`console-app` starts them
-  with `XENITHOS_DESKTOP=1`; `linux/platform_sdl.c` and `shared/ui.c` do the rest): a window of their own
-  (F11 for full screen), the mouse, and keys in the hints instead of the controller's buttons. VOLT
-  steers with the arrows or WASD, starts with Space or a click, pauses with Esc or Space (Q quits from
-  there), and its crash card's buttons can be clicked. DOOM has the usual PC controls: the mouse turns
-  and fires, WASD walks and strafes, E or Space uses, Shift runs, the number keys pick weapons, and Esc
-  is Doom's menu, which lets go of the mouse. This needs a XenithOS Console with desktop mode; an older
-  one opens them in a window as they are.
+- **VOLT**, **DOOM** and **HostMC** are XenithOS Console's own programs in desktop mode (`console-app`
+  starts them with `XENITHOS_DESKTOP=1`; `linux/platform_sdl.c` and `shared/ui.c` do the rest): a window
+  of their own (F11 for full screen), the mouse, and hints that show keys and the mouse instead of the
+  controller's buttons. VOLT steers with the arrows or WASD, starts with Space or a click, pauses with Esc
+  or Space (Q quits from there), and its crash card's buttons can be clicked. DOOM has the usual PC
+  controls: the mouse turns and fires, WASD walks and strafes, E or Space uses, Shift runs, the number keys
+  pick weapons, and Esc is Doom's menu, which lets go of the mouse. In HostMC a click opens a page and
+  chooses a row or a button, the wheel scrolls, a click on either end of a setting's value (or a right
+  click) changes it, and text (the server's message, names, a VPS's address) is typed into a text box
+  with Ctrl+V to paste. The console page has a command line of its own: what's typed goes to the server,
+  Tab switches to saying it to everyone, F2 has the quick commands. Links (the EULA, playit.gg's claim,
+  Patreon and OCAccounts for the supporter relay) open in the browser, and the command for a VPS can be
+  copied. The server keeps running when HostMC's window is closed, as it does when you leave it on the
+  console. This needs a XenithOS Console with desktop mode for them; an older one opens them in a window
+  as they are.
 - **Photos** (`rootfs/usr/lib/xenithos-desktop/photos.py`) shows the pictures XenithOS Console's Photos
   shows, and a photos or pictures folder on any USB stick or drive, newest first with the folders at the
   side. A picture opens in the window: the wheel zooms where the pointer is, dragging moves a zoomed one,

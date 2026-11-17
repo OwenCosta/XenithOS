@@ -110,6 +110,12 @@ void job_stop(struct job *j)
     j->status = -2;
 }
 
+/* On the desktop, a Cancel button under the loading screen's bar. */
+#define CANCEL_W 150
+#define CANCEL_H 46
+#define CANCEL_X ((SCR_W - CANCEL_W) / 2)
+#define CANCEL_Y (SCR_H / 2 + 140)
+
 /* ui_loading_progress's layout, with the bytes so far under the bar and a hint to cancel. */
 static void busy_frame(const char *title, const char *detail, long long done, long long total, int can_cancel)
 {
@@ -129,6 +135,12 @@ static void busy_frame(const char *title, const char *detail, long long done, lo
         human_size(total, b, sizeof b);
         snprintf(line, sizeof line, "%s of %s", a, b);
         gfx_str_c(FONT_SMALL, SCR_W / 2, cy + 112, C_DIM, line);
+    }
+    if (can_cancel && ui_desktop) {
+        int over = ui_mouse_in(CANCEL_X, CANCEL_Y, CANCEL_W, CANCEL_H);
+        gfx_fill_rrect((float)CANCEL_X, (float)CANCEL_Y, CANCEL_W, CANCEL_H, 10, over ? C_SEL : C_SURFACE2, 255);
+        gfx_stroke_rrect((float)CANCEL_X, (float)CANCEL_Y, CANCEL_W, CANCEL_H, 10, 1, over ? C_TEXT : C_LINE, 255);
+        gfx_str_c(FONT_BODY_SB, SCR_W / 2, CANCEL_Y + (CANCEL_H - gfx_line_h(FONT_BODY_SB)) / 2, C_TEXT, "Cancel");
     }
     if (can_cancel) ui_hints("B=Cancel");
     ui_end_frame();
@@ -150,7 +162,7 @@ int job_run_err(const char *const argv[], const char *out, const char *err, cons
     for (;;) {
         if (job_done(&j)) return j.status;
         ui_poll();
-        if (can_cancel && PRESSED(b)) {
+        if (can_cancel && (PRESSED(b) || (ui_desktop && ui_clicked(CANCEL_X, CANCEL_Y, CANCEL_W, CANCEL_H)))) {
             sfx(SFX_BACK);
             job_stop(&j);
             return -2;

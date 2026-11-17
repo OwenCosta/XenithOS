@@ -20,6 +20,13 @@ extern int ui_desktop;
 extern struct plat_mouse mouse;
 int  ui_mouse_in(int x, int y, int w, int h);  /* the pointer is over that box */
 int  ui_clicked(int x, int y, int w, int h);   /* the left button went down over it this frame */
+/* A desktop app that reads the keyboard's own keys (Tab, Delete, Ctrl+V...) sets ui_keys_on, and
+ * ui_poll() then takes them from plat_key_event() each frame: ui_key(k) is 1 when key k (as
+ * plat_key_event names it) went down this frame, 2 when it went down with Ctrl held, and
+ * ui_ctrl is 1 while Ctrl is held. An app that reads plat_key_event() itself, like DOOM, leaves
+ * it off. In ui_hints(), "Click", "Right click" and "Wheel" draw the mouse. */
+extern int ui_keys_on, ui_ctrl;
+int  ui_key(int key);
 
 extern int M;              /* side margin */
 extern int HEADER_H;       /* space the screen header takes */

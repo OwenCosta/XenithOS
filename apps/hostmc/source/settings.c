@@ -100,6 +100,7 @@ void hs_load(void)
     snprintf(hs.type, sizeof hs.type, "vanilla");
     snprintf(hs.version, sizeof hs.version, "latest");
     hs.ram_mb = mem_total_mb() >= 6000 ? 2048 : 1024;
+    hs.real_ips = 1;
     if (!t) return;
     kv_get(t, "type", v, sizeof v);
     if (!strcmp(v, "paper") || !strcmp(v, "vanilla")) snprintf(hs.type, sizeof hs.type, "%s", v);
@@ -112,16 +113,24 @@ void hs_load(void)
     hs.internet = atoi(v) == 1;
     kv_get(t, "vps", v, sizeof v);
     hs.vps = atoi(v) == 1 && !hs.internet;
+    kv_get(t, "relay", v, sizeof v);
+    hs.relay = atoi(v) == 1 && !hs.internet && !hs.vps;
     kv_get(t, "told_detach", v, sizeof v);
     hs.told_detach = atoi(v) == 1;
+    kv_get(t, "real_ips", v, sizeof v);
+    hs.real_ips = !v[0] || atoi(v) == 1;           /* on unless turned off */
+    kv_get(t, "bedrock", v, sizeof v);
+    hs.bedrock = atoi(v) == 1;
     free(t);
 }
 
 void hs_save(void)
 {
     char buf[512];
-    int n = snprintf(buf, sizeof buf, "type=%s\nversion=%s\nram=%d\neula=%s\ninternet=%d\nvps=%d\ntold_detach=%d\n",
-                     hs.type, hs.version, hs.ram_mb, hs.eula, hs.internet, hs.vps, hs.told_detach);
+    int n = snprintf(buf, sizeof buf, "type=%s\nversion=%s\nram=%d\neula=%s\ninternet=%d\nvps=%d\nrelay=%d\ntold_detach=%d\n"
+                                      "real_ips=%d\nbedrock=%d\n",
+                     hs.type, hs.version, hs.ram_mb, hs.eula, hs.internet, hs.vps, hs.relay, hs.told_detach, hs.real_ips,
+                     hs.bedrock);
     mkdirs(HM_DIR);
     file_write(HM_SETTINGS, buf, n, 0644);
 }
@@ -278,9 +287,13 @@ int props_set(const char *key, const char *value)
     return ok;
 }
 
+/* The port players join at. In door mode (door.c) that's the doorway's, and server.properties'
+ * server-port is Paper's own behind it. */
 int server_port(void)
 {
-    int p = props_get_int("server-port", DEFAULT_PORT);
+    int p;
+    if (door_on()) return door_players_port();
+    p = props_get_int("server-port", DEFAULT_PORT);
     return p > 0 && p < 65536 ? p : DEFAULT_PORT;
 }
 

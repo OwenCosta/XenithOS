@@ -1,8 +1,8 @@
 /* What friends on XenithOS see of HostMC: that it's open and, while the server runs and people
- * on the internet can reach it (through playit.gg or the player's own VPS), the address they
- * type in Minecraft to join. It's told to XenithOS Cloud now and then, and as soon as the
- * address changes or goes (shared/social.c). Friends only see it when the player lets them see
- * what they're playing (Settings in XenithOS). HostMC's achievements come from here too. */
+ * on the internet can reach it (through playit.gg, the player's own VPS or the supporter relay),
+ * the address they type in Minecraft to join. It's told to XenithOS Cloud now and then, and as
+ * soon as the address changes or goes (shared/social.c). Friends only see it when the player lets
+ * them see what they're playing (Settings in XenithOS). HostMC's achievements come from here too. */
 #include <stdio.h>
 
 #include "config.h"
@@ -17,6 +17,7 @@ static void public_address(char *out, int n)
     if (sv.state != SV_RUNNING) return;
     if (pi.state == PI_ON && pi.address[0]) snprintf(out, n, "%s", pi.address);
     else if (vps_up() && vps.check_ok) vps_address(out, n);
+    else if (relay_up() && relay.w.check_ok && relay.address[0]) snprintf(out, n, "%s", relay.address);
 }
 
 /* Achievements, from what HostMC sees: the server running, people on the internet able to reach
