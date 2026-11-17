@@ -21,9 +21,9 @@ DOOMFLAGS := -O1 -g -std=gnu11 -w -fsanitize=address -fno-omit-frame-pointer -I.
 
 TUBE    := $(wildcard ../apps/tube/source/*.c) $(SHARED) platform_sim.c $(NET)
 PHOTOS  := ../apps/photos/source/photos.c $(SHARED) platform_sim.c $(NET)
-HOSTMC  := $(wildcard ../apps/hostmc/source/*.c) $(SHARED) platform_sim.c $(NET)
+MINENEST := $(wildcard ../apps/minenest/source/*.c) $(SHARED) platform_sim.c $(NET)
 
-all: xsim xvolt xdoom xtube xphotos xhostmc
+all: xsim xvolt xdoom xtube xphotos xminenest
 
 # stb_image is checked for memory errors only (it does its own careful casting).
 xtube: $(TUBE) $(HDRS)
@@ -35,10 +35,10 @@ comma := ,
 xphotos: $(PHOTOS) $(HDRS)
 	$(CC) $(filter-out -fsanitize=address$(comma)undefined,$(CFLAGS)) -fsanitize=address $(PHOTOS) -o $@ $(LDLIBS)
 
-# HostMC runs real programs (the server, curl, tar), so a script for it runs in real time
-# (XSIM_THREAD=1); see sim/scripts/hostmc.txt.
-xhostmc: $(HOSTMC) $(HDRS) $(wildcard ../apps/hostmc/source/*.h)
-	$(CC) $(CFLAGS) -I../apps/hostmc/source $(HOSTMC) -o $@ $(LDLIBS)
+# MineNest talks to the minenest program, which runs real servers, so a script for it runs in
+# real time (XSIM_THREAD=1); see sim/scripts/minenest.txt.
+xminenest: $(MINENEST) $(HDRS) $(wildcard ../apps/minenest/source/*.h)
+	$(CC) $(CFLAGS) -I../apps/minenest/source $(MINENEST) -o $@ $(LDLIBS)
 
 xsim: $(SRC) $(HDRS)
 	$(CC) $(CFLAGS) $(SRC) -o $@ $(LDLIBS)
@@ -50,4 +50,4 @@ xdoom: $(DOOM) $(HDRS)
 	$(CC) $(DOOMFLAGS) $(DOOM) -o $@ $(LDLIBS)
 
 clean:
-	rm -f xsim xvolt xdoom xtube xphotos xhostmc
+	rm -f xsim xvolt xdoom xtube xphotos xminenest

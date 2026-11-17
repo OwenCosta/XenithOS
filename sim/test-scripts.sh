@@ -9,7 +9,7 @@
 # Scripts that go online get XenithOS Clouds started here on spare ports: one with a stand-in
 # Store (the files server/store.example.json lists, as stand-ins) and sim/store's Flathub and
 # Steam lists, and one with only those lists, as store_pc.txt and store_steam.txt expect.
-# Scripts another test runs (their header names sim/hostmc/test-*.sh) are left to it, and DOOM's
+# Scripts another test runs (their header names sim/minenest/test-*.sh) are left to it, and DOOM's
 # needs a WAD (XSIM_WAD=path/to/freedoom1.wad).
 #
 #   sim/test-scripts.sh [name...]        all of them, or only these (sim/test-scripts.sh boot tour)
@@ -153,7 +153,7 @@ make -s -C "$here" || { echo "the simulator didn't build"; exit 2; }
 KEY=$(python3 -I -c 'import secrets; print(secrets.token_hex(16))')
 if [ -n "$XSIM_USB" ]; then usb=$(realpath "$XSIM_USB"); else usb="$T/usb"; stage_usb "$usb"; fi
 mkdir -p "$T/photos"
-cp "$repo"/art/logo*.png "$repo"/art/thumbs/{doom,volt,tube,hostmc,minecraft}.png "$T/photos/"
+cp "$repo"/art/logo*.png "$repo"/art/thumbs/{doom,volt,tube,minenest,minecraft}.png "$T/photos/"
 
 echo "== offline"
 run boot ""
@@ -171,10 +171,11 @@ if [ -n "$XSIM_WAD" ]; then
 elif wanted doom; then
     skip doom "DOOM needs a WAD: XSIM_WAD=path/to/freedoom1.wad"
 fi
-run hostmc "" XSIM_BIN=xhostmc XSIM_KIND=pc XSIM_THREAD=1 XSIM_HOSTMC=1 XSIM_TYPE="say Hello from HostMC|"
-# HostMC as a desktop app (its own window on XenithOS Desktop): the mouse, the keyboard's keys and typing.
-run hostmc_desktop "" XSIM_BIN=xhostmc XSIM_KIND=pc XSIM_THREAD=1 XSIM_HOSTMC=1 XSIM_DESKTOP=1 XSIM_W=1280 XSIM_H=720 \
-    XSIM_CLIPBOARD=vps.example.com
+if [ -x "${MINENEST_BIN:-}" ]; then
+    run minenest "" XSIM_BIN=xminenest XSIM_KIND=pc XSIM_THREAD=1 XSIM_MINENEST=1 XSIM_TYPE="say Hello from MineNest|"
+else
+    skip minenest "MineNest needs its own program: MINENEST_BIN=path/to/minenest (github.com/OwenCosta/minenest)"
+fi
 
 online=0
 for s in online feedback gallery store_pc store_steam store_route tube store_local; do wanted "$s" && online=1; done
@@ -230,8 +231,8 @@ fi
 for f in "$here"/scripts/*.txt; do
     name=$(basename "$f" .txt)
     [[ "$done_names" == *" $name "* ]] && continue
-    if grep -qE '^#.*sim/hostmc/test-[a-z]+\.sh' "$f"; then
-        wanted "$name" && skip "$name" "run by $(grep -oE 'sim/hostmc/test-[a-z]+\.sh' "$f" | head -1)"
+    if grep -qE '^#.*sim/minenest/test-[a-z]+\.sh' "$f"; then
+        wanted "$name" && skip "$name" "run by $(grep -oE 'sim/minenest/test-[a-z]+\.sh' "$f" | head -1)"
         continue
     fi
     if wanted "$name"; then echo "  (no switches known for $name.txt: add them to sim/test-scripts.sh if it needs any)"; fi

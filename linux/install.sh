@@ -66,6 +66,7 @@ if [ "$UNINSTALL" = 1 ]; then
     [ -f "$PROFILE" ] && sed -i "/$MARK_BEGIN/,/$MARK_END/d" "$PROFILE"
     rm -rf /usr/lib/xenithos /usr/share/xenithos
     rm -f /usr/bin/xenithos-session /usr/bin/xenithos-console
+    if [ "$(readlink /usr/local/bin/minenest 2>/dev/null)" = /usr/lib/xenithos/bin/minenest ]; then rm -f /usr/local/bin/minenest; fi
     rm -f /usr/share/applications/xenithos-console.desktop /usr/share/applications/xenithos.desktop
     if [ -f "$STATE/previous-target" ]; then systemctl set-default "$(cat "$STATE/previous-target")" >/dev/null; fi
     rm -rf "$STATE"
@@ -77,8 +78,7 @@ fi
 say "Installing packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-# openssh-client: HostMC's tunnel to a VPS of the player's own (most systems have it already)
-PKGS="build-essential libsdl2-dev zlib1g-dev curl ca-certificates tar openssh-client"
+PKGS="build-essential libsdl2-dev zlib1g-dev curl ca-certificates tar"
 [ "$DESKTOP" = 1 ] && PKGS="$PKGS xserver-xorg xinit xfce4 xfce4-terminal dbus-x11 libxtst6"
 # shellcheck disable=SC2086
 apt-get install -y $PKGS
@@ -121,19 +121,26 @@ make -C "$SRC/linux" -j"$(nproc)"
 say "Installing"
 install -d /usr/lib/xenithos /usr/share/xenithos/apps "$STATE"
 install -m 755 "$SRC/linux/xenithos" "$SRC/linux/volt" "$SRC/linux/doom" "$SRC/linux/tube" "$SRC/linux/photos" \
-    "$SRC/linux/hostmc" /usr/lib/xenithos/
+    "$SRC/linux/minenest" /usr/lib/xenithos/
+# HostMC became MineNest: its program goes (its data stays, for MineNest to bring in).
+rm -f /usr/lib/xenithos/hostmc /usr/lib/xenithos/hostmc.txt /usr/lib/xenithos/hostmc.ximg /usr/share/xenithos/apps/hostmc.*
 # Each app's name, version and picture next to its program, for the Store to install it with
 # (update.sh keeps them current).
-for app in volt doom tube photos hostmc; do
+for app in volt doom tube photos minenest; do
     if [ -f "$SRC/apps/$app/app.txt" ]; then install -m 644 "$SRC/apps/$app/app.txt" "/usr/lib/xenithos/$app.txt"; fi
     if [ -f "$SRC/art/thumbs/$app.ximg" ]; then install -m 644 "$SRC/art/thumbs/$app.ximg" "/usr/lib/xenithos/$app.ximg"; fi
 done
 # The programs belong to the XenithOS user, so the Store's "XenithOS update" can build a new
 # version and put it in place without sudo (linux/update.sh). They only ever run as that user.
 chown -R "$USER_NAME": /usr/lib/xenithos
+# MineNest's own program, which runs the Minecraft servers (github.com/OwenCosta/minenest): the
+# release linux/minenest.sha256 pins, checked against the SHA-256 written there. It's downloaded as
+# the XenithOS user, and nothing downloaded runs as root. `minenest` works in a terminal too.
+sudo -u "$USER_NAME" bash "$SRC/linux/get-minenest.sh" /usr/lib/xenithos     || say "MineNest wasn't downloaded; it comes with the next XenithOS update"
+if [ -x /usr/lib/xenithos/bin/minenest ]; then ln -sfn /usr/lib/xenithos/bin/minenest /usr/local/bin/minenest; fi
 install -m 755 "$SRC/linux/xenithos-session" "$SRC/linux/xenithos-console" /usr/bin/
 install -m 644 "$SRC/linux/xenithos-console.desktop" "$SRC/linux/xenithos.desktop" /usr/share/applications/
-for app in volt doom tube photos hostmc; do
+for app in volt doom tube photos minenest; do
     if [ -f "$SRC/art/thumbs/$app.ximg" ]; then install -m 644 "$SRC/art/thumbs/$app.ximg" /usr/share/xenithos/apps/; fi
     if [ -f "$SRC/apps/$app/app.txt" ]; then install -m 644 "$SRC/apps/$app/app.txt" "/usr/share/xenithos/apps/$app.txt"; fi
 done
@@ -143,7 +150,9 @@ fi
 
 say "Setting up $USER_NAME"
 sudo -u "$USER_NAME" mkdir -p "$DATA/uda:/apps" "$DATA/uda:/xenith" "$HOME_DIR/.config/xenithos"
-for app in volt doom tube photos hostmc; do
+rm -f "$DATA/uda:/apps/hostmc.elf32" "$DATA/uda:/apps/hostmc.txt" "$DATA/uda:/apps/hostmc.ximg"
+if [ -f "$DATA/optional-apps/hostmc.txt" ]; then mv -f "$DATA/optional-apps/hostmc.txt" "$DATA/optional-apps/minenest.txt"; fi
+for app in volt doom tube photos minenest; do
     # One removed in the Store stays off the home screen: the Store kept its name and picture.
     if [ -f "$DATA/optional-apps/$app.txt" ]; then continue; fi
     sudo -u "$USER_NAME" ln -sfn "/usr/lib/xenithos/$app" "$DATA/uda:/apps/$app.elf32"

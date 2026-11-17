@@ -6,7 +6,7 @@
 # - Every time, it tells XFCE those launchers are safe to start: XFCE otherwise asks before
 #   starting any launcher on the desktop it hasn't been told about.
 # - Every time, it brings the Apps menu's entries for XenithOS Console's apps in step with
-#   XenithOS Console's home screen, and HostMC's icon on the desktop (console-apps menu).
+#   XenithOS Console's home screen, and MineNest's icon on the desktop (console-apps menu).
 # - It applies the person's choices from Settings that XFCE doesn't keep itself, sets the sound
 #   to a level that can be heard the first time, and says when updates are ready.
 LIB=/usr/lib/xenithos-desktop

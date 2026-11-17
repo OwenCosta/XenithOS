@@ -127,7 +127,7 @@ static void answer(const struct friend_row *p)
         static const char *const opts[] = {"Say yes", "Say no", "Decide later"};
         int c;
         snprintf(title, sizeof title, "%s wants to be friends", name);
-        c = ui_dialog(title, "Friends see each other online, what they're playing, and their HostMC servers.", opts, 3);
+        c = ui_dialog(title, "Friends see each other online, what they're playing, and their MineNest servers.", opts, 3);
         if (c == 0 && ask("accept", name, "Saying yes", NULL, 0, NULL, 0)) {
             sfx(SFX_SUCCESS);
             ui_toast_icon(ICON_FRIENDS);
@@ -197,7 +197,7 @@ static void draw_detail(int x, int y, int w, int h, int sel)
         gfx_str(FONT_HEAD, x + pad, y + pad + 118, C_TEXT, "Add a friend");
         gfx_wrap(FONT_BODY, x + pad, y + pad + 118 + gfx_line_h(FONT_HEAD) + 8, w - 2 * pad, 4, C_SUB,
                  "Type their gamertag and they get a request. Once they say yes, you see each other online, "
-                 "what you're playing, and each other's HostMC servers to join.", 5);
+                 "what you're playing, and each other's MineNest servers to join.", 5);
         return;
     }
     {
@@ -211,7 +211,7 @@ static void draw_detail(int x, int y, int w, int h, int sel)
                     y + pad + 18 + gfx_line_h(FONT_HEAD) + 8, c == C_DIM ? C_SUB : c, line, w - 2 * pad - asz - 42);
         ty = y + pad + asz + 30;
         if (p->rel == REL_IN) {
-            snprintf(line, sizeof line, "%s asked to be friends. Friends see each other online, what they're playing, and their HostMC servers.", p->name);
+            snprintf(line, sizeof line, "%s asked to be friends. Friends see each other online, what they're playing, and their MineNest servers.", p->name);
             gfx_wrap(FONT_BODY, x + pad, ty, w - 2 * pad, 4, C_SUB, line, 4);
         } else if (p->rel == REL_OUT) {
             snprintf(line, sizeof line, "You asked %s to be friends. They'll see it next time they're on.", p->name);

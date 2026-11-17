@@ -23,9 +23,9 @@
 # ~/.local/share/applications/xenithos-app-APP.desktop; console-menu.list says which group each
 # app goes in.
 #
-# HostMC also gets an icon on the desktop itself, next to Brave's and Files', while it's on the
-# home screen: xenithos-app-hostmc.desktop on the desktop, the same as its Apps menu entry. It's
-# put there the first time HostMC is on the home screen and goes when HostMC does. One you delete
+# MineNest also gets an icon on the desktop itself, next to Brave's and Files', while it's on the
+# home screen: xenithos-app-minenest.desktop on the desktop, the same as its Apps menu entry. It's
+# put there the first time MineNest is on the home screen and goes when MineNest does. One you delete
 # stays deleted, and one you change is yours (~/.config/xenithos/desktop-icons keeps track).
 set -u
 LIST=/usr/share/xenithos-desktop/console-apps.list
@@ -38,7 +38,7 @@ CHOSEN="${XDG_CONFIG_HOME:-$HOME/.config}/xenithos/console-apps"
 MENU="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 MENU_LIST=/usr/share/xenithos-desktop/console-menu.list
 ICONS=/usr/share/icons/XenithOS/scalable/apps
-ON_DESKTOP="hostmc"             # the apps with an icon on the desktop too
+ON_DESKTOP="minenest"             # the apps with an icon on the desktop too
 PLACED="${XDG_CONFIG_HOME:-$HOME/.config}/xenithos/desktop-icons"    # "APP SHA-256" of each icon put there
 DESK=$(xdg-user-dir DESKTOP 2>/dev/null)
 [ -n "$DESK" ] && [ "$DESK" != "$HOME" ] || DESK="$HOME/Desktop"
@@ -47,6 +47,12 @@ optional() { sed -n 's/^\([a-z0-9][a-z0-9_-]*\)\([[:space:]].*\)\{0,1\}$/\1/p' "
 is_optional() { optional | grep -qx -- "$1"; }
 about() { sed -n "s/^$1[[:space:]]\{1,\}//p" "$LIST" 2>/dev/null | head -n 1; }
 chosen() { grep -qx -- "$1" "$CHOSEN" 2>/dev/null; }
+
+# HostMC became MineNest: a choice made for HostMC carries over (before sync could take MineNest
+# off the home screen as never chosen).
+if grep -qx hostmc "$CHOSEN" 2>/dev/null && ! is_optional hostmc && is_optional minenest; then
+    { grep -vx -e hostmc -e minenest "$CHOSEN"; echo minenest; } > "$CHOSEN.new" && mv -f "$CHOSEN.new" "$CHOSEN"
+fi
 title() {
     local name="" f
     for f in "$APPS/$1.txt" "$KEPT/$1.txt" "$LIB/$1.txt" "$SHARE/$1.txt"; do
@@ -136,7 +142,9 @@ trust() {
 }
 desktop_icon() {                # APP, 1 when it's on the home screen and 0 when it isn't
     local app=$1 icon="$DESK/xenithos-app-$1.desktop" was
-    case " $ON_DESKTOP " in *" $app "*) ;; *) return 0 ;; esac
+    # An app that no longer gets an icon (HostMC, now MineNest) only ever has its old one taken
+    # away, and only if it's still as written.
+    case " $ON_DESKTOP " in *" $app "*) ;; *) set -- "$app" 0 ;; esac
     was=$(placed "$app")
     if [ "$2" = 1 ]; then
         if [ -z "$was" ]; then
@@ -186,6 +194,12 @@ menu() {
             rm -f "$file"
             desktop_icon "$app" 0
         fi
+    done
+    # Icons put on the desktop for an app that no longer gets one, even when its Apps menu entry
+    # has gone already.
+    for app in $(sed -n 's/ .*//p' "$PLACED" 2>/dev/null); do
+        [ -e "$APPS/$app.elf32" ] && case " $ON_DESKTOP " in *" $app "*) continue ;; esac
+        desktop_icon "$app" 0
     done
     return 0
 }

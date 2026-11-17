@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""A stand-in for `java -Xmx... -jar server.jar nogui`, so HostMC can be tried in the simulator
-(sim/run.sh with XSIM_HOSTMC=1) with nothing downloaded and no Java.
+"""A stand-in for `java -Xmx... -jar server.jar nogui`, so MineNest can be tried in the simulator
+(sim/run.sh with XSIM_MINENEST=1) and linux/test-minenest.sh with nothing downloaded and no Java:
+MineNest runs it as its java (MINENEST_JAVA).
 
 It says what a Minecraft server says, in the same log format: starting up, Done, two players
 joining (Steve, then Alex, who leaves after a while), a line of chat, and answers to the commands

@@ -9,4 +9,4 @@ volt     Game;ArcadeGame;                A light-trail game with a leaderboard o
 doom     Game;ActionGame;                The classic shooter
 tube     AudioVideo;Video;Player;        Videos from YouTube
 photos   Graphics;Viewer;Photography;    Your pictures, full screen
-hostmc   Game;                           Your own Minecraft server, run from this PC
+minenest Game;Network;                   Minecraft servers on this PC, with mods and plugins

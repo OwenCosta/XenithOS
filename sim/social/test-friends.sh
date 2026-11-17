@@ -4,10 +4,10 @@
 # profiles stand in for two consoles:
 #   1. Alice asks Bob Two by his gamertag (typed on a keyboard), in Friends.
 #   2. Bob Two gets the request as a toast at start-up, and says yes in Friends.
-#   3. His HostMC server can be reached from the internet, and he plays Minecraft on a PC (the
+#   3. His MineNest server can be reached from the internet, and he plays Minecraft on a PC (the
 #      guide's Return home leaves it running).
 #   4. Alice sees him on: the home screen, the Cloud screen, and Friends with the server to join.
-#   5. Bob Two opens HostMC with the server stopped: friends see HostMC, and the address goes.
+#   5. Bob Two opens MineNest with the server stopped: friends see MineNest, and the address goes.
 #   6. Bob Two turns off "Show friends what I'm playing", then turns his console off.
 # Each step is checked through XenithOS Cloud's API. Screenshots go to sim/out/friends-*.
 #
@@ -57,7 +57,7 @@ check "friends, on both sides" 'friends_of "$A" | grep -q "^Bob Two|[^|]*|friend
 check "screenshots" 'shot friends-answer/fb_home_request && shot friends-answer/fb_friends_now'
 
 echo "== 3. Bob Two's server can be reached, and he plays Minecraft on a PC"
-api post /v1/hello "token=$B" app=hostmc mc=cheery-panda-61.mc.example.net:25566 > /dev/null   # as HostMC says it
+api post /v1/hello "token=$B" app=minenest mc=cheery-panda-61.mc.example.net:25566 > /dev/null   # as MineNest says it
 sim friends-play friends_play.txt "$T/bob.txt" XSIM_KIND=pc XSIM_GUIDE=1 XSIM_OTHER=minecraft
 check "Alice sees him playing Minecraft, and his server's address" \
     'friends_of "$A" | grep -q "^Bob Two|[^|]*|friend|1|minecraft|Minecraft|0|cheery-panda-61.mc.example.net:25566$"'
@@ -68,9 +68,13 @@ check "Bob Two sees Alice on (her console said hello)" 'friends_of "$B" | grep -
 check "still friends (Remove friend was cancelled)" 'friends_of "$A" | grep -q "^Bob Two|[^|]*|friend|"'
 check "screenshots" 'shot friends-online/fo_home && shot friends-online/fo_cloud && shot friends-online/fo_friend'
 
-echo "== 5. Bob Two opens HostMC, with his server stopped"
-sim friends-hostmc friends_hostmc.txt "$T/bob.txt" XSIM_BIN=xhostmc XSIM_KIND=pc XSIM_THREAD=1 XSIM_HOSTMC=1
-check "Alice sees him in HostMC, and no server to join" 'friends_of "$A" | grep -q "^Bob Two|[^|]*|friend|1|hostmc|HostMC|0|$"'
+echo "== 5. Bob Two opens MineNest, with his server stopped"
+if [ -x "${MINENEST_BIN:-}" ]; then
+    sim friends-minenest friends_minenest.txt "$T/bob.txt" XSIM_BIN=xminenest XSIM_KIND=pc XSIM_THREAD=1 XSIM_MINENEST=1
+    check "Alice sees him in MineNest, and no server to join" 'friends_of "$A" | grep -q "^Bob Two|[^|]*|friend|1|minenest|MineNest|0|$"'
+else
+    echo "  skip  MineNest needs its own program: MINENEST_BIN"
+fi
 
 echo "== 6. Bob Two stops showing what he plays, then turns his console off"
 sim friends-sharing friends_sharing.txt "$T/bob.txt"

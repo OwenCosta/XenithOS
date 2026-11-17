@@ -1,6 +1,0 @@
-# Friends, on the second console as a PC (Bob Two): HostMC opened with its server stopped, so it
-# tells XenithOS Cloud it's open and that the server can't be reached. Part of
-# sim/social/test-friends.sh, with XSIM_BIN=xhostmc XSIM_KIND=pc XSIM_THREAD=1 XSIM_HOSTMC=1.
-wait 90
-shot fh_hostmc
-quit

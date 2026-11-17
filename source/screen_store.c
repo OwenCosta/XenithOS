@@ -280,7 +280,7 @@ static void add_store_rows(char *body)
 /* XenithOS's apps that only PCs have, so the Store's list (made for the Xbox) leaves them out.
  * Listed when they're built here, with the version and picture this machine has for them. */
 static const struct { const char *id, *name, *desc; } pc_only[] = {
-    {"hostmc", "HostMC", "Host a Minecraft: Java Edition server, with playit.gg for friends who aren't on your network."},
+    {"minenest", "MineNest", "Minecraft servers on this PC: Paper, Fabric, NeoForge and more, mods and plugins from Modrinth, and ways for friends to join."},
 };
 
 static void set_icon(struct item *it, const char *data, int len);

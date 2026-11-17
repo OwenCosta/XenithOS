@@ -1,0 +1,78 @@
+# MineNest with a stand-in server (sim/minenest/java, as its java) and its own program: starting
+# the server made already, players joining, a command, the pages, a backup while it runs, and
+# stopping. Nothing is downloaded. It runs in real time, since MineNest and the stand-in do:
+#   XSIM_BIN=xminenest XSIM_KIND=pc XSIM_THREAD=1 XSIM_MINENEST=1 MINENEST_BIN=path/to/minenest \
+#     XSIM_TYPE="say Hello from MineNest|" sim/run.sh sim/scripts/minenest.txt minenest
+wait 90
+shot server_stopped
+# Server page: Start
+press a
+wait 10
+shot server_page
+press a
+wait 60
+shot starting
+wait 420
+shot running
+# Console: a command typed (XSIM_TYPE)
+press b
+press down
+wait 20
+press a
+wait 40
+shot console
+press a
+wait 120
+shot console_command
+press b
+# Plugins
+press down
+wait 40
+shot plugins
+# Players
+press down
+wait 40
+shot players
+# Settings: difficulty to Normal
+press down
+wait 30
+press a
+press down
+press right
+wait 60
+shot settings
+press b
+# Version
+press down
+wait 30
+shot version
+# World: a backup while it runs
+press down
+wait 30
+press a
+press a
+wait 240
+shot world
+press b
+# Internet
+press down
+wait 40
+shot internet
+# Back to Server and stop it
+press up
+press up
+press up
+press up
+press up
+press up
+press up
+wait 20
+press a
+press a
+wait 240
+shot stopped
+press b
+wait 20
+press b
+wait 40
+quit

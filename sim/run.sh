@@ -70,13 +70,17 @@ if [ -n "$XSIM_WAD" ]; then
     # shellcheck disable=SC2086
     for w in $XSIM_WAD; do cp "$w" "$work/uda:/doom/"; done
 fi
-# XSIM_HOSTMC=1: HostMC with a stand-in for the Minecraft server (sim/hostmc/java) and what it
-# would have downloaded already in place (sim/hostmc/data), so nothing is downloaded
-if [ -n "$XSIM_HOSTMC" ]; then
-    mkdir -p "$work/hostmc"
-    cp -r "$here/hostmc/data/." "$work/hostmc/"
-    echo "stand-in" > "$work/hostmc/server/server.jar"
-    export HOSTMC_JAVA="$here/hostmc/java"
+# XSIM_MINENEST=1: MineNest's own program (MINENEST_BIN, built from github.com/OwenCosta/minenest)
+# in a folder of its own, with a stand-in for the Minecraft server (sim/minenest/java) and nothing
+# downloaded (MINENEST_FAKE_INSTALL), and one server made already ("My Server", Paper).
+if [ -n "${XSIM_MINENEST:-}" ]; then
+    if [ ! -x "${MINENEST_BIN:-}" ]; then echo "XSIM_MINENEST needs MINENEST_BIN: the minenest program"; exit 2; fi
+    export MINENEST_HOME="$work/minenest" MINENEST_JAVA="$here/minenest/java" MINENEST_FAKE_INSTALL=1
+    export MINENEST_CLOUD=http://127.0.0.1:9                # no XenithOS Cloud for it
+    mkdir -p "$MINENEST_HOME"
+    echo "{\"api_port\": $((41000 + RANDOM % 8000))}" > "$MINENEST_HOME/minenest.json"
+    # The stand-in isn't Minecraft, so there's no EULA to agree to: its eula.txt is the test's.
+    "$MINENEST_BIN" create "My Server" -t paper -v 26.3 --agree-eula > /dev/null
 fi
 
 # XSIM_KIND=pc: XenithOS's own apps as a PC has them, built in a folder standing in for
@@ -84,7 +88,7 @@ fi
 # XSIM_UNINSTALLED="doom volt": ones that are built but not on the home screen.
 if [ "$XSIM_KIND" = pc ]; then
     mkdir -p "$work/lib"
-    for app in volt doom tube photos hostmc; do
+    for app in volt doom tube photos minenest; do
         : > "$work/lib/$app"
         [ -f "$here/../apps/$app/app.txt" ] && cp "$here/../apps/$app/app.txt" "$work/lib/$app.txt"
         [ -f "$here/../art/thumbs/$app.ximg" ] && cp "$here/../art/thumbs/$app.ximg" "$work/lib/$app.ximg"
@@ -103,16 +107,8 @@ cd "$work"
 status=0
 XSIM_SCRIPT="$script" XSIM_OUT="$work/out" ASAN_OPTIONS=detect_leaks=0 "$here/$bin" $XSIM_ARGS || status=$?
 
-# A server HostMC left running (a script that didn't stop it): stopped, once its PID is
-# checked to be the process running in that server folder.
-pidfile="$work/hostmc/server/hostmc.pid"
-if [ -f "$pidfile" ]; then
-    pid=$(grep '^pid=' "$pidfile" | cut -d= -f2)
-    if [ -n "$pid" ] && [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "$(realpath "$work/hostmc/server")" ]; then
-        echo "stopping the server HostMC left running (pid $pid)"
-        kill "$pid" || true
-    fi
-fi
+# MineNest's program, and any server a script left running, stop.
+if [ -n "${XSIM_MINENEST:-}" ]; then "$MINENEST_BIN" quit > /dev/null 2>&1 || true; sleep 2; fi
 
 mkdir -p "$here/out/$name"
 cp "$work"/out/* "$here/out/$name/"

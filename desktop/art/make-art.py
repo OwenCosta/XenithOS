@@ -124,13 +124,12 @@ def app_icon_svgs():
                        + '<g clip-path="url(#frame)"><circle cx="41.5" cy="26" r="4.5" fill="%s"/>' % red
                        + '<path d="M12 47l13-18 13 18z" fill="%s"/><path d="M30 47l12-11 12 11z" fill="%s"/></g>' % (white, grey))
 
-    # HostMC: a block (the server), with a red light on it.
-    found["hostmc"] = (APP_TILE % (dark, edge)
-                       + '<g stroke="%s" stroke-width="1.2" stroke-linejoin="round">' % dark
-                       + '<path d="M32 14l17 9-17 9-17-9z" fill="%s"/>' % white
-                       + '<path d="M15 23l17 9v19l-17-9z" fill="%s"/>' % grey
-                       + '<path d="M49 23l-17 9v19l17-9z" fill="#565d69"/></g>'
-                       + '<circle cx="42" cy="38.5" r="2.6" fill="%s"/>' % red)
+    # MineNest: its pixel icon, a grass block in a nest (github.com/OwenCosta/minenest).
+    nest = [(1, 9, 14, 5, '7a5230'), (0, 10, 1, 3, '7a5230'), (15, 10, 1, 3, '7a5230'), (2, 9, 2, 1, '9c6b3f'), (7, 10, 3, 1, '9c6b3f'), (12, 9, 2, 1, '9c6b3f'), (3, 12, 2, 1, '5c3c22'), (10, 12, 2, 1, '5c3c22'), (4, 2, 8, 8, '8b5a33'), (4, 2, 8, 3, '6fb04a'), (4, 5, 2, 1, '6fb04a'), (8, 5, 1, 1, '6fb04a'), (10, 5, 2, 1, '6fb04a'), (5, 3, 1, 1, '8fd068'), (9, 2, 1, 1, '8fd068'), (6, 7, 1, 1, '6b4426'), (9, 8, 1, 1, '6b4426')]
+    found["minenest"] = (APP_TILE % (dark, edge) + '<g shape-rendering="crispEdges">'
+                         + "".join('<rect x="%g" y="%g" width="%g" height="%g" fill="#%s"/>'
+                                   % (12 + 2.5 * x, 10 + 2.5 * y, 2.5 * w, 2.5 * h, c) for x, y, w, h, c in nest)
+                         + "</g>")
 
     head = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">'
     return {app: head + body + "</svg>\n" for app, body in found.items()}
