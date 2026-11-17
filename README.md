@@ -7,8 +7,8 @@ its Store also installs apps from Flathub (Roblox through Sober, Minecraft, Kodi
 with its games. It's written in C: on the Xbox on [libxenon](https://github.com/Free60Project/libxenon), on PCs
 and Pis on SDL2.
 
-XenithOS Cloud is the free online service every copy uses for profiles, the Store, news, leaderboards and
-YouTube. Nothing to set up: the downloads come with its address.
+XenithOS Cloud is the free online service every copy uses for profiles, friends, cloud saves, achievements,
+the Store, news, leaderboards and YouTube. Nothing to set up: the downloads come with its address.
 
 I'm building it on a 360 S (Trinity board). The 0.4 redesign runs on the real console. 0.5.0 (sound fixes, faster
 app starts, PC and Pi support, Tube, the new avatar editor) has so far been tested in the simulator and on Linux.
@@ -17,18 +17,29 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
 
 **System** (`source/`)
 - Start-up screen with the XenithOS chime, which is synthesized in code like every other sound
-- Home: your profile and avatar at the top, five tiles (Apps, Store, Cloud, Profile, Settings), and a row of
-  installed apps with thumbnails
+- Home: your profile and avatar at the top, seven tiles (Apps, Store, Cloud, Friends, Profile, Settings,
+  Feedback), and a row of installed apps with thumbnails
 - Apps: a thumbnail grid of everything installed
 - Store: apps, game data and system updates from XenithOS Cloud. Its lists come signed by XenithOS Cloud, and
   each download's SHA-256 is checked against them before anything is written. Pick several with X and START
   downloads them one after another. On PCs it has sections: apps from Flathub, Steam and games on Steam, and
   XenithOS.
-- Cloud: who's playing, XenithOS news, and the VOLT leaderboard with avatars
+- Cloud: your friends who are on, XenithOS news, and the VOLT leaderboard with avatars
+- Friends: ask someone by their gamertag and they say yes on their own console. Friends see who's on and what
+  they're playing (also as a notification when one comes on), and the address of a friend's HostMC server to
+  join. "Show friends what I'm playing" in Settings keeps that to yourself.
 - Profile: a gamertag and passcode, saved to XenithOS Cloud so it follows you to any machine
+- Cloud saves: DOOM's saves and settings, and XenithOS's own (interface sounds, the start-up chime), follow
+  your profile between the Xbox and your PCs. Each profile has its own folder on a machine, so people
+  sharing a console never mix saves. If a save changed on two machines before they matched up, XenithOS
+  asks which one to keep; nothing is replaced without asking. Profile, Cloud saves shows what's kept (up to
+  4 MB) and deletes it; Settings turns them off for one machine.
+- Achievements: fifteen across VOLT, DOOM, Tube and HostMC, earned on the machine (offline too: they wait on
+  the stick until XenithOS is online) and kept on your profile. Profile shows yours, the Cloud screen the ones
+  just earned by anyone, and the website everyone's.
 - Avatar editor: thirteen parts in three tabs (face, hair, outfit), colour swatches, random looks
-- Settings: volume, interface sounds, start-up chime, crash reports, network, system info (with start-up times
-  and sound stats), controller test, about
+- Settings: volume, interface sounds, start-up chime, crash reports, showing friends what you play, cloud saves
+  on this machine, network, system info (with start-up times and sound stats), controller test, about
 - Crash reports: when XenithOS or one of its apps crashes, where it stopped is saved, and when XenithOS is back
   it asks to send a crash report to the people who make it (or sends it by itself, if Settings says to). No
   gamertag goes with one unless you add it, and nothing from your home folder.
@@ -36,7 +47,8 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
 **Apps** (`apps/`)
 - VOLT: a light-trail game. Scores go to your profile on the leaderboard.
 - DOOM: [doomgeneric](https://github.com/ozkl/doomgeneric) with controller support and sound effects. Get
-  Freedoom from the Store, or copy your own `doom1.wad` / `doom2.wad` into a `doom/` folder.
+  Freedoom from the Store, or copy your own `doom1.wad` / `doom2.wad` into a `doom/` folder. Signed in, its
+  saves and settings are your profile's (`doom/profiles/<gamertag>/`) and follow you as cloud saves.
 - Tube: search and watch YouTube. XenithOS Cloud turns the video into small JPEG frames and plain sound that
   even the Xbox can play. Needs a XenithOS profile.
 - Photos: your pictures (JPEG, PNG, BMP, GIF) from a `photos` folder on the USB stick, or `~/Pictures` on a
@@ -44,7 +56,8 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
 - HostMC (PCs and Pis): a Minecraft: Java Edition server for you and your friends, Minecraft's own or Paper.
   Start and stop it, see who's on, type commands, change its settings, back the world up, and with
   [playit.gg](https://playit.gg) turned on, let friends join from anywhere. It keeps running after you leave
-  HostMC, so you can play on it. See [linux/README.md](linux/README.md#hostmc-a-minecraft-server).
+  HostMC, so you can play on it. Your friends on XenithOS see its address in Friends while it's reachable.
+  See [linux/README.md](linux/README.md#hostmc-a-minecraft-server).
 
 | DOOM control | |
 |---|---|
@@ -125,7 +138,7 @@ updates all of it (ffmpeg, Deno, the yt-dlp standalone build, the plugin and the
 download against its published checksum.
 
 ```bash
-python3 server/xenith_cloud.py --selftest      # 90 checks, no network needed
+python3 server/xenith_cloud.py --selftest      # 192 checks, no network needed
 ```
 
 Profiles: passcodes are stored as salted PBKDF2 hashes and sign-in tokens as SHA-256 hashes, so the state
@@ -150,6 +163,23 @@ or the bug reports' webhook). Read them with the admin key:
 `curl -H "X-Xenith-Key: $XENITH_ADMIN_KEY" http://<server>/v1/crash` lists them, `/v1/crash/<id>` is one. On a
 PC a report names the function and source line it stopped at. An Xbox report has addresses: `xenon-addr2line -f
 -e xenith.elf <address>` (or the app's `.elf`) with that release's unstripped build turns them into names.
+
+Friends: requests only become friends once the other person says yes, a "no" stops the same person asking
+again for a week, and requests are rate limited per profile. Consoles say hello with what's running when
+they start something (and every minute or so on the home screen); only friends see it. What someone plays is
+kept in memory, never in the state file, and with "Show friends what I'm playing" off it isn't even sent. A
+HostMC server's address is shown to friends while HostMC says people on the internet can reach it, and for a
+day after.
+
+Cloud saves: each file is kept as it came, in `saves/` in the state folder (in folders named by a random id,
+not the gamertag), up to 512 KB a file and 4 MB a profile. Every file has a revision: a machine says which one
+its copy was last in step with, and XenithOS Cloud refuses a change based on an older one instead of
+replacing what another machine sent, so XenithOS can ask which to keep. Deleting leaves a marker, so the
+machines that still have a copy keep it without sending it back.
+
+Achievements: the set is in `ACHIEVEMENTS` (the console's notifications name them from `shared/social.c`, and
+the self-test checks the two agree). They're public like the leaderboards: each profile's, with when it was
+earned, and the newest fifty anyone earned.
 
 Running your own copy (the unit runs as a throwaway user on a read-only system):
 

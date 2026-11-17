@@ -1,0 +1,24 @@
+# Friends, on the first console again (Alice), with Bob Two on, playing Minecraft and hosting a
+# server with HostMC: the home screen, the Cloud screen's friends online, and Bob Two in Friends.
+# Part of sim/social/test-friends.sh.
+wait 236
+shot fo_home
+press right
+press right
+press a
+wait 60
+shot fo_cloud
+press b
+wait 20
+press right
+press a
+wait 40
+press down
+wait 15
+shot fo_friend
+press a
+wait 20
+shot fo_remove_ask
+press b
+wait 20
+quit

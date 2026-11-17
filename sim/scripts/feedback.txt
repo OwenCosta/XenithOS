@@ -7,6 +7,7 @@ press right
 press right
 press right
 press right
+press right
 wait 25
 shot home_feedback
 press a

@@ -11,10 +11,11 @@
 #include "icons.h"
 #include "net.h"
 #include "screens.h"
+#include "social.h"
 #include "theme.h"
 #include "ui.h"
 
-static char best[16], rank[16];
+static char best[16], rank[16], earned[8];
 
 static void pretty_date(const char *iso, char *out, int n)
 {
@@ -72,6 +73,7 @@ static void take_session(struct http_resp *r)
     kv_get(r->body, "avatar", prof.avatar, sizeof prof.avatar);
     if (!avatar_valid(prof.avatar)) strcpy(prof.avatar, AVATAR_DEFAULT);
     kv_get(r->body, "joined", prof.joined, sizeof prof.joined);
+    prof.sharing = 1;                       /* until XenithOS Cloud says otherwise (cloud_sync) */
     prof.signed_in = prof.name[0] && prof.token[0];
     profile_save();
 }
@@ -143,13 +145,21 @@ static void load_stats(void)
 {
     struct http_resp r;
     char form[96];
-    best[0] = rank[0] = 0;
+    best[0] = rank[0] = earned[0] = 0;
     if (!prof.signed_in || !cfg.server[0] || !net_is_up()) return;
+    social_flush();                         /* achievements earned while offline count too */
     snprintf(form, sizeof form, "token=%s", prof.token);
     if (cloud_post("/v1/accounts/me", form, &r) == 200) {
+        char v[8];
         kv_get(r.body, "volt_best", best, sizeof best);
         kv_get(r.body, "volt_rank", rank, sizeof rank);
+        kv_get(r.body, "achievements", earned, sizeof earned);
         kv_get(r.body, "joined", prof.joined, sizeof prof.joined);
+        kv_get(r.body, "sharing", v, sizeof v);
+        if (v[0] && (atoi(v) != 0) != prof.sharing) {
+            prof.sharing = atoi(v) != 0;
+            profile_save();
+        }
     }
     http_free(&r);
 }
@@ -198,7 +208,7 @@ struct action { int icon; const char *label; const char *sub; };
 
 static int action_list(int x, int y, int w, const struct action *a, int n, int sel, float hl)
 {
-    int i, rowh = 84;
+    int i, rowh = n > 3 ? 62 : n > 2 ? 76 : 84;
     for (i = 0; i < n; i++) {
         int ry = y + i * rowh, s = i == sel;
         uint32_t bg = s ? C_SEL : C_SURFACE;
@@ -208,9 +218,9 @@ static int action_list(int x, int y, int w, const struct action *a, int n, int s
             gfx_fill_rrect((float)x, (float)ry, (float)w, rowh - 10.0f, 10, C_SURFACE, 255);
             gfx_stroke_rrect((float)x, (float)ry, (float)w, rowh - 10.0f, 10, 1, C_LINE, 255);
         }
-        icon_draw(a[i].icon, x + 40.0f, ry + (rowh - 10) / 2.0f, 34, s ? 0xFFFFFF : C_SUB, bg);
-        gfx_str(FONT_BODY_SB, x + 76, ry + 12, C_TEXT, a[i].label);
-        gfx_str(FONT_SMALL, x + 76, ry + 42, C_SUB, a[i].sub);
+        icon_draw(a[i].icon, x + 40.0f, ry + (rowh - 10) / 2.0f, rowh > 70 ? 34 : 30, s ? 0xFFFFFF : C_SUB, bg);
+        gfx_str(FONT_BODY_SB, x + 76, ry + (rowh - 10) / 2 - (rowh > 70 ? 25 : 23), C_TEXT, a[i].label);
+        gfx_str(FONT_SMALL, x + 76, ry + (rowh - 10) / 2 + (rowh > 70 ? 5 : 2), C_SUB, a[i].sub);
     }
     return n * rowh;
 }
@@ -233,10 +243,12 @@ void screen_profile(void)
         };
         static const struct action member[] = {
             {ICON_PALETTE, "Change avatar", "Edit your look"},
+            {ICON_TROPHY, "Achievements", "Earned in VOLT, DOOM, Tube and HostMC"},
+            {ICON_CLOUD, "Cloud saves", "Saves and settings that follow you between machines"},
             {ICON_SIGN_OUT, "Sign out", "Play as a guest on this console"},
         };
         const struct action *acts = prof.signed_in ? member : guest;
-        int n = 2, top = HEADER_H + 16, size = SCR_H - top - 120, ax, d;
+        int n = prof.signed_in ? 4 : 2, top = HEADER_H + 16, size = SCR_H - top - 120, ax, d;
         char line[80], date[32];
         if (size > 360) size = 360;
         ax = M + size + 60;
@@ -251,7 +263,10 @@ void screen_profile(void)
                 if (sel == 0) create_profile(); else sign_in();
                 if (prof.signed_in) load_stats();
             } else {
-                if (sel == 0) change_avatar(); else sign_out();
+                if (sel == 0) change_avatar();
+                else if (sel == 1) { screen_achievements(); load_stats(); }
+                else if (sel == 2) screen_saves();
+                else sign_out();
             }
             sel = 0;
             ui_fade_in();
@@ -270,15 +285,24 @@ void screen_profile(void)
                 snprintf(line, sizeof line, "Joined %s", date);
                 gfx_str(FONT_BODY, ax, y, C_SUB, line);
             }
-            y += 50;
-            ui_panel(ax, y, 220, 92);
-            gfx_str(FONT_SMALL, ax + 20, y + 16, C_SUB, "VOLT best");
-            gfx_str(FONT_TITLE, ax + 20, y + 40, C_TEXT, best[0] && strcmp(best, "0") ? best : "-");
-            ui_panel(ax + 236, y, 220, 92);
-            gfx_str(FONT_SMALL, ax + 256, y + 16, C_SUB, "Leaderboard");
-            snprintf(line, sizeof line, rank[0] && strcmp(rank, "0") ? "#%s" : "-", rank);
-            gfx_str(FONT_TITLE, ax + 256, y + 40, C_TEXT, line);
-            action_list(ax, y + 124, SCR_W - M - ax, acts, n, sel, hl);
+            y += 46;
+            {
+                /* VOLT best, the leaderboard, and achievements, side by side */
+                int pw = (SCR_W - M - ax - 32) / 3;
+                if (pw > 220) pw = 220;
+                ui_panel(ax, y, pw, 92);
+                gfx_str(FONT_SMALL, ax + 20, y + 16, C_SUB, "VOLT best");
+                gfx_str(FONT_TITLE, ax + 20, y + 40, C_TEXT, best[0] && strcmp(best, "0") ? best : "-");
+                ui_panel(ax + pw + 16, y, pw, 92);
+                gfx_str(FONT_SMALL, ax + pw + 36, y + 16, C_SUB, "Leaderboard");
+                snprintf(line, sizeof line, rank[0] && strcmp(rank, "0") ? "#%s" : "-", rank);
+                gfx_str(FONT_TITLE, ax + pw + 36, y + 40, C_TEXT, line);
+                ui_panel(ax + 2 * (pw + 16), y, pw, 92);
+                gfx_str(FONT_SMALL, ax + 2 * (pw + 16) + 20, y + 16, C_SUB, "Achievements");
+                snprintf(line, sizeof line, "%d of %d", atoi(earned), social_achievement_total());
+                gfx_str(FONT_TITLE, ax + 2 * (pw + 16) + 20, y + 40, C_TEXT, line);
+            }
+            action_list(ax, y + 110, SCR_W - M - ax, acts, n, sel, hl);
         } else {
             int y = top + 10;
             gfx_str(FONT_HEAD, ax, y, C_TEXT, "Guest");

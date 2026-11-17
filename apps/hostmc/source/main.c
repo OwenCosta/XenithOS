@@ -1538,6 +1538,7 @@ int main(int argc, char **argv)
         int px = M + 252, py = HEADER_H + 4, pw = SCR_W - M - px, ph = SCR_H - py - 66;
         ui_poll();
         hm_frame();
+        share_poll();
         if (sv.restart && sv.state == SV_STOPPED) {
             sv.restart = 0;
             do_start();

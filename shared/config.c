@@ -10,7 +10,7 @@
 #include "platform.h"
 
 struct xenith_config cfg = {.name = "PLAYER"};
-struct xenith_settings st = {80, 1, 1, 1, 0, ""};
+struct xenith_settings st = {80, 1, 1, 1, 0, "", 1};
 struct xenith_profile prof;
 
 static void trim(char *s)
@@ -170,6 +170,7 @@ static void on_settings(const char *k, const char *v)
     else if (!strcmp(k, "last_inbox")) st.last_inbox = atoi(v);
     else if (!strcmp(k, "last_app")) snprintf(st.last_app, sizeof st.last_app, "%s", v);
     else if (!strcmp(k, "crash_reports")) st.crash_reports = atoi(v) != 0;
+    else if (!strcmp(k, "cloud_saves")) st.cloud_saves = atoi(v) != 0;
 }
 
 void settings_load(void)
@@ -187,8 +188,9 @@ void settings_save(void)
 {
     FILE *f = open_write(XENITH_SETTINGS_PATH);
     if (!f) return;
-    fprintf(f, "# Written by XenithOS\nvolume=%d\nui_sounds=%d\nboot_sound=%d\nauto_connect=%d\nlast_inbox=%d\nlast_app=%s\n",
-            st.volume, st.ui_sounds, st.boot_sound, st.auto_connect, st.last_inbox, st.last_app);
+    fprintf(f, "# Written by XenithOS\nvolume=%d\nui_sounds=%d\nboot_sound=%d\nauto_connect=%d\nlast_inbox=%d\nlast_app=%s\n"
+               "cloud_saves=%d\n",
+            st.volume, st.ui_sounds, st.boot_sound, st.auto_connect, st.last_inbox, st.last_app, st.cloud_saves);
     fprintf(f, "crash_reports=%d\n", st.crash_reports);
     fclose(f);
 }
@@ -201,11 +203,13 @@ static void on_profile(const char *k, const char *v)
     else if (!strcmp(k, "token")) copy_alnum(prof.token, sizeof prof.token, v, 0);
     else if (!strcmp(k, "avatar")) snprintf(prof.avatar, sizeof prof.avatar, "%s", v);
     else if (!strcmp(k, "joined")) snprintf(prof.joined, sizeof prof.joined, "%s", v);
+    else if (!strcmp(k, "sharing")) prof.sharing = atoi(v) != 0;
 }
 
 void profile_load(void)
 {
     memset(&prof, 0, sizeof prof);
+    prof.sharing = 1;
     read_kv(XENITH_PROFILE_PATH, on_profile);
     if (!avatar_valid(prof.avatar)) strcpy(prof.avatar, AVATAR_DEFAULT);
     prof.signed_in = prof.name[0] && prof.token[0];
@@ -216,7 +220,8 @@ void profile_save(void)
     FILE *f = open_write(XENITH_PROFILE_PATH);
     if (!f) return;
     fprintf(f, "# Written by XenithOS. Keep this file private: the token signs you in.\n"
-               "name=%s\ntoken=%s\navatar=%s\njoined=%s\n", prof.name, prof.token, prof.avatar, prof.joined);
+               "name=%s\ntoken=%s\navatar=%s\njoined=%s\nsharing=%d\n", prof.name, prof.token, prof.avatar, prof.joined,
+            prof.sharing);
     fclose(f);
 }
 

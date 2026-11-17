@@ -13,6 +13,7 @@ wait 30
 press right
 press right
 press right
+press right
 press a
 wait 40
 shot route_settings

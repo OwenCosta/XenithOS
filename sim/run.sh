@@ -12,10 +12,17 @@ name="$2"
 server="${3:-}"
 
 work="$HOME/.xsim/$name"
-rm -rf "$work"
-mkdir -p "$work/uda:"
-cp -r "$here/../usb/." "$work/uda:/"
+# XSIM_KEEP=1: the same stick as the last run with this name (a console used again), else a fresh one
+if [ "$XSIM_KEEP" = 1 ] && [ -d "$work/uda:" ]; then
+    rm -rf "$work/out"
+else
+    rm -rf "$work"
+    mkdir -p "$work/uda:"
+    cp -r "$here/../usb/." "$work/uda:/"
+fi
 mkdir -p "$work/uda:/xenith"
+# XSIM_UDA: a folder of files to put on the stick as well (saves, say)
+[ -n "$XSIM_UDA" ] && cp -r "$XSIM_UDA"/. "$work/uda:/"
 {
     echo "server=$server"
     echo "name=SIM"

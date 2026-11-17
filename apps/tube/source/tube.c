@@ -26,6 +26,7 @@
 #include "net.h"
 #include "platform.h"
 #include "handoff.h"
+#include "social.h"
 #include "startlog.h"
 #include "theme.h"
 #include "ui.h"
@@ -476,6 +477,8 @@ static void fetch(void)
     http_free(&r);
 }
 
+static int video_started;                   /* play_from() got a stream going */
+
 /* Play from second `at`. Returns the second it stopped at (or -1 when the video ended or
  * the player was closed), so seeking can restart from there. */
 static int play_from(const struct result *it, int at, int *closed)
@@ -485,6 +488,7 @@ static int play_from(const struct result *it, int at, int *closed)
     ui_busy_begin("Starting the video", it->title);
     if (!start_session(it->id, at)) { ui_busy_end(); player_reset(); *closed = 1; return -1; }
     ui_busy_end();
+    video_started = 1;
     if (!pl.title[0]) snprintf(pl.title, sizeof pl.title, "%s", it->title);
     if (!pl.duration) pl.duration = it->seconds;
     audio_stream_open();
@@ -535,8 +539,15 @@ static int play_from(const struct result *it, int at, int *closed)
 
 static void play(const struct result *it)
 {
-    int at = 0, closed = 0;
-    while ((at = play_from(it, at, &closed)) >= 0 && !closed) { }
+    int at = 0, closed = 0, skips = 0;
+    video_started = 0;
+    while ((at = play_from(it, at, &closed)) >= 0 && !closed) skips++;
+    if (video_started) {                     /* achievements: kept on the stick, sent now */
+        int any = social_earn("tube-first");
+        if (social_count("tube-videos", 1) >= 10) any |= social_earn("tube-ten");
+        if (!closed && !skips) any |= social_earn("tube-end");     /* to the end, nothing skipped */
+        if (any) social_flush();
+    }
 }
 
 /* ------------------------------------------------------------------- main */
@@ -621,6 +632,7 @@ int main(int argc, char **argv)
         draw_list();
         ui_end_frame();
         if (!started) { started = 1; startlog_ready("TUBE"); }
+        social_tick("tube", NULL);           /* friends keep seeing Tube while it's open */
 
         /* Fill in one missing thumbnail per frame, keeping the screen drawn meanwhile. */
         for (i = top_row * COLS; i < nresults && i < (top_row + 3) * COLS; i++)

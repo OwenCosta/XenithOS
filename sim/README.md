@@ -20,7 +20,8 @@ for Cloudflare's edge and tunnel, with certificates from a test authority it mak
 Xbox, and the server's log to see which way each request came. Screenshots go to `sim/out/https`.
 
 Environment: `XSIM_KEY` (console key for the inbox), `XSIM_PROFILE` (a profile.txt to boot signed in),
-`XSIM_BIN` (`xsim` or `xvolt`).
+`XSIM_BIN` (`xsim` or `xvolt`), `XSIM_KEEP=1` (the stick as the last run with that name left it, like a
+console used again), `XSIM_UDA` (a folder of files to put on the stick too).
 
 Checks for things that only exist on the console:
 
@@ -65,6 +66,22 @@ More switches:
 - `sim/hostmc/test-vps.sh` runs HostMC's own-VPS route through the `hostmc_vps*.txt` scripts, with a private
   sshd (run as you, on spare ports) standing in for the VPS, and checks each step; screenshots go to
   `sim/out/hostmc-vps`.
+- `sim/social/test-friends.sh` runs friends between two consoles: a XenithOS Cloud of its own (on port 18795,
+  `XSIM_CLOUD_PORT` for another), two profiles, and simulator runs with one or the other (`friends_*.txt`):
+  asking by gamertag, the request at start-up and saying yes, a friend playing Minecraft on a PC while their
+  HostMC server can be reached, the home screen, Cloud and Friends showing it, and "Show friends what I'm
+  playing" turned off. Each step is checked through XenithOS Cloud's API; screenshots go to
+  `sim/out/friends-*`. `sim/social/cloud.py` makes the profiles and does the API calls.
+- `sim/social/test-saves.sh` runs cloud saves between an Xbox and a PC signed in to one profile, each with a
+  stick kept between its runs (`saves_*.txt`): DOOM saves from before profiles had their own folder going
+  up, the PC getting them, a save changed on both (the clash waits for DOOM, which asks), XenithOS's settings
+  following the profile, and a save deleted from XenithOS Cloud staying on both machines. It checks the
+  sticks and the API; screenshots go to `sim/out/saves-*`. DOOM itself isn't started (the simulator can't),
+  so its saves are stand-ins with a save's name in the first 24 bytes.
+- `sim/social/test-achievements.sh` runs achievements: ones an offline Xbox earned going up when XenithOS
+  starts, Tube's against stand-ins for yt-dlp and ffmpeg (`tube_achieve.txt`; the test server's requests to
+  anywhere else go to a closed port), HostMC's with its stand-in server (`hostmc.txt`), and XenithOS showing
+  them (`ach_screens.txt`). Screenshots go to `sim/out/ach-*`.
 
 ## Scripts
 

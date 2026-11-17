@@ -31,6 +31,7 @@ struct xenith_settings {
     int last_inbox;           /* newest inbox message already shown */
     char last_app[96];        /* most recently launched app */
     int crash_reports;        /* 0/1: send crash reports without asking (crash.h); off at first */
+    int cloud_saves;          /* keep saves and settings in step with the profile's cloud saves */
 };
 
 struct xenith_profile {
@@ -39,6 +40,7 @@ struct xenith_profile {
     char token[64];
     char avatar[16];          /* up to AVATAR_CODE_LEN + 1 */
     char joined[16];
+    int sharing;              /* friends see what's playing (Settings); kept on XenithOS Cloud too */
 };
 
 extern struct xenith_config cfg;

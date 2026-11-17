@@ -14,12 +14,23 @@
 #include "theme.h"
 #include "ui.h"
 
-enum { S_VOLUME, S_UI_SOUNDS, S_BOOT, S_CONNECT, S_CRASH, S_NETWORK, S_SYSTEM, S_CONTROLLER, S_ABOUT, S_SIGN_OUT, S_COUNT };
+enum { S_VOLUME, S_UI_SOUNDS, S_BOOT, S_CONNECT, S_CRASH, S_SHARING, S_CLOUD_SAVES, S_NETWORK, S_SYSTEM,
+       S_CONTROLLER, S_ABOUT, S_SIGN_OUT, S_COUNT };
 
 static const char *const label[S_COUNT] = {
     "Volume", "Interface sounds", "Start-up chime", "Connect at start-up", "Send crash reports",
-    "Network", "System info", "Controller test", "About XenithOS", "Sign out",
+    "Show friends what I'm playing", "Cloud saves on this machine", "Network", "System info", "Controller test",
+    "About XenithOS", "Sign out",
 };
+
+/* The rows shown: the ones about a profile only when someone's signed in. */
+static int visible_rows(int *rows)
+{
+    int i, n = 0;
+    for (i = 0; i < S_COUNT; i++)
+        if (prof.signed_in || (i != S_SHARING && i != S_CLOUD_SAVES && i != S_SIGN_OUT)) rows[n++] = i;
+    return n;
+}
 
 static void value_of(int i, char *out, int n)
 {
@@ -30,8 +41,35 @@ static void value_of(int i, char *out, int n)
     case S_BOOT: snprintf(out, n, st.boot_sound ? "On" : "Off"); break;
     case S_CONNECT: snprintf(out, n, st.auto_connect ? "On" : "Off"); break;
     case S_CRASH: snprintf(out, n, st.crash_reports ? "Always" : "Ask first"); break;
-    case S_NETWORK: snprintf(out, n, net_is_up() ? net_ip() : "Not connected"); break;
+    case S_SHARING: snprintf(out, n, prof.sharing ? "On" : "Off"); break;
+    case S_CLOUD_SAVES: snprintf(out, n, st.cloud_saves ? "On" : "Off"); break;
+    case S_NETWORK: snprintf(out, n, "%s", net_is_up() ? net_ip() : "Not connected"); break;
     }
+}
+
+/* Friends see what you're playing and your HostMC server, or only that you're on. It's kept
+ * on XenithOS Cloud, so every machine you sign in on does the same. */
+static void toggle_sharing(void)
+{
+    struct http_resp r;
+    char form[120];
+    int code, want = !prof.sharing;
+    if (!cloud_ready("Settings")) return;
+    snprintf(form, sizeof form, "token=%s&on=%d", prof.token, want);
+    ui_busy_begin(want ? "Showing friends what you play" : "Keeping what you play to yourself", NULL);
+    code = cloud_post("/v1/friends/sharing", form, &r);
+    ui_busy_end();
+    if (code == 200) {
+        prof.sharing = want;
+        profile_save();
+        sfx(SFX_SELECT);
+        ui_toast(want ? "Friends see what you're playing" : "Friends only see that you're on",
+                 want ? "And your HostMC server, when people can reach it." : "Not what you're playing, or your HostMC server.");
+    } else {
+        sfx(SFX_ERROR);
+        ui_message("Couldn't change that", cloud_error_text(&r, code));
+    }
+    http_free(&r);
 }
 
 /* ------------------------------------------------------------ system info */
@@ -228,9 +266,10 @@ void screen_settings(void)
     float hl = 0;
     ui_fade_in();
     for (;;) {
-        int n = prof.signed_in ? S_COUNT : S_COUNT - 1, top = HEADER_H + 16, rowh = 56, w = SCR_W - 2 * M;
+        int rows[S_COUNT], n = visible_rows(rows), top = HEADER_H + 16, rowh = 56, w = SCR_W - 2 * M;
         int visible = (SCR_H - top - 70) / rowh, first = 0, d, dx;
         char v[48];
+        if (sel >= n) sel = n - 1;
         if (sel >= visible) first = sel - visible + 1;
 
         ui_poll();
@@ -238,12 +277,19 @@ void screen_settings(void)
         dx = ui_nav_x();
         if (d && sel + d >= 0 && sel + d < n) { sel += d; sfx(SFX_MOVE); }
         if (PRESSED(b)) {
-            if (changed) settings_save();
+            if (changed) {
+                settings_save();
+                if (cloud_saves_on() && net_is_up()) {      /* the ones that follow the profile go up */
+                    ui_busy_begin("Saving your settings", NULL);
+                    cloud_saves_sync("xenithos", 0);
+                    ui_busy_end();
+                }
+            }
             sfx(SFX_BACK);
             return;
         }
         if (dx || PRESSED(a)) {
-            switch (sel) {
+            switch (rows[sel]) {
             case S_VOLUME:
                 if (dx) {
                     st.volume += dx * 10;
@@ -289,18 +335,37 @@ void screen_settings(void)
                     ui_fade_in();
                 }
                 break;
+            case S_SHARING:
+                toggle_sharing();
+                ui_fade_in();
+                break;
+            case S_CLOUD_SAVES:
+                st.cloud_saves = !st.cloud_saves;
+                settings_save();
+                sfx(SFX_SELECT);
+                if (st.cloud_saves && cloud_ready("Settings")) {    /* catch up now */
+                    ui_busy_begin("Bringing your saves up to date", NULL);
+                    cloud_saves_sync(NULL, 1);
+                    ui_busy_end();
+                    ui_fade_in();
+                }
+                ui_toast_icon(ICON_CLOUD);
+                ui_toast(st.cloud_saves ? "Cloud saves are on" : "Cloud saves are off",
+                         st.cloud_saves ? "Your saves and settings follow you to this machine." :
+                         "This machine keeps its own. What's on XenithOS Cloud stays there.");
+                break;
             default:
                 if (!PRESSED(a)) break;
                 sfx(SFX_SELECT);
-                if (sel == S_NETWORK) {
+                if (rows[sel] == S_NETWORK) {
                     if (cloud_ready("Network")) {
                         cloud_sync(0);
                         ui_toast("Connected", net_ip());
                     }
-                } else if (sel == S_SYSTEM) system_info();
-                else if (sel == S_CONTROLLER) controller_test();
-                else if (sel == S_ABOUT) about();
-                else if (sel == S_SIGN_OUT) {
+                } else if (rows[sel] == S_SYSTEM) system_info();
+                else if (rows[sel] == S_CONTROLLER) controller_test();
+                else if (rows[sel] == S_ABOUT) about();
+                else if (rows[sel] == S_SIGN_OUT) {
                     if (ui_confirm("Sign out?", "Your profile stays on XenithOS Cloud.", "Sign out", "Cancel")) {
                         profile_clear();
                         sel = 0;
@@ -316,7 +381,7 @@ void screen_settings(void)
         hl = ui_ease(hl, (float)(sel - first), 0.45f);
         ui_select_box((float)M, top + hl * rowh, (float)w, rowh - 6.0f, 10);
         for (i = 0; i < visible && first + i < n; i++) {
-            int idx = first + i, y = top + i * rowh, cy = y + (rowh - 6) / 2, s = idx == sel;
+            int idx = rows[first + i], y = top + i * rowh, cy = y + (rowh - 6) / 2, s = first + i == sel;
             gfx_str_vc(FONT_BODY_SB, M + 22, cy, s ? 0xFFFFFF : C_TEXT, label[idx]);
             value_of(idx, v, sizeof v);
             if (idx == S_VOLUME) {
@@ -331,7 +396,7 @@ void screen_settings(void)
                 gfx_line(M + w - 30.0f, cy + 7.0f, M + w - 24.0f, (float)cy, 3, s ? 0xFFFFFF : C_DIM, 255);
             }
         }
-        ui_hints(sel == S_VOLUME ? "LEFT/RIGHT=Change;B=Back" : sel <= S_CRASH ? "A=Switch;B=Back" : "A=Open;B=Back");
+        ui_hints(rows[sel] == S_VOLUME ? "LEFT/RIGHT=Change;B=Back" : rows[sel] <= S_CLOUD_SAVES ? "A=Switch;B=Back" : "A=Open;B=Back");
         ui_end_frame();
     }
 }
