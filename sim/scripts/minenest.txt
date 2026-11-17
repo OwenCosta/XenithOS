@@ -22,8 +22,6 @@ press a
 wait 40
 shot console
 press a
-wait 20
-press a
 wait 120
 shot console_command
 press b

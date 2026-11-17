@@ -62,6 +62,7 @@ static char cur_id[40];
 static uint64_t srv_at;
 static int connected;
 static char upd_latest[24];                /* a newer MineNest, when there is one */
+static void message(const char *title, const char *body);
 
 static void str_of(const char *obj, const char *key, char *out, int n)
 {
@@ -739,7 +740,8 @@ static void build_world(void)
         strftime(when, sizeof when, "%d %b %Y, %H:%M", &tm);
         str_of(b, "why", why, sizeof why);
         str_of(b, "name", name, sizeof name);
-        snprintf(v, sizeof v, "%.1f MB", js_num(js_key(b, "size")) / 1048576.0);
+        if (js_num(js_key(b, "size")) < 1048576) snprintf(v, sizeof v, "%lld KB", js_num(js_key(b, "size")) / 1024 + 1);
+        else snprintf(v, sizeof v, "%.1f MB", js_num(js_key(b, "size")) / 1048576.0);
         add(R_ITEM, ID_BACKUP + i, when, v);
     }
     if (!i) add(R_TEXT, 0, NULL, "No backups yet.")->color = C_DIM;

@@ -1,2 +1,2 @@
-name=HostMC
-version=1.0
+name=MineNest
+version=2.0

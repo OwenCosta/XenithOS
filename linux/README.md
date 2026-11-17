@@ -72,9 +72,10 @@ In the on-screen keyboard you can type on the real keyboard: letters type, Backs
 | `~/.local/share/xenithos/uda:/` | your settings, profile, game data and saves (same layout as the Xbox's USB stick) |
 | `~/.local/share/xenithos/uda:/xenith/crash/` | crash files waiting to be sent, one a program (see Crash reports) |
 | `~/.config/xenithos/` | the mode file and logs |
-| `~/.local/share/xenithos/hostmc/` | HostMC's Minecraft server, its world, Java and backups |
+| `~/.local/share/minenest/` | MineNest's Minecraft servers, their worlds, Java and backups |
+| `/usr/lib/xenithos/bin/minenest` | MineNest's own program (also `minenest` in a terminal) |
 
-XenithOS's own apps (VOLT, DOOM, Tube, Photos, and HostMC on PCs) come with it on PCs and Pis. The Store has three sections here
+XenithOS's own apps (VOLT, DOOM, Tube, Photos, and MineNest on PCs) come with it on PCs and Pis. The Store has three sections here
 (LB and RB switch between them): **Apps** from Flathub, **Steam**, and **XenithOS** (updates and game data).
 
 ## XenithOS Cloud over HTTPS
@@ -148,111 +149,33 @@ Apps get XenithOS's environment minus its own SDL settings, under both SDL names
 on top of SDL3, `SDL_VIDEODRIVER=kmsdrm` is also copied to `SDL_VIDEO_DRIVER`, which sent SDL3 programs
 (Sober) to the bare console in 0.5.4 and made them stop with "no video subsystem".
 
-## HostMC: a Minecraft server
+## MineNest: Minecraft servers
 
-HostMC (in Apps) runs a Minecraft: Java Edition server on the PC. Start it, and Minecraft on the same PC
-(Prism Launcher) joins at `localhost`, friends at home join at the PC's address on the network, which
-HostMC shows, and with playit.gg turned on in its Internet page, friends anywhere join at the address
-playit.gg gives it. Its pages: Server (start, stop, where to join, who's on), Console (the server's output,
-and commands), Players (operators, kicks, bans, the whitelist), Settings (`server.properties`: message,
-game mode, difficulty, max players, whitelist, seed, online mode, port, and the server's memory), Version
-(Minecraft or Paper, the latest release or an earlier one), World (backups, putting one back, a new world)
-and Internet (playit.gg, a VPS of your own, or the supporter relay).
+MineNest (in Apps) runs Minecraft servers on the PC. It used to be HostMC; it's its own project now,
+[MineNest](https://github.com/OwenCosta/minenest), for any Windows or Linux PC, and on XenithOS the
+app is its screen, in XenithOS's look, for a controller or the mouse.
 
-- The server keeps running after you leave HostMC, so you can go and play on it, and HostMC picks it up
-  again next time. It's started in a session of its own; `server/hostmc.pid` holds its PID and start time,
-  and HostMC checks the process is still that server, running in its folder, before it signals it.
-  Commands reach it through `server/console.in`, a named pipe that's its standard input.
-- Before the first start HostMC shows Minecraft's EULA (https://aka.ms/MinecraftEULA) and starts the server
-  only once you agree. It writes your answer into `eula.txt`.
-- The first start downloads the server from Mojang (or Paper from PaperMC) and the Java it needs:
-  Minecraft 26.x needs Java 25, 1.20.5 to 1.21.x need 21, and Debian 12 only packages 17. So HostMC
-  downloads Eclipse Temurin's runtime from Adoptium (about 60 MB) into its own folder, where nothing else
-  uses it. It says what it's about to download first, and checks each download against the checksum its
-  source publishes. Downloads go through `curl`, which the installer puts in.
-- playit.gg is off unless you turn it on. Then HostMC downloads playit's agent (playitd, about 9 MB) from
-  playit's releases on GitHub, checked against the SHA-256 GitHub publishes, and shows a link and a QR code
-  to approve it with your playit.gg account. The agent's key stays in `playit/playit.toml`, readable by you
-  only, and the agent runs while the server does. HostMC asks playit.gg for a Minecraft tunnel to the
-  server, and shows its address.
-- Or, in place of playit.gg, a VPS of your own: HostMC asks for its address, the user it logs in as, its SSH
-  port and the port for players, then keeps an SSH reverse tunnel to it while the server runs
-  (`ssh -N -R 0.0.0.0:<port for players>:127.0.0.1:<server port>`), so friends join at the VPS's address.
-  - HostMC logs in with a key of its own (ed25519, in `vps/`, readable by you only), never a password, and
-    shows the one line to add to `~/.ssh/authorized_keys` on the VPS, with a QR code of a command that adds
-    it. The VPS's host key is trusted the first time and checked after that, in a `known_hosts` of its own.
-  - The VPS needs `GatewayPorts clientspecified` in `/etc/ssh/sshd_config` (without it sshd listens on its
-    own loopback only) and the port open in its firewall. Each time the tunnel comes up, HostMC pings the
-    server through the VPS's public address, the way a friend's game would, and says plainly which of
-    those is missing (and keeps what it found in `vps/check.txt`).
-  - A small `sh` loop keeps ssh going and starts it again when it drops, waiting a little longer each time
-    (up to a minute), whether HostMC is open or not; the next HostMC finds it by `vps/tunnel.pid`. Its
-    tries are in `vps/tunnel.log`.
-  - TCP only, which Java Edition is. Every player arrives from 127.0.0.1, so bans by address don't work
-    for them; bans by name do. It needs `ssh` (openssh-client), which the installer puts in.
-  - `sim/hostmc/test-vps.sh` tries all of it with a private sshd standing in for the VPS (run as you, on
-    spare ports): the key, the login test, a ping through the VPS, ssh killed and coming back by itself, a
-    new HostMC picking the tunnel up, and the message when GatewayPorts is off.
-- Or the supporter relay, for supporters on Patreon: the server gets a name of its own,
-  `<name>.mc.owencosta.diy`, that friends type in, with nothing to set up on a router or a server.
-  - HostMC asks XenithOS Cloud (with the signed-in XenithOS profile) whether the profile is a supporter's:
-    OCAccounts knows, once Patreon and the profile are linked to an OCAccount at owencosta.diy/account.
-    If not yet, it shows the three steps, with QR codes of the Patreon page and the account page.
-  - Then a name: XenithOS Cloud suggests a free one (like `brave-otter-42`), or you type one, 3 to 20
-    letters, numbers and hyphens. One name each; changing it keeps the old one for you for a week, and
-    giving it up does too. If the membership ends, the relay stops passing players and the name is kept
-    for you for 30 days.
-  - While the server runs, HostMC keeps the same kind of tunnel as to a VPS, to the relay, with a key of
-    its own (in `relay/`), allowed to open one port on the relay's loopback and nothing else. The relay's
-    address, that port and its host key come from XenithOS Cloud (kept in `relay/relay.txt`); the host key
-    is the only one trusted (`StrictHostKeyChecking=yes`). The relay reads the name a player's game sends
-    and passes them down that supporter's tunnel. Each time it comes up, HostMC checks from outside by the
-    name, as with a VPS (`relay/check.txt`).
-  - When the relay's port for players isn't 25565, the address has it, like
-    `brave-otter-42.mc.owencosta.diy:25566`, and HostMC's check asks on that port.
-  - Players' real addresses come through the relay with Paper 1.19.4 and later (Players' real addresses,
-    on unless turned off on the relay's page). HostMC tells XenithOS Cloud the server wants them, the
-    relay's router then sends each player's address in a PROXY protocol header, and HostMC turns on
-    Paper's `proxies.proxy-protocol` (`server/config/paper-global.yml`) as the server starts. Paper then
-    wants that header on every connection, which Minecraft on this PC and friends at home don't send, so
-    HostMC puts a doorway on the server's port (its own program run as `hostmc --door`, in `door/`,
-    started and stopped with the server and left running like it): each connection goes on to Paper's
-    own port on the loopback with a header naming who it's from, so they join as before, with their own
-    addresses too. `door/door.txt` says it's set up (the port players use, Paper's port behind it, and
-    `server-ip` as it was); a start without it puts `server.properties` and Paper's setting back. Minecraft's
-    own server can't read the header, so with it every player arrives from 127.0.0.1, and so they do with
-    Bedrock players on (Geyser joins them to Paper through a connection of its own inside the server, which
-    hasn't been tried with proxy-protocol on, so HostMC doesn't use the two together). The relay itself is
-    in [server/mcrelay](../server/mcrelay/README.md).
-  - `sim/hostmc/test-relay.sh` tries all of it here: XenithOS Cloud, a stand-in OCAccounts, the relay's
-    router, sync and sshd, two supporters' servers, a membership ending and coming back, players'
-    addresses with Minecraft's own server and with Paper (through the relay and through the doorway, the
-    stand-in server reading the header as Paper does), and a name changed and given up.
-- Bedrock players, with Paper (Version, "Bedrock Edition can join"): Geyser lets Minecraft: Bedrock Edition
-  (phones, tablets, consoles, Windows) join, and Floodgate lets those players in without a Java account
-  (Geyser signs them in through it by itself). Both are made by GeyserMC, free software under the MIT
-  licence. Turning it on asks first, then downloads both from GeyserMC's download service: the newest
-  build's version, build number and SHA-256 come from `/v2/projects/<project>/versions/latest/builds/latest`,
-  and that very build is downloaded and checked against them before it goes in `server/plugins/`
-  (`geyser.txt` says which builds). "Update Geyser and Floodgate" does the same when there are newer ones
-  (Bedrock's own updates need a Geyser that knows them); turning it off takes both out, and their settings
-  stay. The Server page shows where Bedrock players join: this PC's address and Geyser's port (19132, read
-  from `server/plugins/Geyser-Spigot/config.yml` once Geyser has made it), and from the internet, a
-  playit.gg Minecraft Bedrock tunnel's address. Geyser now uses Bedrock's NetherNet: players find the
-  server over TCP and play over UDP, so playit.gg's "Minecraft Bedrock (NetherNet)" tunnel is the one, set
-  up as playit.gg's guide for Geyser says (HostMC points to it); SSH tunnels (a VPS of your own, the
-  supporter relay) carry TCP alone. Bedrock players go on the whitelist through Floodgate (`fwhitelist add`,
-  while the server runs) and show up with a dot before their name. With Bedrock players on, players' real
-  addresses don't come through the relay (above). `HOSTMC_GEYSER_API` points HostMC at another download
-  service, and `sim/hostmc/test-bedrock.sh` tries all of it with a stand-in for GeyserMC's
-  (`sim/hostmc/geysermc.py`).
-- In `~/.local/share/xenithos/hostmc/`: `server/` (the server, its world, `server.properties` and
-  `console.log`), `java/`, `backups/` (the newest 20, as `.tar.gz`), `playit/`, `vps/`, `relay/`, `door/`
-  and `cache/` (version lists). `HOSTMC_JAVA` points it at another `java` (the simulator uses a stand-in).
-- On XenithOS Desktop, the Apps menu opens HostMC as a desktop app (`XENITHOS_DESKTOP=1`): a window of its
-  own, the mouse (clicks, the wheel), text boxes and a command line on the console page typed into with the
-  keyboard, links that open in the browser, and hints that show keys and the mouse. `linux/test-hostmc.sh`
-  tries it in a virtual display, and `sim/scripts/hostmc_desktop.txt` in the simulator.
+- MineNest's own program runs the servers: `/usr/lib/xenithos/bin/minenest`, which install.sh and
+  update.sh fetch from MineNest's newest release on GitHub (`linux/get-minenest.sh`, checked against
+  the release's SHA256SUMS). The app starts it the first time it's needed, and talks to it on the
+  loopback with the key in its folder. Servers keep running after the app closes. `minenest help`
+  in a terminal does everything the app does.
+- Paper, Purpur, Fabric, NeoForge, Forge or Minecraft's own, any version and loader; mods, plugins
+  and modpacks from Modrinth; backups; players; settings; playit.gg, a VPS of your own or the
+  supporter relay; Bedrock players through Geyser. MineNest's README says how each works.
+- Before a server's first start the app shows Minecraft's EULA (https://aka.ms/MinecraftEULA) and
+  starts it only once you've agreed.
+- The XenithOS profile you're signed in with is handed to MineNest, for the supporter relay. On a
+  PC without XenithOS, MineNest signs in with your OCAccount instead.
+- A server HostMC made (`~/.local/share/xenithos/hostmc/server`) is offered for bringing in on the
+  Server page: MineNest copies it, world and all, and leaves HostMC's folder as it was.
+- HostMC's achievements carry on in MineNest, under the same names.
+- Update MineNest (on the Server page, when there's a newer one) updates MineNest's program by
+  itself, between XenithOS updates.
+- On XenithOS Desktop, MineNest in the Apps menu opens MineNest's own window.
+- `linux/test-minenest.sh` tries the app in a virtual display with MineNest's program
+  (`MINENEST_BIN`) and a stand-in server (`sim/minenest/java`): starting, a player joining, leaving
+  the app with the server running, finding it again, stopping it, and the desktop window.
 
 ## Updates
 
