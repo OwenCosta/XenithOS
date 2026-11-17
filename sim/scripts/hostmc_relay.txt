@@ -1,0 +1,50 @@
+# HostMC's supporter relay, first run, from sim/hostmc/test-relay.sh (a local XenithOS Cloud, a
+# stand-in OCAccounts and the relay's own software): the choice in Internet, XenithOS Cloud
+# saying the profile is a supporter's, a name typed in (XSIM_TYPE), then the EULA and the
+# server, with the tunnel to the relay coming up and checked from outside by the name. HostMC
+# is left with the server running.
+wait 60
+press down
+press down
+press down
+press down
+press down
+press down
+wait 10
+press a
+press down
+press down
+wait 10
+shot internet_choices
+press a
+wait 60
+shot relay_name
+press down
+press a
+wait 120
+shot relay_page
+press b
+press up
+press up
+press up
+press up
+press up
+press up
+wait 10
+press a
+press a
+wait 40
+shot eula
+press a
+wait 900
+shot server_with_relay
+press b
+press down
+press down
+press down
+press down
+press down
+press down
+wait 60
+shot relay_checked
+quit

@@ -112,6 +112,8 @@ void hs_load(void)
     hs.internet = atoi(v) == 1;
     kv_get(t, "vps", v, sizeof v);
     hs.vps = atoi(v) == 1 && !hs.internet;
+    kv_get(t, "relay", v, sizeof v);
+    hs.relay = atoi(v) == 1 && !hs.internet && !hs.vps;
     kv_get(t, "told_detach", v, sizeof v);
     hs.told_detach = atoi(v) == 1;
     free(t);
@@ -120,8 +122,8 @@ void hs_load(void)
 void hs_save(void)
 {
     char buf[512];
-    int n = snprintf(buf, sizeof buf, "type=%s\nversion=%s\nram=%d\neula=%s\ninternet=%d\nvps=%d\ntold_detach=%d\n",
-                     hs.type, hs.version, hs.ram_mb, hs.eula, hs.internet, hs.vps, hs.told_detach);
+    int n = snprintf(buf, sizeof buf, "type=%s\nversion=%s\nram=%d\neula=%s\ninternet=%d\nvps=%d\nrelay=%d\ntold_detach=%d\n",
+                     hs.type, hs.version, hs.ram_mb, hs.eula, hs.internet, hs.vps, hs.relay, hs.told_detach);
     mkdirs(HM_DIR);
     file_write(HM_SETTINGS, buf, n, 0644);
 }

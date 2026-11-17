@@ -1,0 +1,24 @@
+# HostMC's supporter relay for a profile that isn't a supporter's yet (sim/hostmc/test-relay.sh):
+# the three steps with their codes, Check again (still not), then Back, leaving the relay off.
+wait 60
+press down
+press down
+press down
+press down
+press down
+press down
+wait 10
+press a
+press down
+press down
+wait 10
+press a
+wait 60
+shot relay_steps
+press a
+wait 60
+shot relay_steps_again
+press b
+wait 30
+shot internet_after
+quit

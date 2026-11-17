@@ -54,15 +54,32 @@ Accounts (form posts; errors come back as "error=<message>")
                                       in: kept, and passed on to Discord (feedback-webhooks.txt in the
                                       state folder: "bug=<webhook>", "idea=<webhook>", or one for both)
 
+HostMC's supporter relay (off unless XENITH_RELAY_DOMAIN is set; see Relay)
+  POST /v1/relay/status               token  -> relay (on/off), step (ok, link, patreon, tier,
+                                      error), message, suggest, and with a name: name, state (on,
+                                      lapsed, off), until, address (with :port when the relay's
+                                      players_port isn't 25565), players_port, port, ssh_host,
+                                      ssh_port, ssh_user, hostkey; held (names kept for them)
+  POST /v1/relay/claim                token, name, key (HostMC's ssh-ed25519 public key) -> as status
+  POST /v1/relay/release              token  -> as status
+  POST /v1/relay/sync                 from the relay machine: t, hostkey, busy (ports with a
+                                      tunnel on them), signed (X-Relay-Sign)
+                                      -> t, domain, on|name|port|key and held|name rows, signed
+
 Admin (header X-Xenith-Key: <XENITH_ADMIN_KEY>)
   POST /v1/news (or /v1/inbox)        body is the news post
   POST /v1/inbox/clear
   POST /v1/motd                       body is the new message of the day
   GET  /v1/feedback                   time|kind|from|version|platform|text, newest first
+  GET  /v1/relay/list                 name|profile|state|port|until|step|checked|tunnel
+  POST /v1/relay/off, /v1/relay/on    body is a name: turns it off on the relay, or back on
+  POST /v1/relay/check                body is a name: asks OCAccounts about its supporter now
+                                      -> step, tier, state
 
 Command line
   xenith_cloud.py send "text"         message the console inbox (through the running server)
   xenith_cloud.py motd "text"         set the message of the day
+  xenith_cloud.py relay list | off <name> | on <name> | check <name>
   xenith_cloud.py --selftest          built-in tests (no network, temp dir)
 
 Environment
@@ -88,7 +105,21 @@ Environment
                      way is refused (setup-tube.sh installs it)
   XENITH_YTDLP_PLUGINS  a yt-dlp plugin folder: the PO token provider, whose token server is
                      xenith-pot.service
+  HostMC's supporter relay (server/mcrelay; its setup prints the first three):
+  XENITH_RELAY_DOMAIN  names are <name>.<this>, e.g. mc.owencosta.diy; the relay is off when unset
+  XENITH_RELAY_SSH     host:port of the relay's SSH for tunnels, e.g. tunnel.mc.owencosta.diy:2222
+  XENITH_RELAY_SECRET  shared with the relay, which signs its syncs with it
+  XENITH_RELAY_USER    default hostmc: the relay's account for tunnels
+  XENITH_RELAY_PLAYERS_PORT  default 25565: the relay's port for players (another one is added to
+                     the address friends type, <name>.<domain>:<port>)
+  XENITH_RELAY_PORTS   default 30000-39999: supporters' ports on the relay's loopback
+  XENITH_OCACCOUNT_URL, XENITH_OCACCOUNT_KEY  where OCAccounts answers who's a supporter
+                     (/api/partner/xenithos/supporter), and the key it wants for that
+  XENITH_RELAY_PATREON  the Patreon page HostMC shows a QR code of
+  XENITH_RELAY_ACCOUNT_URL  default https://owencosta.diy/account
+  relay-blocked-words.txt in the state folder: words no name may contain, one a line
 """
+import base64
 import hashlib
 import hmac
 import io
@@ -104,10 +135,11 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 VERSION = "0.5.0"
 GAMES = {"volt"}
@@ -1076,6 +1108,408 @@ def lan_addr_ok(addr):
         return False
 
 
+# ---------------------------------------------------------------------- supporter relay
+
+# HostMC's supporter relay. Someone who supports Owen on Patreon (OCAccounts knows, once they've
+# linked Patreon and their XenithOS profile there) gets one name, <name>.<XENITH_RELAY_DOMAIN>,
+# for their Minecraft server. The relay machine (server/mcrelay) asks /v1/relay/sync for the
+# names, each supporter's port on its loopback and the key their HostMC logs in with; HostMC keeps
+# an SSH tunnel to it that can open that one port, and the relay passes players to it by the name
+# their game asks for.
+
+RELAY_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,18}[a-z0-9]$")
+RELAY_DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
+RELAY_HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,252})$")
+RELAY_RESERVED = {
+    "www", "mail", "smtp", "imap", "pop", "ftp", "ns", "ns1", "ns2", "dns", "mx", "api", "admin",
+    "administrator", "root", "tunnel", "relay", "ssh", "status", "help", "support", "abuse",
+    "postmaster", "hostmaster", "webmaster", "noreply", "security", "localhost", "test", "staging",
+    "dev", "owen", "owencosta", "ocaccount", "ocaccounts", "account", "accounts", "login", "auth",
+    "oauth", "patreon", "xenith", "xenithos", "hostmc", "cloud", "mc", "minecraft", "play", "server",
+    "official", "staff", "mod", "moderator", "mojang", "microsoft", "xbox",
+}
+RELAY_HOLD_LAPSED = 30 * 86400     # a membership that ends: the name waits this long for them
+RELAY_HOLD_LEFT = 7 * 86400        # a name changed or given up: theirs to take back for a week
+RELAY_CHECK_FRESH = 5 * 60         # OCAccounts' answers are reused for this long
+RELAY_RECHECK = 6 * 3600           # names in use are checked again this often
+RELAY_RETRY = 10 * 60              # and this long after OCAccounts didn't answer
+RELAY_SYNC_SKEW = 120              # a signed sync request must be this fresh (seconds)
+RELAY_CHANGES_PER_DAY = 3
+RELAY_ADJECTIVES = ("brave", "calm", "clever", "cosy", "swift", "happy", "lucky", "mighty", "quiet",
+                    "sunny", "bold", "bright", "misty", "frosty", "golden", "jolly", "nimble", "rapid",
+                    "silver", "wild", "cosmic", "gentle", "lunar", "mellow", "noble", "polar", "rusty",
+                    "sleepy", "snowy", "stormy", "witty", "zesty", "amber", "breezy", "cheery", "dusky")
+RELAY_ANIMALS = ("otter", "fox", "badger", "falcon", "panda", "koala", "lynx", "owl", "wolf", "heron",
+                 "bison", "gecko", "lemur", "moose", "raven", "tiger", "whale", "yak", "zebra", "beaver",
+                 "crane", "ferret", "hare", "ibis", "jaguar", "kiwi", "llama", "marten", "newt", "orca",
+                 "puffin", "quokka", "robin", "seal", "toucan", "walrus", "axolotl", "panther")
+RELAY_KEY_HEAD = b"\0\0\0\x0bssh-ed25519\0\0\0\x20"
+LEET = str.maketrans("013457", "oieast")
+
+
+def relay_key(text):
+    """The public key line a HostMC sends, rebuilt from its bytes so nothing else can reach the
+    relay's list of keys: "ssh-ed25519 <base64>", or "" when it isn't one."""
+    parts = (text or "").split()
+    if len(parts) < 2 or parts[0] != "ssh-ed25519" or len(parts[1]) != 68:
+        return ""
+    try:
+        blob = base64.b64decode(parts[1], validate=True)
+    except ValueError:
+        return ""
+    if len(blob) != 51 or not blob.startswith(RELAY_KEY_HEAD):
+        return ""
+    return "ssh-ed25519 " + base64.b64encode(blob).decode()
+
+
+def relay_blocked(state_dir):
+    """Words no name may contain: relay-blocked-words.txt in the state folder, one a line (Owen's
+    to fill in; it's read each time, so changes count at once)."""
+    try:
+        with open(os.path.join(state_dir, "relay-blocked-words.txt"), encoding="utf-8") as f:
+            words = [line.strip().lower() for line in f]
+    except OSError:
+        return []
+    return [w.replace("-", "") for w in words if w and not w.startswith("#")]
+
+
+def relay_name_problem(name, blocked=()):
+    """What's wrong with a name someone asked for, or None. Names are DNS labels: 3 to 20 small
+    letters, numbers and single hyphens, starting with a letter."""
+    if not 3 <= len(name) <= 20:
+        return "Names are 3 to 20 letters, numbers and hyphens."
+    if not RELAY_NAME_RE.match(name) or "--" in name:
+        return "Use letters, numbers and single hyphens, starting with a letter."
+    if name in RELAY_RESERVED:
+        return "That name is reserved. Try another one."
+    squashed = name.replace("-", "")
+    if any(w and (w in squashed or w in squashed.translate(LEET)) for w in blocked):
+        return "That name isn't allowed. Try another one."
+    return None
+
+
+def relay_suggest(taken):
+    """A free name like brave-otter-42, for HostMC to offer."""
+    for _ in range(40):
+        name = f"{secrets.choice(RELAY_ADJECTIVES)}-{secrets.choice(RELAY_ANIMALS)}-{secrets.randbelow(90) + 10}"
+        if name not in taken and name not in RELAY_RESERVED:
+            return name
+    return ""
+
+
+def relay_sign(secret, kind, body):
+    """The signature on a sync request (kind "sync") or on its answer ("list"): HMAC-SHA256 of
+    the body, with the secret XenithOS Cloud and the relay share. The secret never crosses the
+    wire, and an answer can't be passed off as a request or the other way round."""
+    if isinstance(body, str):
+        body = body.encode()
+    return hmac.new(secret.encode(), kind.encode() + b"\n" + body, hashlib.sha256).hexdigest()
+
+
+def ocaccount_supporter(url, key, gamertag, timeout=10):
+    """Asks OCAccounts whether a XenithOS profile belongs to a supporter:
+    GET <url>/api/partner/xenithos/supporter?profile=<gamertag> with X-Partner-Key, answering
+    {"linked": bool, "patreon": bool, "supporter": bool, "tier": "..."}. Returns (step, tier),
+    step being "ok", "link" (no OCAccount has this profile linked), "patreon" (no Patreon linked
+    to it), "tier" (not on the supporter tier or above) or "error" (no answer to go by)."""
+    if not url:
+        return "error", ""
+    req = urllib.request.Request(url.rstrip("/") + "/api/partner/xenithos/supporter?" + urlencode({"profile": gamertag}),
+                                 headers={"X-Partner-Key": key, "Accept": "application/json",
+                                          "User-Agent": "XenithOS-Cloud/" + VERSION})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read(8192).decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        return ("link", "") if e.code == 404 else ("error", "")
+    except (OSError, ValueError):
+        return "error", ""
+    if not isinstance(data, dict):
+        return "error", ""
+    if data.get("linked") is not True:
+        return "link", ""
+    if data.get("patreon") is not True:
+        return "patreon", ""
+    return ("ok" if data.get("supporter") is True else "tier"), clean(data.get("tier") or "", 40)
+
+
+class Relay:
+    """The supporter relay's names, kept in state.json under "relay".
+
+    names: name -> {owner, state, until, since}. A name's state is "on" (the relay passes players
+    to it), "lapsed" (its supporter's membership ended: kept for them until "until", and on again
+    if they come back), "left" (changed or given up: theirs alone to take back until "until") or
+    "off" (turned off with `xenith relay off`). Someone has one name that isn't "left" at most.
+    people: profile (lower case) -> {port, key, checked, step, tier}: their port on the relay's
+    loopback, kept while they have any name, and the key their HostMC logs in with."""
+
+    def __init__(self, state, domain="", ssh="", secret="", user="hostmc", ports="30000-39999",
+                 ocaccount_url="", ocaccount_key="", patreon_url="", account_url="", players_port=25565):
+        self.state, self.lock = state, state.lock
+        self.domain = domain.strip().lower().strip(".")
+        self.players_port = int_or(players_port, 0)           # the relay's port for players
+        self.at = "" if self.players_port == 25565 else f":{self.players_port}"   # what friends add to the name
+        host, sep, port = ssh.strip().rpartition(":")
+        self.ssh_host, self.ssh_port = (host, int_or(port, 0)) if sep else (ssh.strip(), 22)
+        self.secret, self.user = secret, user or "hostmc"
+        lo, _, hi = ports.partition("-")
+        self.port_lo = int_or(lo, 0)
+        self.port_hi = int_or(hi, self.port_lo) if hi else self.port_lo
+        self.ocaccount_url, self.ocaccount_key = ocaccount_url, ocaccount_key
+        self.patreon_url = patreon_url
+        self.account_url = account_url or "https://owencosta.diy/account"
+        self.checks = {}                           # profile -> (good until, step, tier)
+        self.tried = {}                            # profile -> when OCAccounts last didn't answer
+        self.changes = RateLimit(RELAY_CHANGES_PER_DAY, 86400)
+        self.asks = RateLimit(60, 3600)
+        self.last_sync = 0
+        self.busy = set()                          # ports with a tunnel on them, at the last sync
+        with self.lock:
+            r = state.data.setdefault("relay", {})
+            r.setdefault("names", {})
+            r.setdefault("people", {})
+
+    def problems(self):
+        """What's wrong with the settings (XENITH_RELAY_*), for the log; the relay stays off."""
+        out = []
+        if not RELAY_DOMAIN_RE.match(self.domain):
+            out.append(f"XENITH_RELAY_DOMAIN must be a domain such as mc.example.com, not {self.domain!r}")
+        if not RELAY_HOST_RE.match(self.ssh_host) or not 0 < self.ssh_port < 65536:
+            out.append("XENITH_RELAY_SSH must be the relay's SSH address for tunnels, host:port")
+        if len(self.secret) < 32:
+            out.append("XENITH_RELAY_SECRET must be the relay's secret (its setup prints one)")
+        if not 1024 < self.port_lo <= self.port_hi < 65536:
+            out.append("XENITH_RELAY_PORTS must be a range such as 30000-39999")
+        if not 0 < self.players_port < 65536:
+            out.append("XENITH_RELAY_PLAYERS_PORT must be the relay's port for players, like 25565")
+        return out
+
+    @property
+    def data(self):
+        return self.state.data["relay"]
+
+    def ready(self):
+        """Open to supporters: set up here, and the relay has said hello (with its host key)."""
+        return bool(self.domain and self.secret and self.data.get("hostkey"))
+
+    def _current(self, who):
+        for name, n in self.data["names"].items():
+            if n["owner"] == who and n["state"] != "left":
+                return name, n
+        return None, None
+
+    def message(self, step, state=None, until=0):
+        site = self.account_url.split("://", 1)[-1].rstrip("/")
+        if state == "off":
+            return "This name has been turned off on the relay."
+        if state == "lapsed":
+            t = time.gmtime(until)
+            return (f"Your Patreon membership ended, so the relay stopped. Your name is kept for you "
+                    f"until {t.tm_mday} {time.strftime('%B', t)} {t.tm_year}.")
+        return {"ok": "", "link": f"Link this XenithOS profile to your OCAccount at {site} first.",
+                "patreon": f"Link Patreon to your OCAccount at {site}.",
+                "tier": "Your Patreon membership isn't on the supporter tier.",
+                "error": "Your membership couldn't be checked just now. Try again in a few minutes."}[step]
+
+    # -------------------------------------------------------------- who's a supporter
+    def supporter(self, who, gamertag, now=None, cached=True):
+        """(step, tier) for a profile (see ocaccount_supporter), from an answer kept a few
+        minutes or a new one. A definite answer also turns their name on or lapses it."""
+        now = time.time() if now is None else now
+        kept = self.checks.get(who)
+        if cached and kept and now < kept[0]:
+            return kept[1], kept[2]
+        step, tier = ocaccount_supporter(self.ocaccount_url, self.ocaccount_key, gamertag)
+        self.checks[who] = (now + (30 if step == "error" else RELAY_CHECK_FRESH), step, tier)
+        if step == "error":
+            self.tried[who] = now
+        else:
+            self.settle(who, step, tier, now)
+        return step, tier
+
+    def settle(self, who, step, tier, now):
+        with self.lock:
+            p = self.data["people"].get(who)
+            if not p:
+                return
+            p["checked"], p["step"], p["tier"] = int(now), step, tier
+            _, n = self._current(who)
+            if n and step == "ok" and n["state"] == "lapsed":
+                n["state"], n["until"] = "on", 0
+            elif n and step != "ok" and n["state"] == "on":
+                n["state"], n["until"] = "lapsed", int(now + RELAY_HOLD_LAPSED)
+            self.state.save()
+
+    # -------------------------------------------------------------- names
+    def claim(self, who, name, key, now=None):
+        """Gives a supporter a name, or takes their key again for the one they have. The
+        supporter check is the caller's. Returns (http code, message)."""
+        now = time.time() if now is None else now
+        problem = relay_name_problem(name, relay_blocked(os.path.dirname(self.state.path)))
+        if problem:
+            return 400, problem
+        key = relay_key(key)
+        if not key:
+            return 400, "HostMC's key isn't one the relay takes."
+        with self.lock:
+            names, people = self.data["names"], self.data["people"]
+            cur, cn = self._current(who)
+            if cn and cn["state"] == "off":
+                return 403, self.message("ok", "off")
+            n = names.get(name)
+            if n and n["owner"] != who:
+                return 409, "That name is taken. Try another one."
+            if any(q.get("key") == key for w, q in people.items() if w != who):
+                return 409, "HostMC's key is in use by someone else. Make HostMC a new one."
+            if cur != name and cur is not None and not self.changes.allow(who):
+                return 429, "That's a few new names today. Try again tomorrow."
+            p = people.get(who)
+            if not p:
+                used = {q["port"] for q in people.values()} | self.busy
+                port = next((x for x in range(self.port_lo, self.port_hi + 1) if x not in used), 0)
+                if not port:
+                    return 503, "The relay is full right now."
+                p = people[who] = {"port": port, "checked": int(now), "step": "ok", "tier": ""}
+            p["key"] = key
+            if cur != name:
+                if cn:                             # the old name waits a week for them
+                    cn["state"], cn["until"] = "left", int(now + RELAY_HOLD_LEFT)
+                names[name] = {"owner": who, "state": "on", "until": 0, "since": int(now)}
+            elif cn["state"] == "lapsed":
+                cn["state"], cn["until"] = "on", 0
+            self.state.save()
+            return 200, ""
+
+    def release(self, who, now=None):
+        now = time.time() if now is None else now
+        with self.lock:
+            _, cn = self._current(who)
+            if not cn:
+                return 404, "You don't have a name on the relay."
+            if cn["state"] == "off":
+                return 403, self.message("ok", "off")
+            cn["state"], cn["until"] = "left", int(now + RELAY_HOLD_LEFT)
+            self.state.save()
+            return 200, ""
+
+    def recheck(self, name):
+        """`xenith relay check <name>`: asks OCAccounts about its supporter now, which turns the
+        name on or lapses it. None for a name nobody has."""
+        with self.lock:
+            n = self.data["names"].get(name)
+            acc = self.state.account(n["owner"]) if n else None
+        if not acc:
+            return None
+        step, tier = self.supporter(acc["name"].lower(), acc["name"], cached=False)
+        with self.lock:
+            return {"step": step, "tier": tier, "state": self.data["names"].get(name, {}).get("state", "")}
+
+    def turn(self, name, on):
+        """`xenith relay off|on <name>`. Returns False for a name nobody has."""
+        with self.lock:
+            n = self.data["names"].get(name)
+            if not n or n["state"] == "left":
+                return False
+            if not on:
+                n["state"], n["until"] = "off", 0
+            elif n["state"] == "off":
+                n["state"] = "on"                  # the next check lapses it if it should
+                p = self.data["people"].get(n["owner"])
+                if p:
+                    p["checked"] = 0
+            self.state.save()
+            return True
+
+    def status(self, acc, now=None):
+        """What HostMC is told: key=value fields for kv()."""
+        now = time.time() if now is None else now
+        who = acc["name"].lower()
+        step, tier = self.supporter(who, acc["name"], now)
+        with self.lock:
+            name, n = self._current(who)
+            p = self.data["people"].get(who) or {}
+            out = {"relay": "on", "domain": self.domain, "step": step, "tier": tier,
+                   "patreon": self.patreon_url, "account": self.account_url}
+            if n:
+                out.update({"name": name, "state": n["state"], "until": n.get("until", 0),
+                            "address": f"{name}.{self.domain}{self.at}", "players_port": self.players_port,
+                            "port": p.get("port", 0),
+                            "ssh_host": self.ssh_host, "ssh_port": self.ssh_port, "ssh_user": self.user,
+                            "hostkey": self.data.get("hostkey", "")})
+            held = sorted(x for x, m in self.data["names"].items() if m["owner"] == who and m["state"] == "left")
+            if held:
+                out["held"] = ",".join(held)
+            out["suggest"] = relay_suggest(self.data["names"])
+        out["message"] = self.message(step, n["state"] if n else None, n.get("until", 0) if n else 0)
+        return out
+
+    def rows(self):
+        """`xenith relay list`: name|profile|state|port|until|step|checked|tunnel (up when the
+        relay saw one on that port at its last sync)."""
+        with self.lock:
+            out = []
+            for name, n in sorted(self.data["names"].items()):
+                p = self.data["people"].get(n["owner"], {})
+                port = p.get("port", 0)
+                out.append(f"{name}|{n['owner']}|{n['state']}|{port}|{n.get('until', 0)}|{p.get('step', '')}|"
+                           f"{p.get('checked', 0)}|{'up' if port in self.busy and n['state'] != 'left' else ''}\n")
+            return "".join(out)
+
+    # -------------------------------------------------------------- the relay machine
+    def signed(self, body, signature):
+        return bool(self.secret) and hmac.compare_digest(relay_sign(self.secret, "sync", body).encode(),
+                                                         (signature or "").strip().encode())
+
+    def synced(self, hostkey, busy="", now=None):
+        """A signed sync came in: the relay's SSH host key, which HostMC pins, and the ports with
+        a tunnel on them. A port with one left on from a name that's no longer on isn't given to
+        anyone else while it lasts."""
+        self.last_sync = time.time() if now is None else now
+        self.busy = {p for p in (int_or(x, 0) for x in busy.split(",")[:5000]) if self.port_lo <= p <= self.port_hi}
+        hostkey = relay_key(hostkey)
+        with self.lock:
+            if hostkey and hostkey != self.data.get("hostkey"):
+                self.data["hostkey"] = hostkey
+                self.state.save()
+
+    def listing(self, t):
+        """The answer to a sync: t (the request's, so an old answer can't be passed off as
+        new), the domain, "on|name|port|key" for names in use and "held|name" for the rest."""
+        with self.lock:
+            people = self.data["people"]
+            lines = [f"t={t}\n", f"domain={self.domain}\n"]
+            for name, n in sorted(self.data["names"].items()):
+                p = people.get(n["owner"])
+                if n["state"] == "on" and p and p.get("key"):
+                    lines.append(f"on|{name}|{p['port']}|{p['key']}\n")
+                else:
+                    lines.append(f"held|{name}\n")
+            return "".join(lines)
+
+    # -------------------------------------------------------------- now and then
+    def tick(self, now=None):
+        """Every minute or so: frees names whose time is up, and asks OCAccounts again about
+        names in use (a few at a time)."""
+        now = time.time() if now is None else now
+        with self.lock:
+            names = self.data["names"]
+            gone = [x for x, n in names.items() if n["state"] in ("lapsed", "left") and n["until"] <= now]
+            for x in gone:
+                del names[x]
+            owners = {n["owner"] for n in names.values()}
+            for who in [w for w in self.data["people"] if w not in owners]:
+                del self.data["people"][who]
+            if gone:
+                self.state.save()
+            due = sorted((p.get("checked", 0), who) for who, p in self.data["people"].items()
+                         if now - p.get("checked", 0) >= RELAY_RECHECK and now - self.tried.get(who, 0) >= RELAY_RETRY
+                         and self._current(who)[1] and self._current(who)[1]["state"] in ("on", "lapsed"))
+        for _, who in due[:20]:
+            acc = self.state.account(who)
+            if acc:
+                self.supporter(who, acc["name"], now, cached=False)
+
+
 # ---------------------------------------------------------------------- http
 
 
@@ -1084,7 +1518,7 @@ def kv(d):
 
 
 def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=None, public="",
-                 downloads="downloads", lan="", server_id=""):
+                 downloads="downloads", lan="", server_id="", relay=None):
     last_score = {}
     last_score_lock = threading.Lock()
     creates = RateLimit(CREATE_PER_HOUR, 3600)
@@ -1102,13 +1536,15 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 return                       # several a second while a video plays
             sys.stderr.write("%s %s\n" % (self.client_address[0], line))
 
-        def reply(self, code, text="", ctype="text/plain; charset=ascii", cache=None):
+        def reply(self, code, text="", ctype="text/plain; charset=ascii", cache=None, headers=None):
             body = text.encode("ascii", "replace") if isinstance(text, str) else text
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             if cache:
                 self.send_header("Cache-Control", cache)
+            for name, value in (headers or {}).items():
+                self.send_header(name, value)
             self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
@@ -1174,6 +1610,14 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                     return self.error(401, "Admin key required.")
                 return self.reply(200, "".join(f"{f['t']}|{f['kind']}|{f['from']}|{f['version']}|{f['platform']}|{f['text']}\n"
                                                for f in reversed(state.data.get("feedback", []))))
+
+            if parts == ["v1", "relay", "list"]:
+                if not self.is_admin():
+                    return self.error(401, "Admin key required.")
+                if not relay:
+                    return self.error(404, "The supporter relay isn't set up here.")
+                head = f"# relay {'on' if relay.ready() else 'off'}, last sync {int(relay.last_sync)}\n"
+                return self.reply(200, head + relay.rows(), cache="no-store")
 
             if len(parts) == 4 and parts[:3] == ["v1", "tube", "thumb"] and parts[3].endswith(".jpg"):
                 vid = parts[3][:-4]
@@ -1392,6 +1836,55 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 return self.reply(200, kv({"session": sid, "title": title, "duration": duration, "fps": TUBE_FPS,
                                            "rate": TUBE_RATE, "width": TUBE_W, "height": TUBE_H}))
 
+            if parts == ["v1", "relay", "sync"]:
+                if not relay or not relay.domain or not relay.secret:
+                    return self.error(404, "Not found.")
+                if not relay.signed(body, self.headers.get("X-Relay-Sign", "")):
+                    return self.error(401, "That sync isn't signed with this server's relay secret.")
+                t = int_or(form.get("t"), 0)
+                if abs(time.time() - t) > RELAY_SYNC_SKEW:
+                    return self.error(401, "The relay's clock is out. Set it right (timedatectl).")
+                relay.synced(form.get("hostkey", ""), form.get("busy", ""))
+                text = relay.listing(t)
+                return self.reply(200, text, cache="no-store",
+                                  headers={"X-Relay-Sign": relay_sign(relay.secret, "list", text)})
+
+            if parts[:2] == ["v1", "relay"] and len(parts) == 3 and parts[2] in ("status", "claim", "release"):
+                if not relay or not relay.ready():
+                    return self.reply(200, kv({"relay": "off", "message": "The supporter relay isn't open yet."}),
+                                      cache="no-store")
+                acc = state.by_token(form.get("token", ""))
+                if not acc:
+                    return self.error(401, "Your sign-in expired. Sign in again.")
+                who = acc["name"].lower()
+                if not relay.asks.allow(who):
+                    return self.error(429, "That's a lot of asking. Wait a few minutes.")
+                code, msg = 200, ""
+                if parts[2] == "claim":
+                    step, _ = relay.supporter(who, acc["name"])
+                    if step != "ok":
+                        return self.error(503 if step == "error" else 403, relay.message(step))
+                    code, msg = relay.claim(who, form.get("name", "").strip().lower(), form.get("key", ""))
+                elif parts[2] == "release":
+                    code, msg = relay.release(who)
+                if code != 200:
+                    return self.error(code, msg)
+                return self.reply(200, kv(relay.status(acc)), cache="no-store")
+
+            if parts in (["v1", "relay", "off"], ["v1", "relay", "on"], ["v1", "relay", "check"]):
+                if not self.is_admin():
+                    return self.error(401, "Admin key required.")
+                if not relay:
+                    return self.error(404, "The supporter relay isn't set up here.")
+                if parts[2] == "check":
+                    found = relay.recheck(body.strip().lower())
+                    if found is None:
+                        return self.error(404, "No name like that.")
+                    return self.reply(200, kv(found))
+                if not relay.turn(body.strip().lower(), parts[2] == "on"):
+                    return self.error(404, "No name like that is in use.")
+                return self.reply(200, "ok\n")
+
             if parts[:2] == ["v1", "accounts"] and len(parts) == 3 and parts[2] in ("me", "avatar", "logout"):
                 acc = state.by_token(form.get("token", ""))
                 if not acc:
@@ -1518,14 +2011,33 @@ def serve():
             state.data["server_id"] = secrets.token_hex(8)
             state.save()
         server_id = state.data["server_id"]
+    relay = None
+    if os.environ.get("XENITH_RELAY_DOMAIN"):
+        relay = Relay(state, os.environ.get("XENITH_RELAY_DOMAIN", ""), os.environ.get("XENITH_RELAY_SSH", ""),
+                      os.environ.get("XENITH_RELAY_SECRET", ""), os.environ.get("XENITH_RELAY_USER", "hostmc"),
+                      os.environ.get("XENITH_RELAY_PORTS", "30000-39999"), os.environ.get("XENITH_OCACCOUNT_URL", ""),
+                      os.environ.get("XENITH_OCACCOUNT_KEY", ""), os.environ.get("XENITH_RELAY_PATREON", ""),
+                      os.environ.get("XENITH_RELAY_ACCOUNT_URL", ""), os.environ.get("XENITH_RELAY_PLAYERS_PORT", "25565"))
+        for problem in relay.problems():
+            log(problem)
+        if relay.problems():
+            relay = None
+        elif not relay.ocaccount_url:
+            log("XENITH_OCACCOUNT_URL isn't set: nobody can be checked as a supporter, so no names are given out")
 
     def reaper():
         while True:
             time.sleep(30)
             tube.reap()
+            if relay:
+                try:
+                    relay.tick()
+                except Exception as e:            # keep the reaper going whatever happens
+                    log(f"relay: {e!r}")
     threading.Thread(target=reaper, daemon=True).start()
 
-    handler = make_handler(state, store, admin_key, web_dir, console_key, tube, public, downloads, lan, server_id)
+    handler = make_handler(state, store, admin_key, web_dir, console_key, tube, public, downloads, lan, server_id,
+                           relay)
     httpd = ThreadingHTTPServer(("0.0.0.0", port), handler)
     httpd.daemon_threads = True
     if proxy_port:
@@ -1536,7 +2048,8 @@ def serve():
                  "on, Deno when needed" if tube.deno else "on") if tube.available() else "off"
     print(f"XenithOS Cloud {VERSION} on :{port}{f' (relay on :{proxy_port})' if proxy_port else ''} "
           f"(admin routes {'on' if admin_key else 'off'}, Tube {tube_mode}"
-          f"{', consoles on its network use ' + lan if lan else ''})", flush=True)
+          f"{', consoles on its network use ' + lan if lan else ''}"
+          f"{', supporter relay for *.' + relay.domain if relay else ''})", flush=True)
     httpd.serve_forever()
 
 
@@ -1975,9 +2488,208 @@ else:
     check("relay: the direct port ignores PROXY lines", req("GET", "/v1/ping") == (200, b"pong\n"))
     relayed.shutdown()
 
+    # HostMC's supporter relay, with a stand-in OCAccounts that knows a few profiles
+    members = {"sup1": {"linked": True, "patreon": True, "supporter": True, "tier": "Supporter"},
+               "sup2": {"linked": True, "patreon": True, "supporter": True, "tier": "Big supporter"},
+               "sup3": {"linked": True, "patreon": True, "supporter": True, "tier": "Supporter"},
+               "sup4": {"linked": True, "patreon": True, "supporter": True, "tier": "Supporter"},
+               "nopatreon": {"linked": True, "patreon": False, "supporter": False},
+               "lowtier": {"linked": True, "patreon": True, "supporter": False, "tier": "Fan"}}
+    oc = {"down": False, "asked": 0}
+
+    class OCAccounts(BaseHTTPRequestHandler):
+        def log_message(self, fmt, *args):
+            pass
+
+        def do_GET(self):
+            oc["asked"] += 1
+            u = urlparse(self.path)
+            who = parse_qs(u.query).get("profile", [""])[0].lower()
+            if oc["down"]:
+                code, out = 500, b"{}"
+            elif u.path != "/api/partner/xenithos/supporter" or self.headers.get("X-Partner-Key") != "partn3r":
+                code, out = 401, b"{}"
+            elif who not in members:
+                code, out = 404, b'{"linked": false}'
+            else:
+                code, out = 200, json.dumps(members[who]).encode()
+            self.send_response(code)
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+
+    ocs = ThreadingHTTPServer(("127.0.0.1", 0), OCAccounts)
+    threading.Thread(target=ocs.serve_forever, daemon=True).start()
+    secret = secrets.token_hex(32)
+    hostkey = "ssh-ed25519 " + base64.b64encode(RELAY_KEY_HEAD + os.urandom(32)).decode()
+
+    def new_key():
+        return "ssh-ed25519 " + base64.b64encode(RELAY_KEY_HEAD + os.urandom(32)).decode()
+
+    check("supporter relay: off where it isn't set up", kvparse(req("POST", "/v1/relay/status", "token=x")[1]).get("relay") == "off"
+          and req("POST", "/v1/relay/sync", "t=1")[0] == 404)
+    check("supporter relay: settings checked", len(Relay(state, "not a domain", "", "short", ports="80-90").problems()) == 4)
+    relay = Relay(state, "mc.example.com", "tunnel.mc.example.com:2222", secret, "hostmc", "30000-30002",
+                  f"http://127.0.0.1:{ocs.server_address[1]}", "partn3r", "https://www.patreon.com/example")
+    check("supporter relay: settings ok", relay.problems() == [] and relay.ssh_port == 2222)
+    rs = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state, store, "k3y", web_dir, relay=relay))
+    threading.Thread(target=rs.serve_forever, daemon=True).start()
+
+    def rreq(method, path, body=None, headers=None):
+        r = urllib.request.Request(f"http://127.0.0.1:{rs.server_address[1]}{path}", method=method,
+                                   data=body.encode() if body is not None else None, headers=headers or {})
+        try:
+            with urllib.request.urlopen(r) as resp:
+                return resp.status, resp.read(), resp.headers
+        except urllib.error.HTTPError as e:
+            return e.code, e.read(), e.headers
+
+    def sync(t=None, key=secret, busy=""):
+        t = int(time.time()) if t is None else t
+        b = urlencode({"t": t, "hostkey": hostkey + " root@relay", "busy": busy})
+        return rreq("POST", "/v1/relay/sync", b, {"X-Relay-Sign": relay_sign(key, "sync", b)})
+
+    def listing():
+        code, b, h = sync()
+        ok = code == 200 and hmac.compare_digest(relay_sign(secret, "list", b), h.get("X-Relay-Sign", ""))
+        return b.decode().splitlines()[2:] if ok else None
+
+    tokens = {}
+    for who in ("Sup1", "Sup2", "Sup3", "Sup4", "Nolink", "Nopatreon", "Lowtier"):
+        tokens[who.lower()] = state.create(who, "1234", "1202001000")[0][1]
+
+    def ask(who, route="status", **form):
+        code, b, _ = rreq("POST", f"/v1/relay/{route}", urlencode({"token": tokens[who], **form}))
+        return code, kvparse(b)
+
+    check("supporter relay: closed until the relay has said hello", ask("sup1")[1].get("relay") == "off")
+    check("supporter relay: unsigned sync refused", rreq("POST", "/v1/relay/sync", "t=1")[0] == 401)
+    check("supporter relay: sync with another secret refused", sync(key="x" * 64)[0] == 401)
+    check("supporter relay: stale sync refused", sync(t=int(time.time()) - 600)[0] == 401)
+    t0 = int(time.time())
+    code, b, h = sync(t0)
+    check("supporter relay: sync answered, signed, with the request's time",
+          code == 200 and b.decode().startswith(f"t={t0}\ndomain=mc.example.com\n")
+          and hmac.compare_digest(relay_sign(secret, "list", b), h.get("X-Relay-Sign", "")))
+    check("supporter relay: the relay's host key kept, as a key alone", relay.data.get("hostkey") == hostkey and relay.ready())
+    check("supporter relay: needs a profile", rreq("POST", "/v1/relay/status", "token=nope")[0] == 401)
+    code, st = ask("nolink")
+    check("supporter relay: profile not linked to an OCAccount", code == 200 and st.get("step") == "link"
+          and "owencosta.diy/account" in st.get("message", "") and "name" not in st)
+    check("supporter relay: no name without being a supporter", ask("nolink", "claim", name="sneaky", key=new_key())[0] == 403)
+    check("supporter relay: Patreon not linked", ask("nopatreon")[1].get("step") == "patreon")
+    check("supporter relay: not on the tier", ask("lowtier")[1].get("step") == "tier"
+          and ask("lowtier", "claim", name="sneaky", key=new_key())[0] == 403)
+    code, st = ask("sup1")
+    check("supporter relay: a supporter, offered a free name", code == 200 and st.get("step") == "ok" and st.get("tier") == "Supporter"
+          and relay_name_problem(st.get("suggest", "")) is None and "name" not in st
+          and st.get("patreon") == "https://www.patreon.com/example")
+    with open(os.path.join(tmp, "state", "relay-blocked-words.txt"), "w") as f:
+        f.write("# words\nbadword\n")
+    key1 = new_key()
+    for bad in ("ab", "1abc", "a--b", "-abc", "abc-", "www", "a_b", "x" * 21, "my-badword", "my-b4dw0rd", "owen"):
+        check(f"supporter relay: name refused: {bad}", ask("sup1", "claim", name=bad, key=key1)[0] == 400)
+    for bad in ("", "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ", "ssh-ed25519 AAAA",
+                "ssh-ed25519 " + base64.b64encode(os.urandom(51)).decode()):
+        check(f"supporter relay: key refused: {bad[:20]}", ask("sup1", "claim", name="brave-otter", key=bad)[0] == 400)
+    code, st = ask("sup1", "claim", name="Brave-Otter", key=key1 + " me@pc\nrestrict,permitlisten=\"*\" " + new_key())
+    check("supporter relay: a name given, with what HostMC needs", code == 200 and st.get("name") == "brave-otter"
+          and st.get("state") == "on" and st.get("address") == "brave-otter.mc.example.com" and st.get("port") == "30000"
+          and st.get("ssh_host") == "tunnel.mc.example.com" and st.get("ssh_port") == "2222"
+          and st.get("ssh_user") == "hostmc" and st.get("hostkey") == hostkey and st.get("players_port") == "25565")
+    relay.players_port, relay.at = 25566, ":25566"
+    st = ask("sup1")[1]
+    check("supporter relay: a players' port other than 25565 goes in the address",
+          st.get("address") == "brave-otter.mc.example.com:25566" and st.get("players_port") == "25566"
+          and Relay(state, "mc.example.com", "t.example.com:22", "s" * 40, players_port="0").problems()
+          == ["XENITH_RELAY_PLAYERS_PORT must be the relay's port for players, like 25565"])
+    relay.players_port, relay.at = 25565, ""
+    check("supporter relay: the key kept as a key alone", relay.data["people"]["sup1"]["key"] == key1)
+    check("supporter relay: the relay told", listing() == [f"on|brave-otter|30000|{key1}"])
+    key2 = new_key()
+    check("supporter relay: a name someone has is taken", ask("sup2", "claim", name="brave-otter", key=key2)[0] == 409)
+    check("supporter relay: someone else's key refused", ask("sup2", "claim", name="other-name", key=key1)[0] == 409)
+    code, st = ask("sup2", "claim", name="calm-heron", key=key2)
+    check("supporter relay: each supporter their own port", code == 200 and st.get("port") == "30001")
+    key1 = new_key()
+    check("supporter relay: same name again takes a new key", ask("sup1", "claim", name="brave-otter", key=key1)[0] == 200
+          and relay.data["people"]["sup1"]["key"] == key1)
+    code, st = ask("sup1", "claim", name="swift-fox", key=key1)
+    check("supporter relay: a new name, the old one held for them", code == 200 and st.get("name") == "swift-fox"
+          and st.get("port") == "30000" and st.get("held") == "brave-otter"
+          and listing() == ["held|brave-otter", f"on|calm-heron|30001|{key2}", f"on|swift-fox|30000|{key1}"])
+    check("supporter relay: a held name is no one else's", ask("sup3", "claim", name="brave-otter", key=new_key())[0] == 409)
+    check("supporter relay: theirs to take back", ask("sup1", "claim", name="brave-otter", key=key1)[1].get("name") == "brave-otter")
+    check("supporter relay: a third new name today", ask("sup1", "claim", name="third-name", key=key1)[0] == 200)
+    check("supporter relay: not a fourth", ask("sup1", "claim", name="fourth-name", key=key1)[0] == 429)
+    check("supporter relay: one name each", sum(n["owner"] == "sup1" and n["state"] != "left"
+                                      for n in relay.data["names"].values()) == 1)
+
+    later = time.time() + RELAY_RECHECK + 1
+    members["sup2"]["supporter"] = False
+    relay.checks.clear()
+    relay.tick(later)
+    code, st = ask("sup2")
+    check("supporter relay: membership ended: the relay stops, the name is kept", relay.data["names"]["calm-heron"]["state"] == "lapsed"
+          and "held|calm-heron" in listing() and st.get("state") == "lapsed" and "kept for you until" in st.get("message", ""))
+    members["sup2"]["supporter"] = True
+    relay.checks.clear()
+    check("supporter relay: back on when they come back", ask("sup2")[1].get("state") == "on" and f"on|calm-heron|30001|{key2}" in listing())
+    oc["down"] = True
+    relay.checks.clear()
+    asked = oc["asked"]
+    relay.tick(later + RELAY_RECHECK)
+    relay.tick(later + RELAY_RECHECK + 60)
+    check("supporter relay: OCAccounts down: nothing changes, and it isn't asked every minute",
+          relay.data["names"]["third-name"]["state"] == "on" and oc["asked"] - asked == 2)
+    check("supporter relay: OCAccounts down: said plainly", ask("sup1")[1].get("step") == "error"
+          and ask("sup1", "claim", name="third-name", key=key1)[0] == 503)
+    oc["down"] = False
+    members["sup2"]["supporter"] = False
+    relay.checks.clear()
+    relay.tick(later + 3 * RELAY_RECHECK)
+    relay.tick(later + 3 * RELAY_RECHECK + RELAY_HOLD_LAPSED)
+    check("supporter relay: names freed when their time is up", sorted(relay.data["names"]) == ["third-name"]
+          and sorted(relay.data["people"]) == ["sup1"])
+    sync(busy="30000,30001,99")                    # sup2's old tunnel is still up on 30001
+    check("supporter relay: a port with a tunnel left on it goes to no one else",
+          ask("sup3", "claim", name="brave-otter", key=new_key())[1].get("port") == "30002" and relay.busy == {30000, 30001})
+    sync(busy="30000")
+    members["sup2"]["supporter"] = True
+    relay.checks.clear()
+    check("supporter relay: a freed name and port can be had again",
+          ask("sup2", "claim", name="calm-heron", key=key2)[1].get("port") == "30001")
+    check("supporter relay: full", ask("sup4", "claim", name="last-one", key=new_key())[0] == 503)
+    code, st = ask("sup3", "release")
+    check("supporter relay: a name given up", code == 200 and "name" not in st and st.get("held") == "brave-otter"
+          and "held|brave-otter" in listing())
+    check("supporter relay: list needs the admin key", rreq("GET", "/v1/relay/list")[0] == 401)
+    sync(busy="30000")
+    code, b, _ = rreq("GET", "/v1/relay/list", headers={"X-Xenith-Key": "k3y"})
+    check("supporter relay: list, with whose tunnel is up", code == 200 and "\nthird-name|sup1|on|30000|0|ok|" in b.decode()
+          and b.decode().splitlines()[-1].endswith("|up") and "\ncalm-heron|sup2|on|30001|0|ok|" in b.decode())
+    check("supporter relay: turned off", rreq("POST", "/v1/relay/off", "third-name", {"X-Xenith-Key": "k3y"})[0] == 200
+          and "held|third-name" in listing() and ask("sup1")[1].get("state") == "off")
+    check("supporter relay: turned off: no way round it", ask("sup1", "claim", name="other-name", key=key1)[0] == 403
+          and ask("sup1", "release")[0] == 403)
+    check("supporter relay: on again", rreq("POST", "/v1/relay/on", "third-name", {"X-Xenith-Key": "k3y"})[0] == 200
+          and f"on|third-name|30000|{key1}" in listing())
+    check("supporter relay: off needs a name in use", rreq("POST", "/v1/relay/off", "nobody", {"X-Xenith-Key": "k3y"})[0] == 404)
+    members["sup1"]["supporter"] = False
+    code, b, _ = rreq("POST", "/v1/relay/check", "third-name", {"X-Xenith-Key": "k3y"})
+    check("supporter relay: checked now, on the admin's word", code == 200 and kvparse(b) == {"step": "tier", "tier": "Supporter",
+                                                                                            "state": "lapsed"}
+          and rreq("POST", "/v1/relay/check", "third-name")[0] == 401)
+    members["sup1"]["supporter"] = True
+    check("supporter relay: and back", kvparse(rreq("POST", "/v1/relay/check", "third-name", {"X-Xenith-Key": "k3y"})[1])
+          .get("state") == "on")
+    rs.shutdown()
+    ocs.shutdown()
+
     reloaded = State(os.path.join(tmp, "state"))
     check("state persists", reloaded.data["motd"] == "Game night 9PM"
-          and reloaded.account("tuber")["avatar"] == "29d97979ab4421")
+          and reloaded.account("tuber")["avatar"] == "29d97979ab4421"
+          and reloaded.data["relay"]["names"]["third-name"]["owner"] == "sup1")
 
     httpd.shutdown()
     shutil.rmtree(tmp)
@@ -1992,22 +2704,33 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if args == ["--selftest"]:
         sys.exit(selftest())
-    if len(args) == 2 and args[0] in ("send", "motd"):
+    if (len(args) == 2 and args[0] in ("send", "motd")) or args == ["relay", "list"] or \
+            (len(args) == 3 and args[:2] in (["relay", "off"], ["relay", "on"], ["relay", "check"])):
         # Talk to the running server so its in-memory state stays the source of truth.
-        import urllib.error
-        import urllib.request
         key = os.environ.get("XENITH_ADMIN_KEY", "")
         if not key:
             sys.exit("XENITH_ADMIN_KEY is not set (on the VPS use the `xenith` wrapper)")
         port = os.environ.get("XENITH_PORT", "8795")
-        path = "/v1/inbox" if args[0] == "send" else "/v1/motd"
-        r = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=args[1].encode(),
-                                   method="POST", headers={"X-Xenith-Key": key})
+        if args[0] == "relay":
+            path, data = f"/v1/relay/{args[1]}", (args[2].encode() if len(args) == 3 else None)
+        else:
+            path, data = ("/v1/inbox" if args[0] == "send" else "/v1/motd"), args[1].encode()
+        r = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data,
+                                   method="POST" if data is not None else "GET", headers={"X-Xenith-Key": key})
         try:
             with urllib.request.urlopen(r, timeout=5) as resp:
-                print("sent" if args[0] == "send" else "motd set", resp.read().decode().strip())
+                text = resp.read().decode().strip()
+        except urllib.error.HTTPError as e:
+            sys.exit(e.read().decode().strip().replace("error=", "", 1))
         except (urllib.error.URLError, OSError) as e:
             sys.exit(f"server not reachable: {e}")
+        if args[:2] == ["relay", "list"]:
+            print(text or "no names yet")
+        elif args[:2] == ["relay", "check"]:
+            print(text)
+        else:
+            print({"send": "sent", "motd": "motd set", "relay": f"{args[2]} turned {args[1]}"}[args[0]],
+                  text if args[0] != "relay" else "")
         sys.exit(0)
     if args:
         print(__doc__)
