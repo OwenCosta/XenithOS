@@ -179,7 +179,16 @@ static void draw_home(void)
             avatar_draw(prof.avatar, x + w / 2 - 40, y + h * (big ? 32 : 42) / 100 - 40, 80);
         else
             icon_draw(tile_icon[i], x + w / 2.0f, y + h * (big ? 0.31f : 0.40f), 62, fg, fill);
-        gfx_str(FONT_LABEL, x + 16, y + h - (big ? 104 : 70), C_TEXT, tile_name[i]);
+        {
+            /* With bigger text, a name too wide for its tile (Feedback, with seven tiles) keeps the
+             * size names have without it, on the same baseline. */
+            int f = FONT_LABEL, ny = y + h - (big ? 104 : 70);
+            if (big && gfx_str_w(FONT_LABEL, tile_name[i]) > w - 24) {
+                f = FONT_BODY_SB;
+                ny += font_table[FONT_LABEL].ascent - font_table[FONT_BODY_SB].ascent;
+            }
+            gfx_str(f, x + 16, ny, C_TEXT, tile_name[i]);
+        }
         tile_sub(i, sub, sizeof sub);
         if (big) gfx_wrap(FONT_SMALL, x + 16, y + h - 66, w - 28, 0, C_SUB, sub, 2);
         else gfx_str_fit(FONT_SMALL, x + 16, y + h - 38, C_SUB, sub, w - 28);   /* seven tiles: 111 px for these words */
