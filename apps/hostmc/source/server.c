@@ -317,6 +317,7 @@ static void stopped(void)
     pi_server_stopped();
     vps_server_stopped();
     relay_server_stopped();
+    door_server_stopped();
     if (asked) {
         sv.why[0] = 0;
         sv_note("the server stopped.");

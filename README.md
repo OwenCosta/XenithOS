@@ -116,7 +116,7 @@ updates all of it (ffmpeg, Deno, the yt-dlp standalone build, the plugin and the
 download against its published checksum.
 
 ```bash
-python3 server/xenith_cloud.py --selftest      # 180 checks, no network needed
+python3 server/xenith_cloud.py --selftest      # 184 checks, no network needed
 ```
 
 Profiles: passcodes are stored as salted PBKDF2 hashes and sign-in tokens as SHA-256 hashes, so the state
@@ -150,7 +150,8 @@ From the server: `xenith send "XenithOS 0.5 is out"` (news), `xenith motd "Welco
 
 HostMC's supporter relay (off unless `XENITH_RELAY_DOMAIN` is set) gives supporters on Patreon a name for their
 Minecraft server and tells the relay machine (`server/mcrelay/`, a VPS of its own) the names, ports and
-HostMC keys, in syncs signed both ways with a secret the two share. Who's a supporter comes from OCAccounts
+HostMC keys, and which servers want players' real addresses (Paper), which the relay's router then sends them
+in a PROXY protocol header, in syncs signed both ways with a secret the two share. Who's a supporter comes from OCAccounts
 (`XENITH_OCACCOUNT_URL`). `xenith relay list`, `xenith relay off <name>`, `xenith relay on <name>` and
 `xenith relay check <name>` look after it. Setting it up: [server/mcrelay/README.md](server/mcrelay/README.md).
 

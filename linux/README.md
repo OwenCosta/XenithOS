@@ -189,14 +189,30 @@ and Internet (playit.gg, a VPS of your own, or the supporter relay).
     name, as with a VPS (`relay/check.txt`).
   - When the relay's port for players isn't 25565, the address has it, like
     `brave-otter-42.mc.owencosta.diy:25566`, and HostMC's check asks on that port.
-  - Through the relay, too, every player arrives from 127.0.0.1. The relay itself is in
+  - Players' real addresses come through the relay with Paper 1.19.4 and later (Players' real addresses,
+    on unless turned off on the relay's page). HostMC tells XenithOS Cloud the server wants them, the
+    relay's router then sends each player's address in a PROXY protocol header, and HostMC turns on
+    Paper's `proxies.proxy-protocol` (`server/config/paper-global.yml`) as the server starts. Paper then
+    wants that header on every connection, which Minecraft on this PC and friends at home don't send, so
+    HostMC puts a doorway on the server's port (its own program run as `hostmc --door`, in `door/`,
+    started and stopped with the server and left running like it): each connection goes on to Paper's
+    own port on the loopback with a header naming who it's from, so they join as before, with their own
+    addresses too. `door/door.txt` says it's set up (the port players use, Paper's port behind it, and
+    `server-ip` as it was); a start without it puts `server.properties` and Paper's setting back. Minecraft's
+    own server can't read the header, so with it every player arrives from 127.0.0.1, and so they do with
+    Bedrock players on (Geyser's own way into the server doesn't carry it). The relay itself is in
     [server/mcrelay](../server/mcrelay/README.md).
   - `sim/hostmc/test-relay.sh` tries all of it here: XenithOS Cloud, a stand-in OCAccounts, the relay's
-    router, sync and sshd, two supporters' servers, a membership ending and coming back, and a name
-    changed and given up.
+    router, sync and sshd, two supporters' servers, a membership ending and coming back, players'
+    addresses with Minecraft's own server and with Paper (through the relay and through the doorway, the
+    stand-in server reading the header as Paper does), and a name changed and given up.
 - In `~/.local/share/xenithos/hostmc/`: `server/` (the server, its world, `server.properties` and
-  `console.log`), `java/`, `backups/` (the newest 20, as `.tar.gz`), `playit/`, `vps/`, `relay/` and
-  `cache/` (version lists). `HOSTMC_JAVA` points it at another `java` (the simulator uses a stand-in).
+  `console.log`), `java/`, `backups/` (the newest 20, as `.tar.gz`), `playit/`, `vps/`, `relay/`, `door/`
+  and `cache/` (version lists). `HOSTMC_JAVA` points it at another `java` (the simulator uses a stand-in).
+- On XenithOS Desktop, the Apps menu opens HostMC as a desktop app (`XENITHOS_DESKTOP=1`): a window of its
+  own, the mouse (clicks, the wheel), text boxes and a command line on the console page typed into with the
+  keyboard, links that open in the browser, and hints that show keys and the mouse. `linux/test-hostmc.sh`
+  tries it in a virtual display, and `sim/scripts/hostmc_desktop.txt` in the simulator.
 
 ## Updates
 

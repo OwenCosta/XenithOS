@@ -16,8 +16,12 @@
 # relay's host key pinned; players reach the server by its name, and another supporter's name
 # reaches theirs; a name nobody has gets the relay's own answer; a membership that ends stops the
 # relay passing players (its port goes to no one else meanwhile) and coming back starts it again;
-# a new HostMC picks the tunnel up and closes it with the server. Screenshots end up in
-# sim/out/hostmc-relay.
+# players' addresses: Minecraft's own server keeps seeing 127.0.0.1, and with Paper the relay sends
+# each player's own in a PROXY header while a doorway on the server's port does the same for
+# players who come straight to it (the stand-in server acts as Paper does with proxy-protocol on);
+# a new HostMC picks the tunnel up and closes it, and the doorway, with the server. Players
+# "elsewhere" connect from other loopback addresses (127.0.0.7, 127.0.0.9), so the address the
+# server sees tells them apart. Screenshots end up in sim/out/hostmc-relay.
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 T=/tmp/hostmc-relay-test
 W="$T/data"                      # XenithOS's data folder on the supporter's PC, with hostmc/ in it
@@ -79,6 +83,12 @@ EOF
 }
 play() { python3 -I "$repo/sim/hostmc/ping.py" 127.0.0.1 "$PLAYERS" "$1.mc.test" 2>/dev/null; }   # a friend's game, by name
 says() { play "$1" | grep -q "$2"; }                   # what the relay or the server answers for a name
+# A friend's game from elsewhere ($2), by name through the relay, or ($1 "") at the server's own port.
+play_from() {
+    if [ -n "$1" ]; then python3 -I "$repo/sim/hostmc/ping.py" 127.0.0.1 "$PLAYERS" "$1.mc.test" "$2" 2>/dev/null
+    else python3 -I "$repo/sim/hostmc/ping.py" 127.0.0.1 "$MCPORT" "" "$2" 2>/dev/null; fi
+}
+seen() { tail -n 1 "$W/hostmc/server/connections.log" 2>/dev/null | grep -qx "$1"; }   # who the server last saw
 run() {                          # $1: the sim script, $2: a name for its screenshots and log, $3: the data folder, $4: typed
     mkdir -p "$T/shots/$2"
     ( cd "$3" && if [ -n "$4" ]; then export XSIM_TYPE="$4"; fi &&
@@ -178,6 +188,11 @@ check "a friend's game reached the server by its name, alpha.mc.test" grep -q "H
 check "HostMC's own check from outside, by the name, said so" checked_ok
 check "a name nobody has gets the relay's own answer" says nobody "no server called nobody"
 check "the server and the tunnel kept running after HostMC quit" both_running
+vanilla_local() { play_from alpha 127.0.0.7 > /dev/null && seen "status 127.0.0.1"; }
+no_proxy() { grep -qx "proxy=off" "$W/hostmc/relay/relay.txt" && grep -qx "proxy_able=1" "$W/hostmc/relay/relay.txt" &&
+             ! grep -q "^proxy|" "$R/routes"; }
+check "the relay told XenithOS Cloud it can send players' addresses, and this server (Minecraft's own) doesn't want them" no_proxy
+check "so through the relay a player from elsewhere shows up as 127.0.0.1" vanilla_local
 
 echo "== what HostMC's key can't do on the relay"
 other_port() { ! as_hostmc -N -R "127.0.0.1:30001:127.0.0.1:$MCPORT" && grep -q "forwarding failed" "$T/as_hostmc.log"; }
@@ -223,8 +238,35 @@ check "and players reach the server again" wait_for 10 says alpha "through the r
 kill "$SUP2" 2>/dev/null
 wait "$SUP2" 2>/dev/null
 
+echo "== Paper: players' real addresses through the relay, and the doorway for everyone else"
+# The server becomes Paper (what HostMC's Version page would have downloaded), while HostMC is
+# closed; HostMC restarts it.
+sed -i 's/^type=.*/type=paper/' "$W/hostmc/hostmc.txt" "$W/hostmc/server/installed.txt"
+rm -f "$W/hostmc/relay/check.txt"                # what the check from outside finds this time
+run hostmc_relay_paper.txt paper "$W" ""
+door_pid() { pid_in "$W/hostmc/door/door.pid"; }
+door_alive() { ours "$(door_pid)" "$W/hostmc/door"; }
+paper_port() { sed -n 's/^paper=//p' "$W/hostmc/door/door.txt" 2>/dev/null; }
+asked_on() { grep -qx "proxy=on" "$W/hostmc/relay/relay.txt"; }
+paper_set() { grep -qx "  proxy-protocol: true" "$W/hostmc/server/config/paper-global.yml" &&
+              [ -n "$(paper_port)" ] && grep -qx "server-port=$(paper_port)" "$W/hostmc/server/server.properties" &&
+              grep -qx "server-ip=127.0.0.1" "$W/hostmc/server/server.properties" && grep -qx "port=$MCPORT" "$W/hostmc/door/door.txt"; }
+relay_real() { play_from alpha 127.0.0.7 | grep -q "through the relay" && seen "status 127.0.0.7"; }
+door_real() { play_from "" 127.0.0.9 | grep -q "through the relay" && seen "status 127.0.0.9"; }
+no_header() { python3 -I "$repo/sim/hostmc/ping.py" 127.0.0.1 "$(paper_port)" "" 127.0.0.5 > /dev/null 2>&1; seen "no PROXY header from 127.0.0.5"; }
+check "HostMC asked XenithOS Cloud for players' addresses, and it said yes" asked_on
+check "the relay lists the server for them" wait_for 10 grep -qx "proxy|alpha" "$R/routes"
+check "Paper's proxy-protocol is on, behind the doorway, on a port of its own on the loopback" paper_set
+check "the doorway has the server's port ($MCPORT)" door_alive
+check "a friend from elsewhere reaches the server through the relay with their own address (127.0.0.7)" wait_for 15 relay_real
+check "a friend at the server's own port comes through the doorway with theirs (127.0.0.9)" door_real
+check "Paper itself turns away a connection without the header, as the real one does" no_header
+check "HostMC's own check from outside, by the name, passed" checked_ok
+check "the server, the tunnel and the doorway kept running after HostMC quit" eval "both_running && door_alive"
+
 echo "== a new HostMC picks the tunnel up, changes the name, gives it up, and stops the server"
 keeper_pid=$(keeper)
+doorway_pid=$(door_pid)
 # A friend's game trying the new name, until it reaches the server.
 ( for _ in $(seq 1 90); do says gamma "through the relay" && touch "$T/gamma-reached" && break; sleep 1; done ) &
 PINGER=$!
@@ -241,13 +283,17 @@ check "both names are given up, and kept for Sup1 for a week" both_held
 check "HostMC turned the relay off and says which names are kept" relay_off
 check "the tunnel closed" tunnel_gone
 check "the server stopped" server_gone
+door_gone() { ! ours "$doorway_pid" "$W/hostmc/door" && [ ! -e "$W/hostmc/door/door.pid" ]; }
+check "the doorway closed with it" door_gone
 check "a friend's game now hears the name isn't available" wait_for 10 says gamma "gamma isn't available"
 
 # Everything this test started (its own children), and anything HostMC left running (a run that
 # went wrong), by checked PID.
 for p in $pids; do kill "$p" 2>/dev/null; done
-for p in "$(keeper)" "$(pid_in "$W/hostmc/server/hostmc.pid")"; do
-    if ours "$p" "$W/hostmc/relay" || ours "$p" "$W/hostmc/server"; then echo "  (stopping $p, left running)"; kill "$p"; failed=1; fi
+for p in "$(keeper)" "$(pid_in "$W/hostmc/server/hostmc.pid")" "$(pid_in "$W/hostmc/door/door.pid")"; do
+    if ours "$p" "$W/hostmc/relay" || ours "$p" "$W/hostmc/server" || ours "$p" "$W/hostmc/door"; then
+        echo "  (stopping $p, left running)"; kill "$p"; failed=1
+    fi
 done
 wait 2>/dev/null
 mkdir -p "$repo/sim/out/hostmc-relay"

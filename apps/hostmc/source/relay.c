@@ -11,7 +11,10 @@
  * hostmc/relay/relay.txt, so the tunnel starts without asking again; the host key is the only one
  * trusted for the relay (tunnel_pin).
  *
- * Its limits are the VPS route's: Java Edition only, and every player arrives as 127.0.0.1.
+ * Java Edition only, as through a VPS. Players' real addresses come through with Paper: HostMC
+ * tells XenithOS Cloud whether the server wants them (proxy=1), the relay's router then sends
+ * each one in a PROXY protocol header, and door.c sets Paper up for it. Minecraft's own server
+ * can't read them, so with it every player arrives as 127.0.0.1, the tunnel's end.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -68,6 +71,10 @@ static void parse(const char *text)
     relay.until = atoll(v);
     field(text, "players_port", v, sizeof v);
     relay.players_port = atoi(v) > 0 && atoi(v) < 65536 ? atoi(v) : DEFAULT_PORT;
+    field(text, "proxy", v, sizeof v);
+    relay.proxy = !strcmp(v, "on");
+    field(text, "proxy_able", v, sizeof v);
+    relay.proxy_able = atoi(v) == 1;
     memset(&relay.w.cfg, 0, sizeof relay.w.cfg);
     field(text, "ssh_host", relay.w.cfg.host, sizeof relay.w.cfg.host);
     field(text, "ssh_user", relay.w.cfg.user, sizeof relay.w.cfg.user);
@@ -142,6 +149,7 @@ void relay_init(void)
     relay.w.name = "the relay";
     relay.w.Name = "The relay";
     relay.w.on = &hs.relay;
+    relay.w.direct = 1;                              /* its router sends players' addresses itself */
     relay.w.check_file = RELAY_DIR "/check.txt";
     relay.w.address = relay_address;
     relay.w.target = target;
@@ -156,12 +164,35 @@ void relay_init(void)
     if (!hs.relay && tunnel_alive(&relay.w.t)) tunnel_stop(&relay.w.t);
 }
 
+/* Players' real addresses for the server that starts next: Paper new enough to take them, not
+ * Bedrock players (Geyser's own connections into the server don't carry the header), and not
+ * turned off on the relay's page. */
+int relay_proxy_wanted(void)
+{
+    return !strcmp(hs.type, "paper") && paper_takes_proxy(hs.version) && !hs.bedrock && hs.real_ips;
+}
+
+int relay_proxy_on(void)
+{
+    return relay.proxy && relay.proxy_able;
+}
+
+/* Before the server starts: XenithOS Cloud told what it will want, if that's changed, so the
+ * relay sends players' addresses exactly when Paper expects them (door.c goes by the answer). */
+void relay_sync_proxy(void)
+{
+    char why[240];
+    int want = relay_proxy_wanted();
+    if (!hs.relay || !relay.name[0] || want == relay_proxy_on() || (want && !relay.proxy_able)) return;
+    relay_ask("status", NULL, why, sizeof why);      /* without an answer, the last one stands */
+}
+
 int relay_ask(const char *what, const char *name, char *why, int n)
 {
     struct http_resp r;
     struct tunnel_cfg before = relay.w.cfg;
-    char form[700], tok[160], pub[240], epub[360], ename[80], path[40], key_before[100], name_before[24];
-    int code;
+    char form[720], tok[160], pub[240], epub[360], ename[80], path[40], key_before[100], name_before[24];
+    int code, proxy_before = relay_proxy_on(), proxy;
     why[0] = 0;
     if (!prof.signed_in || !prof.token[0]) {
         snprintf(why, n, "Sign in to your XenithOS profile first, in XenithOS's Profile. The relay goes by it.");
@@ -172,6 +203,9 @@ int relay_ask(const char *what, const char *name, char *why, int n)
         return 0;
     }
     net_escape(prof.token, tok, sizeof tok);
+    /* Whether the server wants players' addresses: the running one's as it is (door.c), or the
+     * next one's while it's stopped. */
+    proxy = sv.state != SV_STOPPED ? door_on() : relay_proxy_wanted();
     if (!strcmp(what, "claim")) {
         if (!tunnel_key(&relay.w.t, why, n)) return 0;
         if (!tunnel_pubkey(&relay.w.t, pub, sizeof pub)) {
@@ -180,9 +214,9 @@ int relay_ask(const char *what, const char *name, char *why, int n)
         }
         net_escape(pub, epub, sizeof epub);
         net_escape(name, ename, sizeof ename);
-        snprintf(form, sizeof form, "token=%s&name=%s&key=%s", tok, ename, epub);
+        snprintf(form, sizeof form, "token=%s&name=%s&key=%s&proxy=%d", tok, ename, epub, proxy);
     } else {
-        snprintf(form, sizeof form, "token=%s", tok);
+        snprintf(form, sizeof form, "token=%s&proxy=%d", tok, proxy);
     }
     snprintf(path, sizeof path, "/v1/relay/%s", what);
     ui_busy_begin("Asking XenithOS Cloud", name);
@@ -210,6 +244,7 @@ int relay_ask(const char *what, const char *name, char *why, int n)
         relay.w.check_ok = 0;
         if (relay.name[0] && tunnel_alive(&relay.w.t)) relay.w.check_at = ui_ms() + 35000;
     }
+    if (proxy_before != relay_proxy_on()) relay.w.check_after = ui_ms() + 35000;   /* the same for players' addresses */
     if (relay.hostkey[0]) tunnel_pin(&relay.w.t, &relay.w.cfg, relay.hostkey);
     /* The relay moved, or its identity changed: the tunnel starts again with the new ones. */
     if (tunnel_alive(&relay.w.t) && (strcmp(before.host, relay.w.cfg.host) || before.ssh_port != relay.w.cfg.ssh_port ||

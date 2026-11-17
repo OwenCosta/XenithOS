@@ -31,7 +31,9 @@ void way_reset(struct way *w)
 static void start_tunnel(struct way *w)
 {
     char why[220] = "", note[260];
-    w->cfg.local_port = server_port();
+    /* The relay's tunnel goes straight to Paper's own port when there's a doorway in front of it
+     * (door.c): its router sends the player's address itself. */
+    w->cfg.local_port = w->direct ? door_paper_port() : server_port();
     w->checked_try = w->told_try = -2;               /* a new tunnel.log */
     if (tunnel_start(&w->t, &w->cfg, why, sizeof why)) {
         snprintf(note, sizeof note, "connecting to %s.", w->name);
@@ -139,6 +141,7 @@ void way_poll(struct way *w)
         snprintf(note, sizeof note, "the tunnel to %s is up.", w->name);
         sv_note(note);
         w->check_at = now + 1500;
+        if (w->check_at < w->check_after) w->check_at = w->check_after;   /* until the relay knows what changed */
     } else if (w->state == TS_RETRYING && attempt != w->told_try) {
         char note[300], title[80];
         int first = w->told_try == -2 || w->checked_try == attempt;   /* it was up, or it's the first try */

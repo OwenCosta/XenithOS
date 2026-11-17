@@ -40,7 +40,9 @@ More switches:
   what it would have downloaded already in `hostmc/` (`sim/hostmc/data`), so nothing is downloaded
   (`sim/scripts/hostmc.txt`). It runs in real time, since the stand-in does. Without `XSIM_HOSTMC`, HostMC
   downloads Java and a real server and runs it. A server a script leaves running is stopped afterwards.
-  The stand-in answers server list pings on its port (127.0.0.1 only), and `sim/hostmc/ping.py` sends one.
+  The stand-in answers server list pings on its port (on `server-ip`, or 127.0.0.1), and `sim/hostmc/ping.py`
+  sends one. With Paper's `proxies.proxy-protocol` on in `config/paper-global.yml` it wants a PROXY header
+  first, as Paper does, and notes who each connection was from in `connections.log`.
 - `XSIM_DESKTOP=1` runs the program as a desktop app, as XenithOS Desktop's Apps menu opens it
   (`plat_desktop()`): the script drives a mouse and the keyboard's own keys too (below), and
   `XSIM_CLIPBOARD` is what's been copied when it starts (what the program copies is said on stderr, as
@@ -54,7 +56,9 @@ More switches:
   local XenithOS Cloud, a stand-in for OCAccounts (`sim/hostmc/ocaccounts.py`) and the relay's own software
   (`server/mcrelay`, with its sshd run as you on a spare port), and checks each step; screenshots go to
   `sim/out/hostmc-relay`. HostMC runs in a user namespace with a hosts file of its own (`unshare`,
-  `nsenter`), so its check asks by name. `ping.py` takes a third argument, the name a player typed.
+  `nsenter`), so its check asks by name. `ping.py` takes a third argument, the name a player typed, and a
+  fourth, the address to connect from (another loopback address stands for a player elsewhere, so the
+  server can tell players' addresses apart: `hostmc_relay_paper.txt` is that part).
 
 ## Scripts
 

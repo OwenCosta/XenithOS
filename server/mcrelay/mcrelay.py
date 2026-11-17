@@ -9,14 +9,18 @@ supporter's HostMC, down the SSH tunnel HostMC keeps open to this machine.
 Three parts, each run as its own service (setup.sh sets them up):
 
   mcrelay.py router   players, on MCRELAY_LISTEN. Names come from the routes file the sync
-                      writes. Players' addresses are never logged or kept.
+                      writes. Players' addresses are never logged or kept; a server that has
+                      asked for them (Paper's proxy-protocol, which HostMC turns on) gets each
+                      player's address in a PROXY protocol v2 header before the game's bytes.
   mcrelay.py sync     every 30 seconds asks XenithOS Cloud (/v1/relay/sync) for the names,
                       their ports on this machine's loopback and the keys supporters' HostMC log
                       in with, both ways signed with the secret the two share. It writes the
                       routes and the tunnel account's authorized_keys, and tells XenithOS Cloud
-                      which ports have a tunnel on them (busy_ports). It runs as the tunnel
-                      account, which owns those keys and tunnels. When XenithOS Cloud doesn't
-                      answer, the names from before stay.
+                      which ports have a tunnel on them (busy_ports), and that this router can
+                      send PROXY headers (proxy=2), so XenithOS Cloud lists the servers that
+                      want them (proxy|name). It runs as the tunnel account, which owns those
+                      keys and tunnels. When XenithOS Cloud doesn't answer, the names from
+                      before stay.
   sshd                tunnels only, with the settings `mcrelay.py sshd-config` writes: its own
                       port, one account, keys only, remote forwards only (ssh -R), each key to
                       its own port on the loopback (permitlisten), no shell or anything else.
@@ -39,6 +43,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -57,6 +62,8 @@ HANDSHAKE_TIMEOUT = 5          # seconds for a game to say which server it wants
 MAX_HANDSHAKE = 1100           # bytes: a handshake is a few hundred at most
 SYNC_EVERY = 30
 LOOPBACK = {"0100007F", "00000000000000000000000001000000"}   # 127.0.0.1 and ::1 in /proc/net/tcp*
+PROXY_V2 = b"\r\n\r\n\x00\r\nQUIT\n"     # the PROXY protocol v2 signature (haproxy.org's spec)
+PROXY_VERSION = 2                         # what this router sends, told to XenithOS Cloud
 
 
 def log(message):
@@ -71,6 +78,18 @@ def address(text, default_port):
 def plain_ip(ip):
     """An IPv4 address that arrived as IPv6 ("::ffff:1.2.3.4") is just IPv4."""
     return ip[7:] if ip.startswith("::ffff:") and "." in ip else ip
+
+
+def proxy_header(player, relay):
+    """A PROXY protocol v2 header (PROXY command, TCP) for a server that asked for players'
+    addresses: player is the (address, port) the game connected from, relay the (address, port)
+    it connected to here. Paper reads it with proxies.proxy-protocol on."""
+    src, dst = ipaddress.ip_address(plain_ip(str(player[0]))), ipaddress.ip_address(plain_ip(str(relay[0])))
+    if src.version != dst.version:                # both as IPv6 when they differ
+        src, dst = (ipaddress.IPv6Address(f"::ffff:{a}") if a.version == 4 else a for a in (src, dst))
+    family = b"\x11" if src.version == 4 else b"\x21"         # TCP over IPv4, TCP over IPv6
+    body = src.packed + dst.packed + int(player[1]).to_bytes(2, "big") + int(relay[1]).to_bytes(2, "big")
+    return PROXY_V2 + b"\x21" + family + len(body).to_bytes(2, "big") + body
 
 
 def ssh_key(text):
@@ -188,8 +207,9 @@ def disconnect_packet(text):
 # ---------------------------------------------------------------------- router
 
 def read_routes(path):
-    """(domain, {name: port}, {held names}) from the file the sync writes."""
-    domain, on, held = "", {}, set()
+    """(domain, {name: port}, {held names}, {names whose server wants PROXY headers}) from the
+    file the sync writes."""
+    domain, on, held, proxy = "", {}, set(), set()
     with open(path, encoding="ascii", errors="replace") as f:
         for line in f:
             line = line.strip()
@@ -201,7 +221,9 @@ def read_routes(path):
                 on[f[1]] = int(f[2])
             elif len(f) == 2 and f[0] == "held" and NAME_RE.match(f[1]):
                 held.add(f[1])
-    return domain, on, held
+            elif len(f) == 2 and f[0] == "proxy" and NAME_RE.match(f[1]):
+                proxy.add(f[1])
+    return domain, on, held, proxy
 
 
 async def pipe(reader, writer):
@@ -222,7 +244,7 @@ async def pipe(reader, writer):
 class Router:
     def __init__(self, routes, limit=2000, per_ip=12, rate=40, per_name=200):
         self.path, self.port = routes, 25565
-        self.domain, self.on, self.held, self.seen = "", {}, set(), None
+        self.domain, self.on, self.held, self.proxy, self.seen = "", {}, set(), set(), None
         self.limit, self.per_ip, self.rate, self.per_name = limit, per_ip, rate, per_name
         self.active, self.by_ip, self.by_name, self.recent = 0, {}, {}, {}
 
@@ -231,11 +253,12 @@ class Router:
             st = os.stat(self.path)
             if (st.st_mtime_ns, st.st_size) == self.seen:
                 return
-            self.domain, self.on, self.held = read_routes(self.path)
+            self.domain, self.on, self.held, self.proxy = read_routes(self.path)
             self.seen = (st.st_mtime_ns, st.st_size)
         except OSError:
             return
-        log(f"{len(self.on)} names on, {len(self.held)} held, under {self.domain or '(no domain yet)'}")
+        log(f"{len(self.on)} names on ({len(self.proxy & set(self.on))} taking players' addresses), "
+            f"{len(self.held)} held, under {self.domain or '(no domain yet)'}")
 
     async def watch(self):
         while True:
@@ -263,7 +286,7 @@ class Router:
         self.active += 1
         self.by_ip[ip] = self.by_ip.get(ip, 0) + 1
         try:
-            await self.serve(reader, writer)
+            await self.serve(reader, writer, peer)
         except (ConnectionError, OSError, asyncio.TimeoutError, ValueError):
             pass
         finally:
@@ -276,7 +299,7 @@ class Router:
             except (ConnectionError, OSError):
                 pass
 
-    async def serve(self, reader, writer):
+    async def serve(self, reader, writer, peer):
         loop = asyncio.get_running_loop()
         deadline, buf = loop.time() + HANDSHAKE_TIMEOUT, b""
         while True:
@@ -313,7 +336,13 @@ class Router:
             return await self.refuse(reader, writer, state, buf[used:], f"{name} is offline right now.", "Offline")
         self.by_name[name] = self.by_name.get(name, 0) + 1
         try:
-            up_w.write(buf)                            # the handshake and anything after it, as sent
+            first = b""
+            if name in self.proxy:                     # the player's address first, for a server that asked
+                try:
+                    first = proxy_header(peer, writer.get_extra_info("sockname"))
+                except (ValueError, TypeError, IndexError):
+                    return                             # an address that can't be named: no way in without one
+            up_w.write(first + buf)                    # the handshake and anything after it, as sent
             await asyncio.gather(pipe(reader, up_w), pipe(up_r, writer))
         finally:
             up_w.close()
@@ -380,11 +409,12 @@ async def run_router(listen, routes, limits, ready=None):
 # ---------------------------------------------------------------------- sync
 
 def fetch(cloud, secret, hostkey, busy=(), timeout=15):
-    """The names from XenithOS Cloud: (domain, [(name, port, key)], [held names]). It's told this
-    machine's SSH host key and the ports with a tunnel on them. OSError or ValueError when
-    there's no answer to go by."""
+    """The names from XenithOS Cloud: (domain, [(name, port, key)], [held names], [names whose
+    server wants PROXY headers]). It's told this machine's SSH host key, the ports with a tunnel
+    on them, and that the router sends PROXY protocol v2. OSError or ValueError when there's no
+    answer to go by."""
     t = int(time.time())
-    body = urlencode({"t": t, "hostkey": hostkey, "busy": ",".join(map(str, busy))})
+    body = urlencode({"t": t, "hostkey": hostkey, "busy": ",".join(map(str, busy)), "proxy": PROXY_VERSION})
     req = urllib.request.Request(cloud.rstrip("/") + "/v1/relay/sync", data=body.encode(), method="POST",
                                  headers={"X-Relay-Sign": sign(secret, "sync", body), "User-Agent": "mcrelay/1",
                                           "Content-Type": "application/x-www-form-urlencoded"})
@@ -399,7 +429,7 @@ def fetch(cloud, secret, hostkey, busy=(), timeout=15):
     lines = text.decode("ascii", "replace").splitlines()
     if not lines or lines[0] != f"t={t}":
         raise ValueError("the answer was to another request")
-    domain, on, held, keys, ports = "", [], [], set(), set()
+    domain, on, held, proxy, keys, ports = "", [], [], [], set(), set()
     for line in lines[1:]:
         if line.startswith("domain="):
             domain = line[7:]
@@ -413,9 +443,12 @@ def fetch(cloud, secret, hostkey, busy=(), timeout=15):
                 on.append((f[1], int(f[2]), key))
         elif len(f) == 2 and f[0] == "held" and NAME_RE.match(f[1]):
             held.append(f[1])
+        elif len(f) == 2 and f[0] == "proxy" and NAME_RE.match(f[1]):
+            proxy.append(f[1])
     if not DOMAIN_RE.match(domain):
         raise ValueError("the answer had no domain")
-    return domain, on, held
+    names = {n for n, _, _ in on}
+    return domain, on, held, [n for n in proxy if n in names]
 
 
 def write_file(path, text, mode):
@@ -435,10 +468,11 @@ def write_file(path, text, mode):
     return True
 
 
-def write_lists(folder, domain, on, held):
+def write_lists(folder, domain, on, held, proxy=()):
     """The router's routes, and the tunnel account's authorized_keys: each key may only open its
     own port, on the loopback, and do nothing else."""
-    routes = f"domain={domain}\n" + "".join(f"on|{n}|{p}\n" for n, p, _ in on) + "".join(f"held|{n}\n" for n in held)
+    routes = f"domain={domain}\n" + "".join(f"on|{n}|{p}\n" for n, p, _ in on) + "".join(f"held|{n}\n" for n in held) + \
+        "".join(f"proxy|{n}\n" for n in proxy)
     keys = "# HostMC's tunnels, written by mcrelay sync from XenithOS Cloud's list. Changes here don't last.\n" + \
         "".join(f'restrict,port-forwarding,permitlisten="127.0.0.1:{p}" {k} {n}\n' for n, p, k in on)
     changed = write_file(os.path.join(folder, "authorized_keys"), keys, 0o600)
@@ -475,8 +509,8 @@ def run_sync(cloud, secret, hostkey_path, folder, once=False, every=SYNC_EVERY):
         except OSError:
             hostkey = ""
         try:
-            domain, on, held = fetch(cloud, secret, hostkey, busy_ports())
-            if write_lists(folder, domain, on, held) or told != "ok":
+            domain, on, held, proxy = fetch(cloud, secret, hostkey, busy_ports())
+            if write_lists(folder, domain, on, held, proxy) or told != "ok":
                 log(f"{len(on)} names on, {len(held)} held")
             told = "ok"
         except (OSError, ValueError) as e:
@@ -556,6 +590,19 @@ def selftest():
           and name_in("mc.example.com", "mc.example.com") == "" and name_in("a.b.mc.example.com", "mc.example.com") == ""
           and name_in("brave-otter.mc.example.org", "mc.example.com") == "" and name_in("1.2.3.4", "mc.example.com") == "")
 
+    # PROXY protocol v2 headers, byte for byte as the spec lays them out
+    v4 = PROXY_V2 + b"\x21\x11\x00\x0c" + bytes([203, 0, 113, 7, 198, 51, 100, 1]) + (51000).to_bytes(2, "big") + \
+        (25566).to_bytes(2, "big")
+    check("PROXY header: IPv4", proxy_header(("203.0.113.7", 51000), ("198.51.100.1", 25566)) == v4)
+    check("PROXY header: IPv4 that came as IPv6 is IPv4",
+          proxy_header(("::ffff:203.0.113.7", 51000, 0, 0), ("::ffff:198.51.100.1", 25566, 0, 0)) == v4)
+    v6 = proxy_header(("2001:db8::7", 51000, 0, 0), ("2001:db8::1", 25566, 0, 0))
+    check("PROXY header: IPv6", v6[12:16] == b"\x21\x21\x00\x24" and len(v6) == 16 + 36
+          and v6[16:32] == ipaddress.ip_address("2001:db8::7").packed and v6[48:50] == (51000).to_bytes(2, "big"))
+    mixed = proxy_header(("203.0.113.7", 1), ("2001:db8::1", 2))
+    check("PROXY header: one of each, both as IPv6", mixed[13:14] == b"\x21"
+          and mixed[16:32] == ipaddress.ip_address("::ffff:203.0.113.7").packed)
+
     # The router, with the sync's routes file and stand-in servers
     tmp = tempfile.mkdtemp()
     servers = []
@@ -590,7 +637,7 @@ def selftest():
     routes = os.path.join(tmp, "routes")
     with open(routes, "w") as f:
         f.write(f"domain=mc.example.com\non|alpha|{alpha_port}\non|beta|{beta_port}\non|down|{dead_port}\n"
-                f"on|bad.name|{alpha_port}\non|low|80\nheld|lapsed\n")
+                f"on|bad.name|{alpha_port}\non|low|80\nheld|lapsed\nproxy|beta\nproxy|bad.name\n")
     ports = []
     threading.Thread(target=lambda: asyncio.run(run_router(("127.0.0.1", 0), routes, (2000, 3, 1000, 200), ports)),
                      daemon=True).start()
@@ -599,8 +646,8 @@ def selftest():
             break
         time.sleep(0.02)
 
-    def play(data, wait=True):
-        with socket.create_connection(("127.0.0.1", ports[0]), timeout=5) as s:
+    def play(data, wait=True, source="127.0.0.1"):
+        with socket.create_connection(("127.0.0.1", ports[0]), timeout=5, source_address=(source, 0)) as s:
             s.sendall(data)
             out = b""
             try:
@@ -627,11 +674,17 @@ def selftest():
 
     login = shake("ALPHA.mc.example.com") + packet(0, mc_string("Steve") + bytes(16))
     check("routes read, bad lines left out", read_routes(routes)[1] == {"alpha": alpha_port, "beta": beta_port,
-                                                                       "down": dead_port})
-    check("a player reaches the server their name is for", play(login) == b"hello from %d" % alpha_port
+                                                                       "down": dead_port}
+          and read_routes(routes)[3] == {"beta"})
+    check("a player reaches the server their name is for", play(login, source="127.0.0.7") == b"hello from %d" % alpha_port
           and alpha_got and alpha_got[-1] == login)
-    check("and another name another server", play(shake("beta.mc.example.com", 1) + b"\x01\x00")
-          == b"hello from %d" % beta_port)
+    status = shake("beta.mc.example.com", 1) + b"\x01\x00"
+    check("and another name another server", play(status, source="127.0.0.7") == b"hello from %d" % beta_port)
+    got_beta = beta_got[-1] if beta_got else b""
+    check("a server that wants players' addresses gets the player's first, then what the game sent",
+          got_beta[:14] == PROXY_V2 + b"\x21\x11" and got_beta[16:20] == bytes([127, 0, 0, 7])
+          and got_beta[20:24] == bytes([127, 0, 0, 1]) and got_beta[26:28] == ports[0].to_bytes(2, "big")
+          and got_beta[28:] == status)
     ping = b"\x09\x01" + b"12345678"
     out = play(shake("nobody.mc.example.com", 1) + b"\x01\x00" + ping)
     check("no such name: said in the server list, ping answered", "no server called nobody" in text_of(out)
@@ -668,6 +721,7 @@ def selftest():
             ok = hmac.compare_digest(sign(secret, "sync", body), self.headers.get("X-Relay-Sign", ""))
             form = {k: v[0] for k, v in parse_qs(body.decode()).items()}
             cloud["heard"] = form.get("hostkey") if ok else None
+            cloud["proxy"] = form.get("proxy") if ok else None
             text = f"t={cloud['t'] or form.get('t')}\ndomain=mc.example.com\n{cloud['rows']}".encode()
             self.send_response(200 if ok else 401)
             self.send_header("Content-Length", str(len(text)))
@@ -680,10 +734,12 @@ def selftest():
     url = f"http://127.0.0.1:{cs.server_address[1]}"
     cloud["rows"] = (f"on|alpha|30000|{k1}\non|beta|30001|{k2} extra\nheld|gone\non|evil|30002|{k1}\n"
                      f"on|twin|30001|{k2}\non|bad|30003|ssh-ed25519 AAAA\non|x.y|30004|{k1}\n"
-                     f"on|inject|30005|{k1}\nrestrict\n")
+                     f"on|inject|30005|{k1}\nrestrict\nproxy|beta\nproxy|gone\nproxy|x.y\n")
     got = fetch(url, secret, hostkey + " root@relay")
-    check("sync: the list, with only good rows", got == ("mc.example.com", [("alpha", 30000, k1), ("beta", 30001, k2)], ["gone"])
+    check("sync: the list, with only good rows", got == ("mc.example.com", [("alpha", 30000, k1), ("beta", 30001, k2)], ["gone"],
+                                                         ["beta"])
           and cloud["heard"] == hostkey + " root@relay")
+    check("sync: XenithOS Cloud is told this router sends PROXY headers", cloud["proxy"] == str(PROXY_VERSION))
     check("sync: refused with another secret", _raises(fetch, url, "t" * 64, hostkey, exc=OSError))
     cloud["sign"] = False
     check("sync: an answer not signed is no answer", _raises(fetch, url, secret, hostkey))
@@ -699,8 +755,8 @@ def selftest():
         f'restrict,port-forwarding,permitlisten="127.0.0.1:30000" {k1} alpha',
         f'restrict,port-forwarding,permitlisten="127.0.0.1:30001" {k2} beta']
         and os.stat(os.path.join(folder, "authorized_keys")).st_mode & 0o777 == 0o600)
-    check("sync: the router's routes", read_routes(os.path.join(folder, "routes")) ==
-          ("mc.example.com", {"alpha": 30000, "beta": 30001}, {"gone"}))
+    check("sync: the router's routes, with who wants players' addresses", read_routes(os.path.join(folder, "routes")) ==
+          ("mc.example.com", {"alpha": 30000, "beta": 30001}, {"gone"}, {"beta"}))
     cs.shutdown()
     cs.server_close()
     check("sync: XenithOS Cloud away, the lists stay", not run_sync(url, secret, "/nonexistent", folder, once=True)

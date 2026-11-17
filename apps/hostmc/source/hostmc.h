@@ -35,6 +35,8 @@ struct hm_settings {
     int vps;                /* the player's own VPS on */
     int relay;              /* the supporter relay on (one of the three at a time) */
     int told_detach;        /* has been told the server keeps running after HostMC */
+    int real_ips;           /* players' real addresses through the relay, with Paper (door.c) */
+    int bedrock;            /* Bedrock players too, through Geyser and Floodgate (geyser.c) */
 };
 extern struct hm_settings hs;
 void hs_load(void);
@@ -272,6 +274,8 @@ struct way {
     /* set by its owner */
     const char *name, *Name;                    /* "your VPS", "Your VPS": in notes and toasts */
     const int *on;                              /* its setting in hs */
+    int direct;                                 /* the tunnel goes to Paper's own port (door.c): the relay */
+    uint64_t check_after;                       /* no check from outside before this (ui_ms) */
     const char *check_file;                     /* where the check's finding is kept */
     void (*address)(char *out, int n);          /* what friends type */
     void (*target)(char *host, int n, int *port);           /* where the check asks */
@@ -324,10 +328,15 @@ struct hm_relay {
     int players_port;                           /* the relay's port for players (address has :port if not 25565) */
     long long until;                            /* a lapsed name is kept until then */
     uint64_t asked;                             /* when XenithOS Cloud was last asked (ui_ms) */
+    int proxy;                                  /* XenithOS Cloud says the relay sends players' addresses */
+    int proxy_able;                             /* the relay can */
 };
 extern struct hm_relay relay;
 void relay_init(void);
 void relay_poll(void);
+int  relay_proxy_wanted(void);                  /* players' real addresses, for the server that starts next */
+int  relay_proxy_on(void);                      /* XenithOS Cloud's last word: the relay sends them */
+void relay_sync_proxy(void);                    /* before a start: XenithOS Cloud told what the server wants */
 /* Asks XenithOS Cloud: "status", "claim" (name) or "release", behind a loading screen. 0 with
  * why set when it couldn't, or said no. */
 int  relay_ask(const char *what, const char *name, char *why, int n);
@@ -339,6 +348,25 @@ void relay_check(void);
 int  relay_up(void);
 void relay_address(char *out, int n);
 const char *relay_status(uint32_t *color);
+
+/* ------------------------------------------------------------- door.c */
+
+/* Players' real addresses through the relay, with Paper's proxy-protocol, and the doorway on the
+ * server's port that keeps every other way in working meanwhile (see door.c). */
+int  door_main(int port, int to_port);          /* the doorway itself: hostmc --door PORT TO */
+void door_load(void);
+void door_attach(void);                         /* at start: one left running goes, unless the server runs */
+int  door_prepare(char *why, int n);            /* as the server starts: door mode set up, or put back */
+void door_server_stopped(void);
+void door_stop(void);
+void door_poll(void);
+int  door_on(void);                             /* door mode is set up (door.txt) */
+int  door_alive(void);
+int  door_players_port(void);                   /* the doorway's port: the one players join at */
+int  door_paper_port(void);                     /* where Paper takes players: its own port, or server_port() */
+int  door_set_players_port(int port);           /* the Port setting, in door mode */
+int  paper_proxy_protocol(int on);              /* proxies.proxy-protocol in config/paper-global.yml */
+int  paper_takes_proxy(const char *version);    /* a Paper version that has that setting */
 
 /* --------------------------------------------------------------- qr.c */
 

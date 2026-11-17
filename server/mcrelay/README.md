@@ -5,7 +5,8 @@ that friends type into Minecraft. This folder is the relay machine's software, f
 
 ```
 friend's game ──25565──▶ relay: router ──127.0.0.1:<their port>──▶ sshd ══ SSH tunnel ══▶ HostMC ──▶ server
-                         (reads the name)                         (HostMC keeps it open while the server runs)
+                         (reads the name; for Paper,          (HostMC keeps it open while the server runs)
+                          the player's address first)
 
 relay: sync ──every 30 s, signed both ways──▶ XenithOS Cloud ──▶ OCAccounts (who's a supporter)
 ```
@@ -31,8 +32,22 @@ relay: sync ──every 30 s, signed both ways──▶ XenithOS Cloud ──▶
   `PermitOpen none`, `MaxSessions 0`), forwards always on the loopback (`GatewayPorts no`). The machine's own
   SSH on port 22 stays as it is.
 
-Every player arrives at the supporter's server from 127.0.0.1 (bans by address don't work for them; by name
-they do). Passing the real address on (PROXY protocol, for Paper) could come later.
+**Players' addresses.** Down the tunnel every player would arrive at the supporter's server from 127.0.0.1.
+Paper can be told each one's real address instead: with `proxies.proxy-protocol` on, it reads a PROXY
+protocol header at the start of every connection. So:
+
+- The sync tells XenithOS Cloud the router sends PROXY protocol v2 (`proxy=2` in its signed request), and
+  XenithOS Cloud lists the names whose server wants it (`proxy|<name>` rows, which a relay from before
+  this leaves alone, so it sends nothing they'd trip on).
+- HostMC says whether the server wants it (`proxy=1`, with Paper, kept with the supporter's name), and
+  only once XenithOS Cloud answers that the relay sends them does it turn Paper's setting on.
+- For those names the router puts a v2 header (TCP4 or TCP6: the player's address and port, and the
+  relay's) before the game's first bytes. Nothing about it is logged or kept here.
+
+Minecraft's own server can't read the header, so with it players keep showing up as 127.0.0.1 (bans by
+address don't work for them; by name they do). On the supporter's PC, HostMC keeps a doorway on the
+server's port while Paper expects the header, so Minecraft on that PC and friends at home still get in
+(`apps/hostmc/source/door.c`).
 
 ## Setting it up
 

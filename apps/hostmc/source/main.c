@@ -49,6 +49,7 @@ void hm_frame(void)
     pi_poll();
     vps_poll();
     relay_poll();
+    door_poll();
 }
 
 /* ------------------------------------------------------------------ rows */
@@ -99,7 +100,7 @@ enum {
     W_BACKUP, W_RESTORE, W_RESET,
     N_ON, N_OFF, N_FORGET, N_CLAIM_OPEN,
     N_VPS, N_VPS_CHECK, N_VPS_STEPS, N_VPS_EDIT, N_VPS_FORGET, N_VPS_OFF,
-    N_RELAY, N_RELAY_CHECK, N_RELAY_MEMBER, N_RELAY_NAME, N_RELAY_OFF, N_RELAY_GIVEUP,
+    N_RELAY, N_RELAY_CHECK, N_RELAY_MEMBER, N_RELAY_NAME, N_RELAY_OFF, N_RELAY_GIVEUP, N_RELAY_REALIP,
     ID_PLAYER = 100, ID_WL = 200, ID_OP = 300,
 };
 
@@ -555,6 +556,13 @@ static void do_start(void)
             props_set("enforce-whitelist", "true");
         }
     }
+    /* Players' real addresses through the relay: XenithOS Cloud told what this start wants, then
+     * Paper and the doorway set up to match its answer (door.c), or put back. */
+    relay_sync_proxy();
+    if (!door_prepare(why, sizeof why)) {
+        message("The server didn't start", why);
+        return;
+    }
     if (!sv_start(why, sizeof why)) {
         message("The server didn't start", why);
         return;
@@ -765,14 +773,46 @@ static const char *relay_port_text(void)
     return at;
 }
 
+/* Players' addresses through the relay, in a sentence (door.c, relay.c): 1 when they come
+ * through now. */
+static int relay_addresses(char *out, int n)
+{
+    int paper = !strcmp(hs.type, "paper");
+    if (!paper)
+        snprintf(out, n, "Minecraft's own server can't take players' real addresses from the relay, so through it they show "
+                         "up as 127.0.0.1: bans by address don't work for them, bans by name do. Paper can (in Version).");
+    else if (!paper_takes_proxy(hs.version))
+        snprintf(out, n, "Paper %s can't take players' real addresses from the relay, so through it they show up as "
+                         "127.0.0.1. Paper 1.19.4 and later can.", hs.version);
+    else if (hs.bedrock)
+        snprintf(out, n, "With Bedrock players on, players' real addresses don't come through the relay: they show up as "
+                         "127.0.0.1, so bans by address don't work for them; bans by name do.");
+    else if (!hs.real_ips)
+        snprintf(out, n, "Off: through the relay, players show up as 127.0.0.1.");
+    else if (!relay.proxy_able)
+        snprintf(out, n, "The relay can't pass players' addresses on yet, so through it they show up as 127.0.0.1.");
+    else if (door_on() && sv.state == SV_RUNNING && door_alive())
+        snprintf(out, n, "Players' real addresses come through the relay, so bans by address work. On this PC and your "
+                         "home network everyone joins at the same port as before.");
+    else if (sv.state != SV_STOPPED)
+        snprintf(out, n, "Players' real addresses come through the relay once the server restarts.");
+    else
+        snprintf(out, n, "Players' real addresses come through the relay once the server starts.");
+    return door_on() && sv.state == SV_RUNNING && door_alive();
+}
+
 /* The supporter relay, when that's the way in. */
 static void build_relay(void)
 {
     uint32_t color;
     const char *st = relay_status(&color);
+    char text[300];
+    int real;
     add(R_INFO, 0, "Friends join at", relay.address[0] ? relay.address : "No name yet");
     if (relay.tier[0] && !strcmp(relay.step, "ok")) add(R_INFO, 0, "Membership", relay.tier);
     add(R_INFO, 0, "Tunnel", st)->color = color;
+    real = relay_addresses(text, sizeof text);       /* said in full under Players' addresses, below */
+    add(R_INFO, 0, "Players' addresses", real ? "Their own" : "All 127.0.0.1")->color = real ? C_OK : C_SUB;
     if (relay.message[0]) add(R_TEXT, 0, NULL, relay.message)->color = C_WARN;
     if (relay.w.why[0] && !relay_up() && sv.state == SV_RUNNING) add(R_TEXT, 0, NULL, relay.w.why)->color = C_BAD;
     if (relay.w.checking) add(R_TEXT, 0, NULL, "Checking the way in from the internet...")->color = C_SUB;
@@ -783,8 +823,11 @@ static void build_relay(void)
     add(R_BUTTON, N_RELAY_NAME, "Change the name", NULL);
     add(R_BUTTON, N_RELAY_OFF, "Turn off the supporter relay", NULL);
     add(R_BUTTON, N_RELAY_GIVEUP, "Give up the name", NULL);
-    add(R_TEXT, 0, NULL, "Through the relay every player shows up as 127.0.0.1, so bans by address don't work for them; "
-                         "bans by name do. It carries Java Edition, not Bedrock.")->color = C_DIM;
+    add(R_HEAD, 0, "Players' addresses", NULL);
+    if (!strcmp(hs.type, "paper") && paper_takes_proxy(hs.version) && !hs.bedrock)
+        add(R_ITEM, N_RELAY_REALIP, "Players' real addresses", hs.real_ips ? "On" : "Off")->cycle = 1;
+    add(R_TEXT, 0, NULL, text)->color = real ? C_OK : C_DIM;
+    add(R_TEXT, 0, NULL, "The relay carries Java Edition, not Bedrock.")->color = C_DIM;
     add(R_TEXT, 0, NULL, "The relay is a thank-you to supporters, kept running as well as it can be, with no promise "
                          "that it's always up.")->color = C_DIM;
 }
@@ -975,7 +1018,8 @@ static void change_setting(int id, int dir)
                 break;
             }
             snprintf(v, sizeof v, "%d", p);
-            props_set("server-port", v);
+            if (door_on()) door_set_players_port(p);   /* the doorway's: Paper's own is behind it */
+            else props_set("server-port", v);
             if (sv.state != SV_STOPPED) needs_restart = 1;
             if (hs.internet) ui_message("Change the playit.gg tunnel too", "On playit.gg, point the tunnel at the new port, or turn playit.gg off and on.");
         }
@@ -1490,6 +1534,13 @@ static void act(int id, int dir)
     }
     if (id >= S_MOTD && id <= S_PORT) { change_setting(id, dir); return; }
     if (id >= V_TYPE && id <= V_INSTALL) { act_version(id, dir); return; }
+    if (id == N_RELAY_REALIP) {                    /* counts from the next start (door.c) */
+        hs.real_ips = !hs.real_ips;
+        hs_save();
+        if (sv.state != SV_STOPPED) needs_restart = 1;
+        sfx(SFX_MOVE);
+        return;
+    }
     if (dir) return;
     switch (id) {
     case A_START: do_start(); break;
@@ -2057,6 +2108,8 @@ static void desktop_mouse(int px, int py, int pw, int ph)
 int main(int argc, char **argv)
 {
     int started = 0;
+    /* HostMC's doorway on the server's port (door.c), a process of its own. */
+    if (argc == 4 && !strcmp(argv[1], "--door")) return door_main(atoi(argv[2]), atoi(argv[3]));
     handoff_args(argc, argv);
     startlog_mark("start");
     plat_init();
@@ -2089,7 +2142,9 @@ int main(int argc, char **argv)
     }
     hs_load();
     hi_load();
+    door_load();                               /* before anything asks for the server's port */
     sv_attach();
+    door_attach();
     pi_init();
     vps_init();
     relay_init();

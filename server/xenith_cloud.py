@@ -59,12 +59,19 @@ HostMC's supporter relay (off unless XENITH_RELAY_DOMAIN is set; see Relay)
                                       error), message, suggest, and with a name: name, state (on,
                                       lapsed, off), until, address (with :port when the relay's
                                       players_port isn't 25565), players_port, port, ssh_host,
-                                      ssh_port, ssh_user, hostkey; held (names kept for them)
+                                      ssh_port, ssh_user, hostkey; held (names kept for them);
+                                      proxy (on: the relay sends the server each player's address
+                                      in a PROXY protocol v2 header), proxy_able (1: it can)
   POST /v1/relay/claim                token, name, key (HostMC's ssh-ed25519 public key) -> as status
   POST /v1/relay/release              token  -> as status
+                                      Each of the three also takes proxy=1 or 0: whether the
+                                      supporter's server wants players' addresses (Paper, with
+                                      proxies.proxy-protocol on), kept with their name
   POST /v1/relay/sync                 from the relay machine: t, hostkey, busy (ports with a
-                                      tunnel on them), signed (X-Relay-Sign)
-                                      -> t, domain, on|name|port|key and held|name rows, signed
+                                      tunnel on them), proxy (2 when its router sends PROXY
+                                      protocol v2), signed (X-Relay-Sign)
+                                      -> t, domain, on|name|port|key, held|name and proxy|name
+                                      (servers that want players' addresses) rows, signed
 
 Admin (header X-Xenith-Key: <XENITH_ADMIN_KEY>)
   POST /v1/news (or /v1/inbox)        body is the news post
@@ -1240,8 +1247,11 @@ class Relay:
     to it), "lapsed" (its supporter's membership ended: kept for them until "until", and on again
     if they come back), "left" (changed or given up: theirs alone to take back until "until") or
     "off" (turned off with `xenith relay off`). Someone has one name that isn't "left" at most.
-    people: profile (lower case) -> {port, key, checked, step, tier}: their port on the relay's
-    loopback, kept while they have any name, and the key their HostMC logs in with."""
+    people: profile (lower case) -> {port, key, checked, step, tier, proxy}: their port on the
+    relay's loopback, kept while they have any name, the key their HostMC logs in with, and
+    whether their server wants players' addresses (HostMC says, with Paper; the relay then sends
+    them in a PROXY protocol v2 header, once it has said it can: "proxy" in the data, from its
+    syncs)."""
 
     def __init__(self, state, domain="", ssh="", secret="", user="hostmc", ports="30000-39999",
                  ocaccount_url="", ocaccount_key="", patreon_url="", account_url="", players_port=25565):
@@ -1291,6 +1301,19 @@ class Relay:
     def ready(self):
         """Open to supporters: set up here, and the relay has said hello (with its host key)."""
         return bool(self.domain and self.secret and self.data.get("hostkey"))
+
+    def proxy_able(self):
+        """The relay's router sends PROXY protocol v2 (its syncs say so)."""
+        return int_or(self.data.get("proxy"), 0) >= 2
+
+    def set_proxy(self, who, on):
+        """Whether their server wants players' addresses (HostMC says: Paper, with proxy-protocol
+        on). Kept with the port, so it lasts while they have a name."""
+        with self.lock:
+            p = self.data["people"].get(who)
+            if p is not None and bool(p.get("proxy")) != bool(on):
+                p["proxy"] = bool(on)
+                self.state.save()
 
     def _current(self, who):
         for name, n in self.data["names"].items():
@@ -1440,6 +1463,8 @@ class Relay:
             if held:
                 out["held"] = ",".join(held)
             out["suggest"] = relay_suggest(self.data["names"])
+            out["proxy"] = "on" if p.get("proxy") and self.proxy_able() else "off"
+            out["proxy_able"] = 1 if self.proxy_able() else 0
         out["message"] = self.message(step, n["state"] if n else None, n.get("until", 0) if n else 0)
         return out
 
@@ -1460,31 +1485,38 @@ class Relay:
         return bool(self.secret) and hmac.compare_digest(relay_sign(self.secret, "sync", body).encode(),
                                                          (signature or "").strip().encode())
 
-    def synced(self, hostkey, busy="", now=None):
-        """A signed sync came in: the relay's SSH host key, which HostMC pins, and the ports with
-        a tunnel on them. A port with one left on from a name that's no longer on isn't given to
-        anyone else while it lasts."""
+    def synced(self, hostkey, busy="", proxy="", now=None):
+        """A signed sync came in: the relay's SSH host key, which HostMC pins, the ports with a
+        tunnel on them, and whether its router sends PROXY headers. A port with one left on from
+        a name that's no longer on isn't given to anyone else while it lasts."""
         self.last_sync = time.time() if now is None else now
         self.busy = {p for p in (int_or(x, 0) for x in busy.split(",")[:5000]) if self.port_lo <= p <= self.port_hi}
         hostkey = relay_key(hostkey)
+        proxy = max(0, min(int_or(proxy, 0), 99))
         with self.lock:
-            if hostkey and hostkey != self.data.get("hostkey"):
-                self.data["hostkey"] = hostkey
+            if (hostkey and hostkey != self.data.get("hostkey")) or proxy != int_or(self.data.get("proxy"), 0):
+                if hostkey:
+                    self.data["hostkey"] = hostkey
+                self.data["proxy"] = proxy
                 self.state.save()
 
     def listing(self, t):
         """The answer to a sync: t (the request's, so an old answer can't be passed off as
-        new), the domain, "on|name|port|key" for names in use and "held|name" for the rest."""
+        new), the domain, "on|name|port|key" for names in use and "held|name" for the rest, then
+        "proxy|name" for names in use whose server wants players' addresses (a relay from before
+        these leaves the rows it doesn't know alone)."""
         with self.lock:
             people = self.data["people"]
-            lines = [f"t={t}\n", f"domain={self.domain}\n"]
+            lines, proxied = [f"t={t}\n", f"domain={self.domain}\n"], []
             for name, n in sorted(self.data["names"].items()):
                 p = people.get(n["owner"])
                 if n["state"] == "on" and p and p.get("key"):
                     lines.append(f"on|{name}|{p['port']}|{p['key']}\n")
+                    if p.get("proxy"):
+                        proxied.append(f"proxy|{name}\n")
                 else:
                     lines.append(f"held|{name}\n")
-            return "".join(lines)
+            return "".join(lines + proxied)
 
     # -------------------------------------------------------------- now and then
     def tick(self, now=None):
@@ -1844,7 +1876,7 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 t = int_or(form.get("t"), 0)
                 if abs(time.time() - t) > RELAY_SYNC_SKEW:
                     return self.error(401, "The relay's clock is out. Set it right (timedatectl).")
-                relay.synced(form.get("hostkey", ""), form.get("busy", ""))
+                relay.synced(form.get("hostkey", ""), form.get("busy", ""), form.get("proxy", ""))
                 text = relay.listing(t)
                 return self.reply(200, text, cache="no-store",
                                   headers={"X-Relay-Sign": relay_sign(relay.secret, "list", text)})
@@ -1869,6 +1901,8 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                     code, msg = relay.release(who)
                 if code != 200:
                     return self.error(code, msg)
+                if form.get("proxy") in ("0", "1"):   # what their server wants, from this HostMC
+                    relay.set_proxy(who, form["proxy"] == "1")
                 return self.reply(200, kv(relay.status(acc)), cache="no-store")
 
             if parts in (["v1", "relay", "off"], ["v1", "relay", "on"], ["v1", "relay", "check"]):
@@ -2544,9 +2578,11 @@ else:
         except urllib.error.HTTPError as e:
             return e.code, e.read(), e.headers
 
+    proxy_v = [""]                                 # what the stand-in relay's syncs say about PROXY headers
+
     def sync(t=None, key=secret, busy=""):
         t = int(time.time()) if t is None else t
-        b = urlencode({"t": t, "hostkey": hostkey + " root@relay", "busy": busy})
+        b = urlencode({"t": t, "hostkey": hostkey + " root@relay", "busy": busy, "proxy": proxy_v[0]})
         return rreq("POST", "/v1/relay/sync", b, {"X-Relay-Sign": relay_sign(key, "sync", b)})
 
     def listing():
@@ -2606,6 +2642,18 @@ else:
     relay.players_port, relay.at = 25565, ""
     check("supporter relay: the key kept as a key alone", relay.data["people"]["sup1"]["key"] == key1)
     check("supporter relay: the relay told", listing() == [f"on|brave-otter|30000|{key1}"])
+    st = ask("sup1", proxy="1")[1]
+    check("supporter relay: a server that wants players' addresses: not before the relay says it can send them",
+          st.get("proxy") == "off" and st.get("proxy_able") == "0" and relay.data["people"]["sup1"].get("proxy") is True)
+    proxy_v[0] = "2"
+    lines = listing()
+    st = ask("sup1")[1]
+    check("supporter relay: the relay can: the server listed for its address, and HostMC told",
+          lines == [f"on|brave-otter|30000|{key1}", "proxy|brave-otter"] and st.get("proxy") == "on"
+          and st.get("proxy_able") == "1")
+    st = ask("sup1", proxy="0")[1]
+    check("supporter relay: players' addresses turned off again", st.get("proxy") == "off" and st.get("proxy_able") == "1"
+          and listing() == [f"on|brave-otter|30000|{key1}"])
     key2 = new_key()
     check("supporter relay: a name someone has is taken", ask("sup2", "claim", name="brave-otter", key=key2)[0] == 409)
     check("supporter relay: someone else's key refused", ask("sup2", "claim", name="other-name", key=key1)[0] == 409)
@@ -2689,7 +2737,8 @@ else:
     reloaded = State(os.path.join(tmp, "state"))
     check("state persists", reloaded.data["motd"] == "Game night 9PM"
           and reloaded.account("tuber")["avatar"] == "29d97979ab4421"
-          and reloaded.data["relay"]["names"]["third-name"]["owner"] == "sup1")
+          and reloaded.data["relay"]["names"]["third-name"]["owner"] == "sup1"
+          and reloaded.data["relay"].get("proxy") == 2)
 
     httpd.shutdown()
     shutil.rmtree(tmp)
