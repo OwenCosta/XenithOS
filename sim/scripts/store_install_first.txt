@@ -1,0 +1,19 @@
+# Installs the Store's first item (VOLT on the Xbox) the usual way, with A. With a build that
+# trusts no key and sim/store/between.py swapping VOLT and its SHA-256 on the way, this shows
+# the hole signing closes: the swapped file is installed. With a key, the Store won't open.
+# Run by sim/store/test-store.sh.
+wait 200
+press right
+press a
+wait 90
+press a
+wait 20
+shot install_confirm
+press a
+wait 60
+shot installed
+press b
+wait 20
+press b
+wait 30
+quit

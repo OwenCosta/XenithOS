@@ -177,6 +177,19 @@ static void icon_render(int icon, float cx, float cy, float size, uint32_t fg, u
         gfx_tri(PX(-0.26f), PY(-0.40f), PX(-0.26f), PY(0.24f), PX(0.26f), PY(0.08f), FG, 255);
         ln(-0.06f, 0.10f, 0.10f, 0.40f, 0.11f);
         break;
+    case ICON_FRIENDS: {                    /* two people, one a little behind the other */
+        int clip[4];
+        gfx_get_clip(clip);
+        gfx_clip_intersect((int)PX(-0.5f), (int)PY(-0.5f), (int)L(1), (int)L(0.92f));
+        ci(0.19f, -0.19f, 0.15f, FG);
+        gfx_ellipse(PX(0.19f), PY(0.30f), L(0.27f), L(0.21f), FG, 255);
+        ci(-0.09f, -0.10f, 0.215f, BGC);    /* a gap around the one in front */
+        gfx_ellipse(PX(-0.09f), PY(0.45f), L(0.38f), L(0.29f), BGC, 255);
+        ci(-0.09f, -0.10f, 0.16f, FG);
+        gfx_ellipse(PX(-0.09f), PY(0.45f), L(0.32f), L(0.23f), FG, 255);
+        gfx_set_clip(clip[0], clip[1], clip[2], clip[3]);
+        break;
+    }
     }
 }
 

@@ -6,7 +6,7 @@
 
 #define PAIR 80
 
-static char got[HANDOFF_MAX][PAIR], give[HANDOFF_MAX][PAIR];
+static char got[HANDOFF_MAX][PAIR], give[HANDOFF_MAX][PAIR], self[PAIR];
 static int ngot, ngive, received;
 
 void handoff_args(int argc, char **argv)
@@ -14,6 +14,7 @@ void handoff_args(int argc, char **argv)
     int i, on = 0;
     /* Copied straight away: on the Xbox the strings sit in memory the loader set aside, and
      * nothing keeps it from being reused later. */
+    if (argv && argc > 0 && argv[0]) snprintf(self, sizeof self, "%s", argv[0]);
     for (i = 1; argv && i < argc && i < 32; i++) {
         const char *a = argv[i];
         if (!a) continue;
@@ -29,6 +30,11 @@ void handoff_args(int argc, char **argv)
 int handoff_received(void)
 {
     return received;
+}
+
+const char *handoff_self(void)
+{
+    return self;
 }
 
 static const char *find(char list[][PAIR], int n, const char *key)

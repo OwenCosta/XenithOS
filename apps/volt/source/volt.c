@@ -22,6 +22,7 @@
 #include "net.h"
 #include "platform.h"
 #include "handoff.h"
+#include "social.h"
 #include "startlog.h"
 #include "theme.h"
 #include "ui.h"
@@ -163,6 +164,8 @@ static void upload(void)
         if (rank > 0) snprintf(result_line, sizeof result_line, "Uploaded. You're #%d on the leaderboard.", rank);
         else snprintf(result_line, sizeof result_line, "Uploaded. Not in the top 50 yet.");
         sfx(SFX_SUCCESS);
+        if (rank > 0) social_earn("volt-board");
+        social_flush();                    /* the network's up now: what's waiting goes too */
     } else {
         char err[96] = "";
         if (r.body) {
@@ -292,6 +295,19 @@ static void back_to_shell(void)
     ui_back_to_xenithos("volt");
 }
 
+/* Achievements for the score of a run that's just ended. They go to XenithOS Cloud now if the
+ * network's up (a PC), or when XenithOS next starts. */
+static void earn_for_score(void)
+{
+    static const struct { int score; const char *id; } marks[] = {
+        {100, "volt-100"}, {500, "volt-500"}, {1000, "volt-1000"},
+    };
+    int i, any = 0;
+    for (i = 0; i < (int)(sizeof marks / sizeof marks[0]); i++)
+        if (score >= marks[i].score) any |= social_earn(marks[i].id);
+    if (any) social_flush();
+}
+
 int main(int argc, char **argv)
 {
     int uploaded = 0, started = 0;
@@ -346,6 +362,7 @@ int main(int argc, char **argv)
                     uploaded = 0;
                     sfx(SFX_CRASH);
                     rumble(200, 255, 350);
+                    earn_for_score();
                 }
             }
             break;

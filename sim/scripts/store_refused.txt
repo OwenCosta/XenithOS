@@ -1,0 +1,13 @@
+# A Store list that doesn't check out against the key this build trusts (changed on the way,
+# its signature taken off, signed with another key, or not signed at all): the Store says so
+# and stays closed, and nothing is downloaded.
+# Run by sim/store/test-store.sh, with sim/store/between.py changing things on the way.
+wait 200
+press right
+press a
+wait 60
+shot store_refused
+press a
+wait 30
+shot home_after
+quit

@@ -1,0 +1,17 @@
+# Cloud saves, the first console again: its DOOM save in slot 1 changed here and on the PC. Starting
+# XenithOS says so (the clash waits for DOOM); starting DOOM asks which to keep, and this Xbox's
+# is kept. (The simulator can't start DOOM itself, so it says it couldn't.) Part of
+# sim/social/test-saves.sh.
+wait 240
+shot sc_toast
+wait 40
+press down
+wait 20
+press a
+wait 20
+shot sc_which
+press a
+wait 30
+press a
+wait 20
+quit

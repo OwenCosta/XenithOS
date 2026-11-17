@@ -1,0 +1,17 @@
+# The Store on a PC installs DOOM, which comes with its game data, and stops there
+# (sim/test-https.sh compares what arrived with the Store's files). XSIM_KIND=pc, with DOOM not
+# yet on the home screen.
+wait 200
+press right
+press a
+wait 90
+shot store_apps
+press down
+wait 20
+press a
+wait 25
+shot doom_confirm
+press a
+wait 400
+shot doom_installed
+quit

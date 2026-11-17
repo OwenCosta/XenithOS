@@ -70,11 +70,32 @@ In the on-screen keyboard you can type on the real keyboard: letters type, Backs
 |---|---|
 | `/usr/lib/xenithos/` | XenithOS and its apps |
 | `~/.local/share/xenithos/uda:/` | your settings, profile, game data and saves (same layout as the Xbox's USB stick) |
+| `~/.local/share/xenithos/uda:/xenith/crash/` | crash files waiting to be sent, one a program (see Crash reports) |
 | `~/.config/xenithos/` | the mode file and logs |
 | `~/.local/share/xenithos/hostmc/` | HostMC's Minecraft server, its world, Java and backups |
 
 XenithOS's own apps (VOLT, DOOM, Tube, Photos, and HostMC on PCs) come with it on PCs and Pis. The Store has three sections here
 (LB and RB switch between them): **Apps** from Flathub, **Steam**, and **XenithOS** (updates and game data).
+
+## XenithOS Cloud over HTTPS
+
+The Xbox talks to XenithOS Cloud over plain HTTP, since it has no TLS. PCs and Pis use HTTPS when XenithOS Cloud
+has an HTTPS address, so passcodes, sign-ins and everything else can't be read on the way.
+
+- Each time XenithOS starts it asks the address in `config.txt` what else it answers at (`/v1/lan`). When that
+  names an HTTPS address, and the server answers there as itself with a certificate this machine trusts for
+  that name, everything goes there until the next start: profiles, the Store, Tube, scores. Settings > System
+  info says "Connected securely".
+- The address is kept in `uda:/xenith/route.txt` (`https=`) for the apps, next to the home-network address.
+  At home that one still comes first, with HTTPS as the way out if the machine leaves.
+- If the HTTPS address doesn't answer, or its certificate doesn't check out, XenithOS stays on plain HTTP for
+  that start, and says why in `~/.config/xenithos/xenithos.log`. If the address in `config.txt` doesn't answer
+  at all, it keeps the HTTPS address it had.
+- `config.txt` can say `server=https://name` itself (with `:port` when it isn't 443).
+- It's the system's OpenSSL (libssl, which ca-certificates needs, so every Debian, Ubuntu and Raspberry Pi OS
+  has it), opened when it's first needed, and the system's certificates. Building XenithOS doesn't need
+  OpenSSL's headers, so updates from the Store build as before.
+- `sim/test-https.sh` tries all of it here, with a stand-in for Cloudflare (`sim/tls_proxy.py`).
 
 ## Apps from Flathub, and Steam
 
@@ -244,6 +265,18 @@ into the new program. If the build fails, nothing is replaced, and the build's o
 `update.log` in `uda:/xenith`. Machines installed before 0.5.3 have a root-owned `/usr/lib/xenithos`:
 run the install command once more and the Store takes over after that.
 
+## Crash reports
+
+XenithOS and every app catch the signals a crash ends in (SIGSEGV, SIGABRT, SIGBUS, SIGFPE, SIGILL;
+`crash_linux.c`, set up in `plat_init`) and leave a crash file in `uda:/xenith/crash/<program>.txt`: the
+version, the signal and the address it was about, how far the program's start got, the program's build id
+and where it was loaded, the stack, and for a glibc abort its message (`*** buffer overflow detected ***` is
+how HostMC's crash on Ubuntu looked). The handler only makes async-signal-safe calls; it runs `addr2line` in a
+child process, so the file names functions and source lines (the programs are built with `-g` and aren't
+stripped). Then the program ends just as it would have. Next time XenithOS starts, or as soon as it's back
+from the app, it sends the report to XenithOS Cloud, or asks first: Settings > Send crash reports, "Ask
+first" until it's set to "Always". Paths in the home folder are cut down to file names before anything goes.
+
 ## Building by hand
 
 ```bash
@@ -269,6 +302,11 @@ x11-apps imagemagick`): it boots XenithOS, starts the app, leaves it, and moves 
 taking screenshots through each switch and recording the sound to a file. It prints how bright every
 screenshot is (0 would be a black screen) and how loud each quarter second was, so a black gap or missing
 sound after coming back shows up straight away.
+
+`linux/test-crash.sh` crashes VOLT and XenithOS on purpose (`XENITHOS_TEST_CRASH=segv`, `abort`, `fortify`,
+`stack`, `fpe`, `ill` or `bus`, or `volt:segv` for only that program, at frame `XENITHOS_TEST_CRASH_FRAME`)
+in a virtual display against a local XenithOS Cloud: a report sent by itself, one sent once asked, and one
+the answer was no to. Each that arrives must say where it stopped and have nothing from the home folder in it.
 
 ## Apps inside XenithOS
 

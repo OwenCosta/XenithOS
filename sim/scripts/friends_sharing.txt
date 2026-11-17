@@ -1,0 +1,28 @@
+# Friends, on the second console (Bob Two): Settings, "Show friends what I'm playing" turned off,
+# then Turn off in the power menu, which tells XenithOS Cloud he's gone. Part of
+# sim/social/test-friends.sh.
+wait 236
+press right
+press right
+press right
+press right
+press right
+press a
+wait 30
+press down
+press down
+press down
+press down
+wait 15
+shot fs_settings
+press a
+wait 30
+shot fs_sharing_off
+press b
+wait 20
+press back
+wait 20
+press down
+press a
+wait 20
+quit

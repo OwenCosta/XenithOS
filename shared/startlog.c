@@ -83,6 +83,16 @@ void startlog_ready(const char *app_name)
     fclose(f);
 }
 
+int startlog_steps(const char **steps, uint64_t *at, int max)
+{
+    int i;
+    for (i = 0; i < nmarks && i < max; i++) {
+        steps[i] = marks[i].step;
+        at[i] = marks[i].at;
+    }
+    return i;
+}
+
 int startlog_last_app(char *out, int n)
 {
     FILE *f = fopen(START_FILE, "r");

@@ -27,6 +27,7 @@
 #include "config.h"
 
 #include "doomtype.h"
+#include "doomgeneric.h"
 #include "doomkeys.h"
 #include "doomfeatures.h"
 #include "i_system.h"
@@ -2042,8 +2043,9 @@ float M_GetFloatVariable(char *name)
 
 static char *GetDefaultConfigDir(void)
 {
-    /* XENITH: keep config and saves on the USB stick. */
-    return strdup("uda:/doom/");
+    /* XENITH: keep config and saves on the USB stick, in the signed-in profile's own folder,
+     * which XenithOS keeps in step with the profile's cloud saves (doomgeneric_xenith.c). */
+    return strdup(DG_ConfigDir());
 }
 
 // 

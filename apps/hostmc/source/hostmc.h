@@ -212,6 +212,10 @@ void pi_server_stopped(void);
 int  pi_has_secret(void);
 int  pi_agent_running(void);
 
+/* ------------------------------------------------------------ share.c */
+
+void share_poll(void);          /* friends see HostMC is open, and the server's public address */
+
 /* ------------------------------------------------------------- ping.c */
 
 /* A Minecraft server list ping, a step at a time: start it, then poll it every frame. */

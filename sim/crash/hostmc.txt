@@ -1,0 +1,33 @@
+# XenithOS crash report
+program=hostmc
+version=0.6.4
+machine=x86_64
+signal=SIGABRT
+code=-6 raised by the program (abort or raise)
+pc=0x7f3a12a96fac
+seconds=0.41
+step=start 0.00
+step=video 0.05
+step=storage 0.07
+build=5e1f0c8a9b2d4e6f7a8b9c0d1e2f3a4b5c6d7e8f
+base=0x55d0c0000000
+size=0x2f8000
+exe=/home/player/.cache/xenithos-update/src/linux/hostmc
+frame=0x7f3a12a96fac
+frame=0x7f3a12a40582
+frame=0x7f3a12a28507
+frame=0x7f3a12b1e6de
+frame=0x7f3a12b1e0b2
+frame=0x55d0c0012a34 program+0x12a34
+frame=0x55d0c0006b11 program+0x6b11
+message=*** buffer overflow detected ***: terminated
+--- where
+0x0000000000012a33: main at /home/player/.cache/xenithos-update/src/linux/../apps/hostmc/source/main.c:1349
+0x0000000000006b10: _start at ??:?
+--- trace
+/usr/lib/x86_64-linux-gnu/libc.so.6(+0x96fac) [0x7f3a12a96fac]
+/usr/lib/x86_64-linux-gnu/libc.so.6(gsignal+0x12) [0x7f3a12a40582]
+/usr/lib/x86_64-linux-gnu/libc.so.6(abort+0x24) [0x7f3a12a28507]
+/usr/lib/x86_64-linux-gnu/libc.so.6(__realpath_chk+0x1e) [0x7f3a12b1e6de]
+/home/player/xenith-360/linux/hostmc(+0x12a34) [0x55d0c0012a34]
+/home/player/Downloads/hostmc(+0x6b11) [0x55d0c0006b11]

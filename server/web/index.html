@@ -79,7 +79,35 @@
   .player:hover { transform: translateY(-5px); border-color: rgba(255, 255, 255, 0.28); }
   .player canvas { display: block; margin: 0 auto 10px; border-radius: 16px; }
   .player b { display: block; font-size: 16px; overflow-wrap: anywhere; }
-  .player small { color: var(--sub); font-size: 13px; }
+  .player small { color: var(--sub); font-size: 13px; display: block; }
+  button.player { font: inherit; color: inherit; cursor: pointer; width: 100%; }
+  button.player:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+  .achs { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
+  .achs h3, #pdlg h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .achs h3 span, #pdlg h3 span { font: 12px system-ui, sans-serif; color: var(--dim); font-weight: normal; }
+  .ach { display: flex; gap: 12px; align-items: flex-start; padding: 9px 0; border-top: 1px solid var(--line); min-width: 0; }
+  .ach:first-of-type { border-top: 0; }
+  .ach svg { flex: none; margin-top: 3px; }
+  .ach > div { flex: 1; min-width: 0; }
+  .ach b { display: block; font-size: 15px; }
+  .ach small { display: block; color: var(--sub); font-size: 13px; line-height: 1.4; }
+  .ach .count { flex: none; font: 12px var(--mono); color: var(--dim); white-space: nowrap; padding-top: 3px; }
+  .ach.not b { color: var(--sub); }
+  .ach.not small { color: var(--dim); }
+  .recent .who { padding: 8px 0; border-top: 1px solid var(--line); align-items: flex-start; }
+  .recent .who:first-child { border-top: 0; }
+  .recent .who div { min-width: 0; }
+  .recent .who small { display: block; color: var(--sub); font-size: 13px; }
+
+  dialog#pdlg { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 14px; padding: 22px;
+                width: calc(100% - 32px); max-width: 540px; max-height: calc(100% - 48px); color-scheme: dark; }
+  dialog#pdlg::backdrop { background: rgba(0, 0, 0, 0.72); }
+  #pdlg .head { display: flex; gap: 16px; align-items: center; margin-bottom: 14px; }
+  #pdlg .head canvas { border-radius: 16px; flex: none; }
+  #pdlg .head b { display: block; font-size: 22px; overflow-wrap: anywhere; }
+  #pdlg .head small { color: var(--sub); font-size: 14px; }
+  #pdlg form { margin-top: 16px; text-align: right; }
 
   table { width: 100%; border-collapse: collapse; font-size: 15px; }
   th { text-align: left; font: 12px system-ui, sans-serif; color: var(--dim); font-weight: normal; padding: 0 12px 8px 0; }
@@ -163,6 +191,7 @@
     <nav id="nav" aria-label="XenithOS">
       <a href="#screens">Screens</a>
       <a href="#players">Players</a>
+      <a href="#achievements">Achievements</a>
       <a href="#scores">Leaderboard</a>
       <a href="#status">Status</a>
       <a href="#get">Get it</a>
@@ -179,8 +208,8 @@
   <p>XenithOS is a homebrew console system. It runs on an Xbox 360 in place of the Microsoft dashboard, and on
     PCs and Raspberry Pis as a console you can switch to a normal Linux desktop. It has its own home screen,
     profiles with avatars, a store, YouTube, DOOM and a light-trail game.</p>
-  <p class="sub">Every copy uses XenithOS Cloud, the free service this page runs on: profiles, the Store, news,
-    leaderboards and Tube (YouTube) live here, for everyone. It's written in C, on libxenon for the Xbox and
+  <p class="sub">Every copy uses XenithOS Cloud, the free service this page runs on: profiles, friends, cloud
+    saves, achievements, the Store, news, leaderboards and Tube (YouTube) live here, for everyone. It's written in C, on libxenon for the Xbox and
     SDL2 everywhere else.</p>
   <div class="facts"><span id="ver">v0.5.0</span><span>Xbox 360, PC, Raspberry Pi</span><span>GPL-3.0</span><span>free to use</span></div>
   <div class="actions">
@@ -210,6 +239,20 @@
   </div>
 </section>
 
+<section id="achievements">
+  <div class="wrap">
+    <h2>Achievements</h2>
+    <p class="lead">A few for each of XenithOS's own apps, earned as you play on the Xbox or a PC and kept on your profile. Pick a player above to see theirs.</p>
+    <div class="achs" id="achlist"><p class="muted">Loading...</p></div>
+  </div>
+</section>
+<dialog id="pdlg" aria-labelledby="pdlg-name">
+  <div class="head"><canvas id="pdlg-avatar" width="96" height="96"></canvas><div><b id="pdlg-name"></b><small id="pdlg-sub"></small></div></div>
+  <h3>Achievements <span id="pdlg-count"></span></h3>
+  <div id="pdlg-list"></div>
+  <form method="dialog"><button class="btn">Close</button></form>
+</dialog>
+
 <section id="scores">
   <div class="wrap cols">
     <div class="box">
@@ -235,6 +278,7 @@
         <tr><td>Interface, Store updates</td><td class="yes" data-k="Builds">yes</td><td class="yes" data-k="On the Xbox">works</td><td class="note">0.4.1 installed itself from the Store</td></tr>
         <tr><td>Sound in games, app start times</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">0.5.1 keeps the picture up between programs and lines the sound chip up after a game</td></tr>
         <tr><td>Profiles, Cloud, avatars</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">needs the Ethernet cable on the Xbox; no Wi-Fi driver</td></tr>
+        <tr><td>Friends, cloud saves, achievements</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">tested in the simulator as two consoles on one XenithOS Cloud; a save going up from the Xbox hasn't been tried on the real console</td></tr>
         <tr><td>VOLT, DOOM, Tube, Photos</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">DOOM comes with Freedoom and has sound effects; no music yet</td></tr>
         <tr><td>PCs and Raspberry Pis</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">0.5.2 runs apps inside XenithOS's window: no black screen between them</td></tr>
         <tr><td>Minecraft and the guide</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">PCs only; they open over XenithOS on its own X server and the guide comes up over them, tested in a virtual display</td></tr>
@@ -338,6 +382,10 @@
   <div class="wrap">
     <h2>Build log</h2>
     <ul class="log">
+      <li><b>0.7.0</b><time datetime="2026-11-17">Nov 17, 2026</time>
+        <p>Friends: ask someone by their gamertag, see who's on and what they're playing, and join a friend's HostMC server, from a new Friends tile. With cloud saves, DOOM's saves and XenithOS's settings follow your profile to your other machines, and fifteen achievements across VOLT, DOOM, Tube and HostMC are kept on XenithOS Cloud, here on the site too. The Store's lists now come signed by XenithOS Cloud and are checked before anything downloads, and X picks several to download one after another. PCs and Raspberry Pis talk to XenithOS Cloud over HTTPS. When XenithOS or an app crashes, it offers to send a report so it can be fixed, or sends it by itself if Settings says so.</p></li>
+      <li><b>0.6.9</b><time datetime="2026-11-17">Nov 17, 2026</time>
+        <p>VOLT and DOOM can run as desktop apps, for XenithOS Desktop: a window of their own, the mouse and the keyboard, and F11 for full screen. In DOOM the mouse turns and fires, WASD walks and strafes, the number keys pick weapons and Esc is Doom's menu. In a desktop app the hints name keys instead of a controller's buttons, and messages can be clicked. XenithOS Desktop 2.0.2 opens them this way and gives Photos and Tube desktop apps of their own. Nothing changes on the Xbox or inside XenithOS.</p></li>
       <li><b>Desktop 2.0.1</b><time datetime="2026-11-16">Nov 16, 2026</time>
         <p>XenithOS Desktop can be downloaded here: XenithOS as a PC's whole system in one ISO, built on Ubuntu 24.04 LTS, with XenithOS Console one click away. The console apps you install show up in the desktop's Apps menu and open full screen, Settings puts the PC's own apps on the console's home screen, and Settings &gt; Updates keeps all of it up to date.</p></li>
       <li><b>0.6.8</b><time datetime="2026-11-16">Nov 16, 2026</time>
@@ -456,12 +504,12 @@ $("nav").addEventListener("click", (e) => {
 
 /* Screens */
 const SHOTS = [
-  ["home", "Home", "Your profile at the top, six tiles, and the apps you've installed. A notification slides in when there's XenithOS news."],
+  ["home", "Home", "Your profile at the top, seven tiles, and the apps you've installed. A notification slides in when there's XenithOS news, a friend comes online, or someone asks to be friends."],
   ["store", "Store", "Apps, game data and updates from XenithOS Cloud, with thumbnails. Downloads are checked against their SHA-256 before they're saved."],
   ["guide", "Guide", "On a PC, the Xbox button (or Esc held down) brings up the guide over any game: back to the home screen while it keeps running, another game, or the controller as a mouse or a keyboard."],
   ["profile", "Profile", "Profiles are saved to XenithOS Cloud and follow you to any Xbox, PC or Pi. Make one with a gamertag and a passcode."],
   ["avatar", "Avatar", "Thirteen parts in three tabs: face, hair and outfit, with every colour as a swatch. Y picks something random."],
-  ["cloud", "Cloud", "Who's playing, XenithOS news, and the VOLT leaderboard with everyone's avatar."],
+  ["cloud", "Cloud", "Your friends who are on and what they're playing, XenithOS news, and the VOLT leaderboard with everyone's avatar."],
   ["volt", "VOLT", "Grab sparks, don't hit the walls. Your best score goes on your profile."],
 ];
 function showShot(i) {
@@ -483,15 +531,101 @@ showShot(0);
 
 /* Live data */
 const rows = (t) => t.split("\n").filter(Boolean).map((l) => l.split("|"));
+const get = (p) => fetch(p, { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(p); return r.text(); });
 function td(tr, text, cls) { const c = document.createElement("td"); if (cls) c.className = cls; c.textContent = text; tr.appendChild(c); return c; }
 function fmtSize(n) { n = Number(n); return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.ceil(n / 1024) + " KB"; }
 function fmtDate(iso) {
   const d = new Date(iso + "T00:00:00Z");
   return isNaN(d) ? iso : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
 }
+function ago(s) {
+  s = Number(s);
+  if (s < 120) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} minutes ago`;
+  if (s < 7200) return "an hour ago";
+  if (s < 86400) return `${Math.floor(s / 3600)} hours ago`;
+  if (s < 172800) return "yesterday";
+  return `${Math.floor(s / 86400)} days ago`;
+}
+
+/* Achievements: [id, app, name, how it's earned, how many players have it] from v1/achievements */
+const APPS = { volt: "VOLT", doom: "DOOM", tube: "Tube", hostmc: "HostMC" };
+let catalogue = [];
+function trophy(fill) {
+  const ns = "http://www.w3.org/2000/svg", svg = document.createElementNS(ns, "svg"), p = document.createElementNS(ns, "path");
+  [["width", 22], ["height", 22], ["viewBox", "0 0 24 24"], ["aria-hidden", "true"]].forEach(([k, v]) => svg.setAttribute(k, v));
+  p.setAttribute("d", "M7 3h10v2h3v3a4 4 0 0 1-4 4h-.4A5 5 0 0 1 13 14.9V17h3v3H8v-3h3v-2.1A5 5 0 0 1 8.4 12H8a4 4 0 0 1-4-4V5h3V3zm-1 4v1a2 2 0 0 0 1 1.7V7H6zm11 0v2.7A2 2 0 0 0 18 8V7h-1z");
+  p.setAttribute("fill", fill);
+  svg.appendChild(p);
+  return svg;
+}
+function achRow(a, right, fill, got) {
+  const row = document.createElement("div"), text = document.createElement("div");
+  row.className = "ach" + (got === false ? " not" : "");
+  const b = document.createElement("b"); b.textContent = a[2];
+  const s = document.createElement("small"); s.textContent = a[3];
+  const c = document.createElement("span"); c.className = "count"; c.textContent = right;
+  text.append(b, s);
+  row.append(trophy(fill), text, c);
+  return row;
+}
+function showAchievements(recent) {
+  const list = $("achlist");
+  list.replaceChildren();
+  Object.entries(APPS).forEach(([app, title]) => {
+    const mine = catalogue.filter((a) => a[1] === app);
+    if (!mine.length) return;
+    const box = document.createElement("div"), h = document.createElement("h3"), n = document.createElement("span");
+    box.className = "box";
+    h.textContent = title;
+    n.textContent = "players who have it";
+    h.appendChild(n);
+    box.appendChild(h);
+    mine.forEach((a) => box.appendChild(achRow(a, Number(a[4]).toLocaleString(), "#8b93a0")));
+    list.appendChild(box);
+  });
+  const box = document.createElement("div"), h = document.createElement("h3");
+  box.className = "box recent";
+  h.textContent = "Just earned";
+  box.appendChild(h);
+  const shown = recent.filter(([, , id]) => catalogue.some((a) => a[0] === id)).slice(0, 8);
+  if (!shown.length) box.appendChild(Object.assign(document.createElement("p"), { className: "muted", textContent: "Nobody yet. Be the first." }));
+  shown.forEach(([name, avatar, id, secs]) => {
+    const a = catalogue.find((x) => x[0] === id), who = document.createElement("div"), t = document.createElement("div");
+    who.className = "who";
+    who.appendChild(XAvatar.canvas(avatar, 36));
+    const b = document.createElement("b"); b.textContent = `${name}: ${a[2]}`;
+    const s = document.createElement("small"); s.textContent = `${APPS[a[1]] || a[1]}, ${ago(secs)}`;
+    t.append(b, s);
+    who.appendChild(t);
+    box.appendChild(who);
+  });
+  list.appendChild(box);
+}
+
+/* A player's card opens their achievements: the ones earned first, lit, with when. */
+async function openPlayer(name, avatar, joined, best) {
+  const dlg = $("pdlg"), list = $("pdlg-list"), pic = XAvatar.canvas(avatar, 96);
+  pic.id = "pdlg-avatar";
+  $("pdlg-avatar").replaceWith(pic);
+  $("pdlg-name").textContent = name;
+  $("pdlg-sub").textContent = (Number(best) > 0 ? `VOLT best ${Number(best).toLocaleString()}. ` : "") + `Joined ${fmtDate(joined)}`;
+  $("pdlg-count").textContent = "";
+  list.replaceChildren(Object.assign(document.createElement("p"), { className: "muted", textContent: "Loading..." }));
+  if (dlg.showModal) dlg.showModal(); else dlg.setAttribute("open", "");
+  try {
+    const got = new Map(rows(await get(`v1/players/${encodeURIComponent(name)}/achievements`)));
+    const have = catalogue.filter((a) => got.has(a[0]));
+    list.replaceChildren();
+    $("pdlg-count").textContent = `${have.length} of ${catalogue.length}`;
+    have.concat(catalogue.filter((a) => !got.has(a[0]))).forEach((a) =>
+      list.appendChild(got.has(a[0]) ? achRow(a, ago(got.get(a[0])), "#e50914", true) : achRow(a, "", "#3a3f48", false)));
+  } catch (e) {
+    list.replaceChildren(Object.assign(document.createElement("p"), { className: "muted", textContent: "Couldn't get them right now." }));
+  }
+}
 
 async function refresh() {
-  const get = (p) => fetch(p, { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(p); return r.text(); });
   try {
     const [sc, it, pl] = await Promise.all([get("v1/scores/volt"), get("v1/store"), get("v1/players")]);
 
@@ -567,18 +701,34 @@ async function refresh() {
       m.textContent = "No profiles yet. Make one on your Xbox from the Profile tile.";
       list.appendChild(m);
     }
-    p.forEach(([name, avatar, joined, best]) => {
-      const card = document.createElement("div");
+    p.forEach(([name, avatar, joined, best, ach]) => {
+      const card = document.createElement("button");
+      card.type = "button";
       card.className = "player";
+      card.setAttribute("aria-label", `${name}: their achievements`);
       card.appendChild(XAvatar.canvas(avatar, 110));
       const nb = document.createElement("b"); nb.textContent = name;
       const sm = document.createElement("small");
       sm.textContent = Number(best) > 0 ? `VOLT best ${Number(best).toLocaleString()}` : `Joined ${fmtDate(joined)}`;
       card.append(nb, sm);
+      if (Number(ach) > 0) {
+        const a = document.createElement("small");
+        a.textContent = Number(ach) === 1 ? "1 achievement" : `${ach} achievements`;
+        card.appendChild(a);
+      }
+      card.addEventListener("click", () => openPlayer(name, avatar, joined, best));
       list.appendChild(card);
     });
   } catch (e) {
     /* XenithOS Cloud isn't answering: the lists keep what they last showed */
+  }
+  try {
+    const [cat, recent] = await Promise.all([get("v1/achievements"), get("v1/achievements/recent")]);
+    catalogue = rows(cat).filter((a) => a.length >= 5);
+    showAchievements(rows(recent));
+  } catch (e) {
+    /* not answering: the section keeps what it showed (an older XenithOS Cloud has none yet) */
+    if (!catalogue.length) $("achlist").replaceChildren(Object.assign(document.createElement("p"), { className: "muted", textContent: "Not here yet." }));
   }
 }
 refresh();

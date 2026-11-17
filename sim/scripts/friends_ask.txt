@@ -1,0 +1,19 @@
+# Friends, on the first console (signed in as Alice): the Friends tile, an empty list, then Add a
+# friend with a gamertag typed on a keyboard (XSIM_TYPE). Part of sim/social/test-friends.sh:
+#   XSIM_PROFILE=alice.txt XSIM_TYPE="Bob Two|" sim/run.sh sim/scripts/friends_ask.txt friends-ask 127.0.0.1:18795
+wait 260
+press right
+press right
+press right
+wait 25
+shot fa_home_tile
+press a
+wait 40
+shot fa_friends_empty
+press a
+wait 40
+shot fa_asked
+press down
+wait 15
+shot fa_asked_detail
+quit
