@@ -17,7 +17,7 @@ W="$T/data"                      # XenithOS's data folder, with HostMC's hostmc/
 V="$T/vps"                       # the stand-in VPS's sshd
 SSHPORT=22022 PUBLIC=25578 MCPORT=25577
 SSHD=$(command -v sshd || echo /usr/sbin/sshd)
-HOST=$(hostname -I 2>/dev/null | awk '{print $1}')
+HOST=$(hostname -I 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+(\.[0-9]+){3}$/) { print $i; exit }}')
 failed=0
 check() { if eval "$2"; then echo "  ok    $1"; else echo "  FAIL  $1"; failed=1; fi; }
 
@@ -54,7 +54,10 @@ LogLevel VERBOSE
 EOF
     "$SSHD" -D -e -f "$V/sshd_config" 2>> "$V/sshd.log" &
     SSHD_PID=$!
-    sleep 0.5
+    for _ in $(seq 1 50); do                 # until it takes connections
+        python3 -I -c "import socket, sys; socket.create_connection(('127.0.0.1', int(sys.argv[1])), 1).close()" "$SSHPORT" 2>/dev/null && break
+        sleep 0.2
+    done
 }
 stop_vps() {                     # the sshd started above, by its PID, if it's still that sshd
     if [ -n "$SSHD_PID" ] && tr '\0' ' ' < "/proc/$SSHD_PID/cmdline" 2>/dev/null | grep -q "$V/sshd_config"; then
