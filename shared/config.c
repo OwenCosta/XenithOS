@@ -7,6 +7,7 @@
 #include "avatar.h"
 #include "config.h"
 #include "net.h"
+#include "platform.h"
 
 struct xenith_config cfg = {.name = "PLAYER"};
 struct xenith_settings st = {80, 1, 1, 1, 0, ""};
@@ -65,20 +66,52 @@ static void on_config(const char *k, const char *v)
 /* ---------------------------------------------------------------- route.txt */
 
 static FILE *open_write(const char *path);
-static char route_for[32], route_lan[32], route_id[24];
+static char route_for[NET_ADDR_LEN], route_lan[32], route_id[24], route_https[NET_ADDR_LEN];
+static char lan_now[32];          /* the home-network address in use */
 
 static void on_route(const char *k, const char *v)
 {
     if (!strcmp(k, "for")) snprintf(route_for, sizeof route_for, "%s", v);
     else if (!strcmp(k, "lan")) snprintf(route_lan, sizeof route_lan, "%s", v);
     else if (!strcmp(k, "id")) copy_alnum(route_id, sizeof route_id, v, 0);
+    else if (!strcmp(k, "https")) snprintf(route_https, sizeof route_https, "%s", v);
+}
+
+/* Where requests go away from the network XenithOS Cloud runs on. */
+static const char *away(void)
+{
+    return cfg.server_https[0] ? cfg.server_https : cfg.server_main;
 }
 
 static void route_use(const char *lan, const char *id)
 {
+    snprintf(lan_now, sizeof lan_now, "%s", lan);
     snprintf(cfg.server, sizeof cfg.server, "%s", lan);
     snprintf(cfg.route_id, sizeof cfg.route_id, "%s", id);
-    net_set_lan_route(cfg.server, sizeof cfg.server, cfg.server_main);
+    net_set_lan_route(cfg.server, sizeof cfg.server, away());
+}
+
+static void https_use(const char *addr)       /* "" for none */
+{
+    snprintf(cfg.server_https, sizeof cfg.server_https, "%s", addr);
+    if (net_lan_route_on()) net_set_lan_route(cfg.server, sizeof cfg.server, away());   /* at home: the way out */
+    else snprintf(cfg.server, sizeof cfg.server, "%s", away());
+}
+
+/* route.txt says what's in use, and goes when nothing is. */
+static void route_write(void)
+{
+    FILE *f;
+    if (!cfg.route_id[0] && !cfg.server_https[0]) {
+        remove(XENITH_ROUTE_PATH);
+        return;
+    }
+    f = open_write(XENITH_ROUTE_PATH);
+    if (!f) return;
+    fprintf(f, "# Written by XenithOS each time it starts: other ways to reach XenithOS Cloud from here.\n"
+               "for=%s\nlan=%s\nid=%s\nhttps=%s\n",
+            cfg.server_main, cfg.route_id[0] ? lan_now : "", cfg.route_id, cfg.server_https);
+    fclose(f);
 }
 
 void config_load(void)
@@ -87,31 +120,41 @@ void config_load(void)
     int port;
     cfg.loaded = read_kv(XENITH_CONFIG_PATH, on_config);
     snprintf(cfg.server_main, sizeof cfg.server_main, "%s", cfg.server);
-    cfg.route_id[0] = route_for[0] = route_lan[0] = route_id[0] = 0;
-    /* The dashboard checked this route when it came online (cloud_route_check), so the apps it
-     * starts take it as it is. If the console has moved since, the first request finds out. */
-    if (cfg.server[0] && read_kv(XENITH_ROUTE_PATH, on_route) && !strcmp(route_for, cfg.server_main)
-            && route_id[0] && net_parse_host(route_lan, ip, &port))
-        route_use(route_lan, route_id);
+    cfg.route_id[0] = cfg.server_https[0] = lan_now[0] = 0;
+    route_for[0] = route_lan[0] = route_id[0] = route_https[0] = 0;
+    net_set_lan_route(NULL, 0, NULL);
+    /* The dashboard checked these when it came online (cloud_route_check), so the apps it starts
+     * take them as they are. If the machine has moved since, the first request finds out. */
+    if (!cfg.server[0] || !read_kv(XENITH_ROUTE_PATH, on_route) || strcmp(route_for, cfg.server_main)) return;
+    if (plat_kind() == PLAT_PC && !strncmp(route_https, "https://", 8)) https_use(route_https);
+    if (route_id[0] && net_parse_host(route_lan, ip, &port)) route_use(route_lan, route_id);
 }
 
 void route_save(const char *lan, const char *id)
 {
-    FILE *f;
     route_use(lan, id);
-    f = open_write(XENITH_ROUTE_PATH);
-    if (!f) return;
-    fprintf(f, "# Written by XenithOS: XenithOS Cloud's address on this network.\nfor=%s\nlan=%s\nid=%s\n",
-            cfg.server_main, cfg.server, cfg.route_id);
-    fclose(f);
+    route_write();
 }
 
 void route_forget(void)
 {
-    snprintf(cfg.server, sizeof cfg.server, "%s", cfg.server_main);
-    cfg.route_id[0] = 0;
+    cfg.route_id[0] = lan_now[0] = 0;
     net_set_lan_route(NULL, 0, NULL);
-    remove(XENITH_ROUTE_PATH);
+    snprintf(cfg.server, sizeof cfg.server, "%s", away());
+    route_write();
+}
+
+void https_save(const char *addr)
+{
+    https_use(addr);
+    route_write();
+}
+
+void https_forget(void)
+{
+    if (!cfg.server_https[0]) return;
+    https_use("");
+    route_write();
 }
 
 /* ----------------------------------------------------------- settings.txt */

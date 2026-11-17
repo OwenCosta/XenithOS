@@ -2,8 +2,10 @@
 #define XENITH_NET_H
 
 /* XenithOS networking. On the console this is wired Ethernet through libxenon's lwIP
- * (raw API, no DNS), so servers are addressed as "a.b.c.d:port". Calls are synchronous;
- * while they wait they call the idle hook so the screen and sound keep running. */
+ * (raw API, no DNS), so servers are addressed as "a.b.c.d:port". PCs and Raspberry Pis
+ * (linux/http_posix.c) also take names ("example.com:8795") and "https://name[:port]", which
+ * is HTTPS with the certificate checked. Calls are synchronous; while they wait they call the
+ * idle hook so the screen and sound keep running. */
 
 enum {
     NE_NO_NETWORK = -1,
@@ -14,7 +16,10 @@ enum {
     NE_TOO_BIG    = -6,
     NE_MEMORY     = -7,
     NE_BAD_REPLY  = -8,
+    NE_SECURE     = -9,     /* an https:// address: no secure connection, or its certificate didn't check out */
 };
+
+#define NET_ADDR_LEN 128    /* room for "https://<name>:<port>" */
 
 int net_up(void);                   /* bring the network up (DHCP) if needed; 1 with an address */
 int net_is_up(void);                /* 1 if it already has an address, never blocks */
@@ -31,7 +36,7 @@ struct http_resp {
     char *raw_;         /* owned buffer, release with http_free */
 };
 
-/* host is "a.b.c.d:port". body may be NULL. max_bytes caps the reply size. */
+/* host is "a.b.c.d:port" (see the top for PCs). body may be NULL. max_bytes caps the reply size. */
 int http_request(const char *host, const char *method, const char *path,
                  const char *body, int body_len, int max_bytes,
                  net_progress_fn progress, void *ctx, struct http_resp *out);
@@ -44,7 +49,8 @@ int http_probe(const char *host, const char *path, int connect_ms, int max_bytes
  * address on the network it runs on, which answers in milliseconds where the public address
  * takes a trip out to the relay and back. A request there that can't connect within
  * NET_LAN_CONNECT_MS goes to main_addr instead, and so does everything after it (*active
- * becomes main_addr): the console has left that network. NULL turns the route off. */
+ * becomes main_addr): the console has left that network. main_addr is the address used away
+ * from home (on a PC, the HTTPS one when it has it). NULL turns the route off. */
 void net_set_lan_route(char *active, int active_size, const char *main_addr);
 int net_lan_route_on(void);
 

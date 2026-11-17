@@ -41,6 +41,7 @@ const char *net_error(int status)
     case NE_TOO_BIG:    return "The reply was too large.";
     case NE_MEMORY:     return "Out of memory.";
     case NE_BAD_REPLY:  return "XenithOS Cloud sent something unexpected.";
+    case NE_SECURE:     return "Couldn't make a secure connection to XenithOS Cloud.";
     default:            return "Network error.";
     }
 }
@@ -143,7 +144,7 @@ void http_free(struct http_resp *r)
 /* ---------------------------------------------------------------- the home-network route */
 static char *route_active;
 static int route_size;
-static char route_lan[64], route_main[64];
+static char route_lan[NET_ADDR_LEN], route_main[NET_ADDR_LEN];
 
 void net_set_lan_route(char *active, int active_size, const char *main_addr)
 {
@@ -162,7 +163,7 @@ int http_request(const char *host, const char *method, const char *path,
                  const char *body, int body_len, int max_bytes,
                  net_progress_fn progress, void *ctx, struct http_resp *out)
 {
-    char main_addr[64];
+    char main_addr[NET_ADDR_LEN];
     int status;
     if (!host || !net_lan_route_on() || strcmp(host, route_lan))
         return net_http_once(host, method, path, body, body_len, max_bytes, progress, ctx, out, NET_CONNECT_MS);

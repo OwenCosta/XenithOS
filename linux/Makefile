@@ -2,6 +2,8 @@
 #   make         builds xenithos and its apps here
 #   make clean
 # install.sh does the rest (packages, installing, console mode). Needs libsdl2-dev and zlib.
+# HTTPS uses the system's OpenSSL (libssl.so.3), opened when it's needed (http_posix.c), so
+# building doesn't need libssl-dev.
 
 CC          ?= cc
 SDL_CFLAGS  := $(shell sdl2-config --cflags)
@@ -11,8 +13,8 @@ CFLAGS_ALL  := $(OPT) -std=gnu11 -Wall -Wno-format-truncation -I../shared -I../s
 LIBS        := $(SDL_LIBS) -lX11 -lz -lm -lpthread -ldl
 
 SHARED      := $(filter-out ../shared/platform_xenon.c ../shared/net_xenon.c, $(wildcard ../shared/*.c))
-PLATFORM    := platform_sdl.c apps_linux.c kiosk.c net_posix.c
-HEADERS     := $(wildcard ../shared/*.h ../source/*.h) platform_linux.h
+PLATFORM    := platform_sdl.c apps_linux.c kiosk.c net_posix.c http_posix.c
+HEADERS     := $(wildcard ../shared/*.h ../source/*.h) platform_linux.h http_posix.h
 
 SHELL_SRC   := $(wildcard ../source/*.c) $(SHARED) $(PLATFORM)
 VOLT_SRC    := ../apps/volt/source/volt.c $(SHARED) $(PLATFORM)

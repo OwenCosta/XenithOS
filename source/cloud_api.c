@@ -52,37 +52,76 @@ const char *cloud_error_text(struct http_resp *r, int status)
     return msg;
 }
 
+/* What XenithOS Cloud says about itself at /v1/lan: its id, and the other addresses it answers
+ * at. 1 if it answered at addr. */
+struct lan_info {
+    char id[24], lan[32], https[80];
+};
+
+static int ask_lan(const char *addr, int connect_ms, struct lan_info *in)
+{
+    struct http_resp r;
+    int ok = http_probe(addr, "/v1/lan", connect_ms, 1024, &r) == 200;
+    memset(in, 0, sizeof *in);
+    if (ok) {
+        kv_get(r.body, "id", in->id, sizeof in->id);
+        kv_get(r.body, "lan", in->lan, sizeof in->lan);
+        kv_get(r.body, "https", in->https, sizeof in->https);
+    }
+    http_free(&r);
+    return ok && in->id[0];
+}
+
+/* "name" or "name:port": letters, digits, dots and dashes. */
+static int https_name_ok(const char *s)
+{
+    int n = (int)strspn(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-"), port;
+    if (n == 0 || n > 64 || s[0] == '.' || s[0] == '-') return 0;
+    if (!s[n]) return 1;
+    port = atoi(s + n + 1);
+    return s[n] == ':' && s[n + 1] && strspn(s + n + 1, "0123456789") == strlen(s + n + 1) && port > 0 && port < 65536;
+}
+
+/* PCs and Raspberry Pis talk to XenithOS Cloud over HTTPS when it has an HTTPS address (it says
+ * which at /v1/lan), once it answers there as the same server with a certificate that checks
+ * out. Checked at each start, so it's dropped again when the server stops offering it or it
+ * doesn't answer: plain HTTP to the address in config.txt keeps working, as on the Xbox, which
+ * has no TLS. */
+static void https_check(const struct lan_info *from)
+{
+    struct lan_info got;
+    char addr[NET_ADDR_LEN];
+    if (plat_kind() != PLAT_PC) return;
+    if (!https_name_ok(from->https)) { https_forget(); return; }
+    snprintf(addr, sizeof addr, "https://%s", from->https);
+    if (!strcmp(addr, cfg.server_main)) { https_forget(); return; }     /* config.txt says it already */
+    if (ask_lan(addr, NET_CONNECT_MS, &got) && !strcmp(got.id, from->id)) https_save(addr);
+    else https_forget();
+}
+
 /* Consoles on the network XenithOS Cloud runs on talk to it there: a few milliseconds a request
  * instead of a trip out to the relay and back (most of a second each). The server says what that
  * address is (/v1/lan), and it's only used once it answers there as the same server. Once a
- * start-up; apps take it from route.txt (config_load). */
+ * start-up; apps take it from route.txt (config_load). The server is asked at the address in
+ * config.txt, so a PC that can't get there keeps the HTTPS address it had. */
 void cloud_route_check(void)
 {
     static int done;
-    struct http_resp r;
-    char id[24], lan[32], got[24];
+    struct lan_info here, back;
     unsigned char ip[4];
-    int port;
+    int port, home;
 
     if (done || !cfg.server_main[0] || !net_is_up()) return;
     done = 1;
-    if (cfg.route_id[0]) {                   /* route.txt: still on that network? */
-        int ok = http_probe(cfg.server, "/v1/lan", NET_LAN_CONNECT_MS, 1024, &r) == 200;
-        if (ok) kv_get(r.body, "id", got, sizeof got);
-        http_free(&r);
-        if (ok && !strcmp(got, cfg.route_id)) return;
-        route_forget();
+    /* route.txt: still on that network? */
+    home = cfg.route_id[0] && ask_lan(cfg.server, NET_LAN_CONNECT_MS, &here) && !strcmp(here.id, cfg.route_id);
+    if (!home) {
+        if (cfg.route_id[0]) route_forget();
+        if (!ask_lan(cfg.server_main, NET_CONNECT_MS, &here)) return;      /* not reachable, or an older server */
     }
-    if (cloud_get("/v1/lan", 1024, &r) != 200) { http_free(&r); return; }   /* an older server */
-    kv_get(r.body, "id", id, sizeof id);
-    kv_get(r.body, "lan", lan, sizeof lan);
-    http_free(&r);
-    if (!id[0] || !lan[0] || !strcmp(lan, cfg.server_main) || !net_parse_host(lan, ip, &port)) return;
-    if (http_probe(lan, "/v1/lan", NET_LAN_CONNECT_MS, 1024, &r) == 200) {
-        kv_get(r.body, "id", got, sizeof got);
-        if (!strcmp(got, id)) route_save(lan, id);
-    }
-    http_free(&r);
+    https_check(&here);
+    if (home || !here.lan[0] || !strcmp(here.lan, cfg.server_main) || !net_parse_host(here.lan, ip, &port)) return;
+    if (ask_lan(here.lan, NET_LAN_CONNECT_MS, &back) && !strcmp(back.id, here.id)) route_save(here.lan, here.id);
 }
 
 int cloud_ready(const char *title)

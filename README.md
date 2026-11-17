@@ -105,6 +105,11 @@ community project that isn't made by Roblox, and only runs on x86-64 PCs; Steam 
 leaderboards, the downloads and the website (`server/web/`) over plain HTTP, because the Xbox has no TLS. Tube
 also needs `yt-dlp` and `ffmpeg` on the server; it switches itself off without them.
 
+PCs and Raspberry Pis use HTTPS when XenithOS Cloud has an HTTPS address too (`XENITH_PUBLIC_HTTPS`, such as
+a Cloudflare tunnel's hostname whose service is `XENITH_EDGE_PORT`, where each console's address comes from
+`CF-Connecting-IP`). It tells them at `/v1/lan`, and they move there once it answers with a certificate that
+checks out, at each start; see [linux/README.md](linux/README.md#xenithos-cloud-over-https).
+
 YouTube is hard on server addresses, so Tube asks for a video at most twice. First it tries the quick way, without
 JavaScript, which takes a few seconds. If YouTube refuses, it tries the full way: Deno solves YouTube's
 JavaScript challenges, and a local token helper (`server/xenith-pot.service`, the
@@ -120,9 +125,9 @@ python3 server/xenith_cloud.py --selftest      # 90 checks, no network needed
 
 Profiles: passcodes are stored as salted PBKDF2 hashes and sign-in tokens as SHA-256 hashes, so the state
 file never holds either. Five wrong passcodes lock a profile for 15 minutes, and sign-ups and sign-ins are
-rate limited per address. Because the Xbox speaks plain HTTP, don't reuse a passcode from anywhere else. Tube
-needs a signed-in profile, plays one video per profile and a few at a time overall, so the server can't be used
-as an open proxy.
+rate limited per address (an IPv6 address by its /64). Because the Xbox speaks plain HTTP, don't reuse a
+passcode from anywhere else. Tube needs a signed-in profile, plays one video per profile and a few at a time
+overall, so the server can't be used as an open proxy.
 
 Running your own copy (the unit runs as a throwaway user on a read-only system):
 

@@ -1,0 +1,20 @@
+# XenithOS Cloud over HTTPS (sim/test-https.sh): start and go online, which is when a PC looks
+# for XenithOS Cloud's HTTPS address, then Settings > System info, which says how this machine
+# is connected.
+wait 200
+shot https_home
+press right
+press right
+press right
+press right
+press a
+wait 40
+press down
+press down
+press down
+press down
+press down
+press a
+wait 40
+shot https_info
+quit
