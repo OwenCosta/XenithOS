@@ -1915,7 +1915,9 @@ def store_key_command(args):
         while routes:
             route = routes.pop(0)
             try:
-                with urllib.request.urlopen(base + route, timeout=20) as r:
+                # As a console asks: Cloudflare (cloud.owencosta.diy) turns away Python's own User-Agent.
+                ask = urllib.request.Request(base + route, headers={"User-Agent": "XenithOS/0.4 (store-key check)"})
+                with urllib.request.urlopen(ask, timeout=20) as r:
                     body, values = r.read(), r.headers.get_all(STORE_SIG_HEADER) or []
             except urllib.error.HTTPError as e:
                 if "/icon/" in route and e.code == 404:

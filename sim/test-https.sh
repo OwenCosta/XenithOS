@@ -100,8 +100,10 @@ run() {                          # $1: the machine, $2: the script, $3: the prog
     local shots="${4:-$1}"       # $4: a name for its screenshots (default the machine's)
     mkdir -p "$T/shots/$shots"
     MARK=$(wc -l < "$T/cloud.log")
+    # The test's XenithOS Cloud has no Store key, so the simulator acts as a build without one
+    # (source/store_key.h has the real XenithOS Cloud's); sim/store/test-store.sh checks signing.
     ( cd "$T/$1" && XSIM_SCRIPT="$repo/sim/scripts/$2" XSIM_OUT="$T/shots/$shots" ASAN_OPTIONS=detect_leaks=0 \
-        "$repo/sim/${3:-xsim}" >> "$T/sim-$1.log" 2>&1 )
+        XSIM_STORE_KEY="${XSIM_STORE_KEY:-none}" "$repo/sim/${3:-xsim}" >> "$T/sim-$1.log" 2>&1 )
     echo "  ($1: $2 finished with $?)"
 }
 since() { tail -n +"$((MARK + 1))" "$T/cloud.log"; }

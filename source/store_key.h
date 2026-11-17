@@ -9,6 +9,7 @@
  * prints the line for here; its private half goes to XenithOS Cloud (XENITH_STORE_KEY), never in
  * this repository. Two keys here (old and new) let consoles carry on through a change of key. */
 static const char *const store_keys[] = {
+    "6ac2e8d5bd25ccc7478843b2270d572ab7490ed9c9ab2bbdecda2e50a171026b",   /* XenithOS Cloud, 2026-11-17 */
     NULL
 };
 
