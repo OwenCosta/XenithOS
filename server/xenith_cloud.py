@@ -24,6 +24,9 @@ Public
                                       reply (store_bundle), for 0.5.7 consoles
   GET  /v1/store/file/<id>            the file bytes
   GET  /v1/store/icon/<id>.ximg|.png  the item's thumbnail
+                                      With XENITH_STORE_KEY, all of these but the files come with
+                                      an X-Xenith-Sig header, XenithOS Cloud's signature, which
+                                      consoles check (see "Store signatures" below)
   GET  /v1/scores/<game>              rank|name|score|avatar
   GET  /v1/players                    name|avatar|joined|volt_best   (most recently seen first)
   GET  /v1/players/<name>             key=value
@@ -61,6 +64,10 @@ Admin (header X-Xenith-Key: <XENITH_ADMIN_KEY>)
   GET  /v1/feedback                   time|kind|from|version|platform|text, newest first
 
 Command line
+  xenith_cloud.py store-key new <file>   make the Store's signing key; prints its public half
+  xenith_cloud.py store-key show <file>  the public half of a key file
+  xenith_cloud.py store-key check <host:port> [public key]   check a running server's Store
+                                      signatures (default: the keys in source/store_key.h)
   xenith_cloud.py send "text"         message the console inbox (through the running server)
   xenith_cloud.py motd "text"         set the message of the day
   xenith_cloud.py --selftest          built-in tests (no network, temp dir)
@@ -74,6 +81,8 @@ Environment
   XENITH_STATE_DIR   default ./state      (state.json lives here)
   XENITH_STORE_DIR   default ./store      (store.json + the files it lists, flathub.json, steam.json,
                                           and <id>.ximg / <id>.png thumbnails)
+  XENITH_STORE_KEY   the file with the Store's signing key (store-key new). It must be outside the
+                     store, web, download and state folders. Unset: Store replies go out unsigned
   XENITH_WEB_DIR     default ./web        (index.html and static/)
   XENITH_ADMIN_KEY   admin key; admin routes are off when unset
   XENITH_CONSOLE_KEY when set, the old /v1/inbox route needs ?key=<this>
@@ -104,6 +113,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -431,6 +441,7 @@ class Store:
         self.dir = store_dir
         self.cache = {}   # path -> (mtime, size, sha256)
         self.lock = threading.Lock()
+        self.key = None   # StoreKey: what the Store serves goes out signed with it
 
     def _digest(self, path):
         st = os.stat(path)
@@ -1065,6 +1076,286 @@ def store_bundle(store, pc):
     return b"".join(out)
 
 
+# ---------------------------------------------------------------------- Store signatures
+
+# The Store's replies travel over plain HTTP, and the SHA-256 that checks each download comes in
+# them, so someone in between could change a list and the file together. So with a key
+# (XENITH_STORE_KEY) every list, the bundle and every thumbnail go out signed with XenithOS Cloud's
+# ed25519 key, in a header older consoles never look at:
+#     X-Xenith-Sig: 1 <key id> <signature>
+# "1" is the format, the key id the first 16 hex digits of the public key (so during a change of
+# key both can be sent, and each console uses the one it knows), the signature 128 hex digits over
+#     XenithOS Store 1\n<name>\n<SHA-256 of the body, in hex>\n
+# where the name says which reply it is (store_sig_name), so one can't stand in for another.
+# Consoles built with the public key (source/store_key.h) refuse a list without a good signature;
+# the files themselves are checked against the SHA-256s in the signed list.
+#
+# The standard library has no ed25519, so here it is after RFC 8032. Python's integers don't run in
+# constant time; it only ever signs this server's own replies, once for each new content (made),
+# so an outsider can't have it sign much, let alone time it.
+ED_P = 2 ** 255 - 19
+ED_L = 2 ** 252 + 27742317777372353535851937790883648493
+ED_D = -121665 * pow(121666, ED_P - 2, ED_P) % ED_P
+ED_I = pow(2, (ED_P - 1) // 4, ED_P)                   # a square root of -1
+ED_ZERO = (0, 1, 1, 0)
+STORE_SIG_HEADER = "X-Xenith-Sig"
+STORE_KEY_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _ed_add(a, b):
+    """Points in extended coordinates (X, Y, Z, T): x = X/Z, y = Y/Z, xy = T/Z. Adds and doubles."""
+    p = ED_P
+    x1, y1, z1, t1 = a
+    x2, y2, z2, t2 = b
+    e1, e2 = (y1 - x1) * (y2 - x2) % p, (y1 + x1) * (y2 + x2) % p
+    c, d = 2 * ED_D * t1 * t2 % p, 2 * z1 * z2 % p
+    e, f, g, h = e2 - e1, d - c, d + c, e2 + e1
+    return e * f % p, g * h % p, f * g % p, e * h % p
+
+
+def _ed_mul(s, point):
+    """s times point, always the same 256 doublings and additions whatever s is."""
+    q = ED_ZERO
+    for i in range(255, -1, -1):
+        q = _ed_add(q, q)
+        added = _ed_add(q, point)
+        q = added if (s >> i) & 1 else q
+    return q
+
+
+def _ed_encode(point):
+    x, y, z, _ = point
+    zi = pow(z, ED_P - 2, ED_P)
+    x, y = x * zi % ED_P, y * zi % ED_P
+    return (y | (x & 1) << 255).to_bytes(32, "little")
+
+
+def _ed_decode(data):
+    """The point 32 bytes stand for, or None when they aren't one written the one proper way."""
+    if len(data) != 32:
+        return None
+    y = int.from_bytes(data, "little")
+    sign, y = y >> 255, y & ((1 << 255) - 1)
+    if y >= ED_P:
+        return None
+    x2 = (y * y - 1) * pow(ED_D * y * y + 1, ED_P - 2, ED_P) % ED_P
+    x = pow(x2, (ED_P + 3) // 8, ED_P)
+    if (x * x - x2) % ED_P:
+        x = x * ED_I % ED_P
+    if (x * x - x2) % ED_P or (x == 0 and sign):
+        return None
+    if x & 1 != sign:
+        x = ED_P - x
+    return x, y, 1, x * y % ED_P
+
+
+ED_B = _ed_decode((4 * pow(5, ED_P - 2, ED_P) % ED_P).to_bytes(32, "little"))
+
+
+def _ed_secret(seed):
+    h = hashlib.sha512(seed).digest()
+    return int.from_bytes(h[:32], "little") & ((1 << 254) - 8) | 1 << 254, h[32:]
+
+
+def ed25519_public(seed):
+    """The public key (32 bytes) of a 32-byte private key (RFC 8032's seed)."""
+    return _ed_encode(_ed_mul(_ed_secret(seed)[0], ED_B))
+
+
+def ed25519_sign(seed, msg, public=None):
+    a, prefix = _ed_secret(seed)
+    public = public or _ed_encode(_ed_mul(a, ED_B))
+    r = int.from_bytes(hashlib.sha512(prefix + msg).digest(), "little") % ED_L
+    big_r = _ed_encode(_ed_mul(r, ED_B))
+    k = int.from_bytes(hashlib.sha512(big_r + public + msg).digest(), "little") % ED_L
+    return big_r + ((r + k * a) % ED_L).to_bytes(32, "little")
+
+
+def ed25519_verify(public, msg, sig):
+    """RFC 8032's check without the cofactor, as Monocypher and libsodium make it: S below L,
+    A a proper point, and [S]B - [k]A written out the same as R."""
+    if len(sig) != 64:
+        return False
+    a, s = _ed_decode(public), int.from_bytes(sig[32:], "little")
+    if a is None or s >= ED_L:
+        return False
+    k = int.from_bytes(hashlib.sha512(sig[:32] + public + msg).digest(), "little") % ED_L
+    minus_a = (ED_P - a[0], a[1], a[2], ED_P - a[3])
+    return _ed_encode(_ed_add(_ed_mul(s, ED_B), _ed_mul(k, minus_a))) == sig[:32]
+
+
+def store_sig_name(parts, query):
+    """Which signed reply a Store route is ("store", "all pc", "icon doom.ximg"), or None for one
+    that isn't signed (the files: the signed list has their SHA-256s)."""
+    names = {("v1", "store"): "store", ("v1", "store", "needs"): "needs",
+             ("v1", "store", "flathub"): "flathub", ("v1", "store", "steam"): "steam"}
+    if tuple(parts) in names:
+        return names[tuple(parts)]
+    if parts == ["v1", "store", "all"]:
+        return "all pc" if query.get("pc", [""])[0] == "1" else "all"
+    if len(parts) == 4 and parts[:3] == ["v1", "store", "icon"]:
+        return "icon " + parts[3]
+    return None
+
+
+def store_sig_text(name, body):
+    """What a signature covers: the reply's name and its body's SHA-256."""
+    return f"XenithOS Store 1\n{name}\n{hashlib.sha256(body).hexdigest()}\n".encode()
+
+
+class StoreKey:
+    """XenithOS Cloud's Store signing key, and the X-Xenith-Sig headers made with it."""
+
+    def __init__(self, seed):
+        self.seed = seed
+        self.public = ed25519_public(seed)
+        self.key_id = self.public.hex()[:16]
+        self.made = {}                         # signed text -> header (one per content)
+        self.lock = threading.Lock()
+
+    def header(self, name, body):
+        text = store_sig_text(name, body)
+        with self.lock:
+            value = self.made.get(text)
+        if not value:
+            value = f"1 {self.key_id} {ed25519_sign(self.seed, text, self.public).hex()}"
+            with self.lock:
+                if len(self.made) >= 1024:
+                    self.made.clear()
+                self.made[text] = value
+        return value
+
+
+def read_store_key(path):
+    """The private key in a key file (store-key new): its first line that isn't a # comment."""
+    with open(path, encoding="ascii") as f:
+        for line in f:
+            line = line.strip().lower()
+            if line and not line.startswith("#"):
+                if STORE_KEY_RE.match(line):
+                    return bytes.fromhex(line)
+                break
+    raise ValueError("it doesn't hold a key (64 hex digits on a line of their own)")
+
+
+def load_store_key(path, kept_out_of):
+    """StoreKey from the file XENITH_STORE_KEY names, or None after saying why not. kept_out_of:
+    the folders XenithOS Cloud serves files from or keeps its state in, where a key could leak
+    (through store.json, a backup of the state, a stray copy in the website)."""
+    real = os.path.realpath(path)
+    for folder in kept_out_of:
+        inside = os.path.realpath(folder)
+        if real == inside or real.startswith(inside.rstrip(os.sep) + os.sep):
+            log(f"XENITH_STORE_KEY is in {folder}, which XenithOS Cloud serves or keeps its state in. Move it "
+                f"out (to a folder of its own). Until then Store lists go out unsigned, and consoles that "
+                f"check refuse them.")
+            return None
+    try:
+        seed = read_store_key(path)
+        loose = os.stat(path).st_mode & 0o077
+    except (OSError, ValueError, UnicodeDecodeError) as e:
+        log(f"XENITH_STORE_KEY {path}: {e}. Until it's fixed Store lists go out unsigned, and consoles that "
+            f"check refuse them.")
+        return None
+    if loose:
+        log(f"XENITH_STORE_KEY {path} can be read by others than its owner: chmod 600 it")
+    return StoreKey(seed)
+
+
+def store_keys_in(header_file):
+    """The public keys (hex) a console build trusts, from source/store_key.h."""
+    try:
+        with open(header_file, encoding="utf-8") as f:
+            text = re.sub(r"/\*.*?\*/|//[^\n]*", "", f.read(), flags=re.S)
+    except OSError:
+        return []
+    return re.findall(r'"([0-9a-f]{64})"', text)
+
+
+def store_sig_good(values, name, body, keys):
+    """True when one of the X-Xenith-Sig values is a good signature of this reply by one of the
+    public keys (hex): what consoles check (source/store_sig.c)."""
+    text = store_sig_text(name, body)
+    for value in values:
+        f = value.split()
+        if len(f) != 3 or f[0] != "1" or not re.fullmatch(r"[0-9a-f]{16}", f[1]) \
+                or not re.fullmatch(r"[0-9a-f]{128}", f[2]):
+            continue
+        for key in keys:
+            if key.startswith(f[1]) and ed25519_verify(bytes.fromhex(key), text, bytes.fromhex(f[2])):
+                return True
+    return False
+
+
+def store_key_command(args):
+    """xenith_cloud.py store-key new <file> | show <file> | check <host:port> [public key]"""
+    def tell(public):
+        print(f"Public half: {public}  (key id {public[:16]})\n"
+              f"For source/store_key.h, the line inside store_keys[]:\n    \"{public}\",")
+
+    if len(args) == 2 and args[0] == "new":
+        seed = secrets.token_bytes(32)
+        public = ed25519_public(seed).hex()
+        try:                                    # never over a key that's there: it may be in use
+            fd = os.open(args[1], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except OSError as e:
+            print(f"{args[1]}: {e.strerror}. A key file is never replaced like this.", file=sys.stderr)
+            return 1
+        with os.fdopen(fd, "w", encoding="ascii") as f:
+            f.write("# XenithOS Cloud's Store signing key (ed25519). Keep it secret, and keep a copy somewhere\n"
+                    "# safe: consoles built with its public half only trust Store lists signed with it.\n"
+                    f"# Public half: {public}\n{seed.hex()}\n")
+        print(f"Made {args[1]}, which only you can read.")
+        tell(public)
+        return 0
+    if len(args) == 2 and args[0] == "show":
+        try:
+            tell(ed25519_public(read_store_key(args[1])).hex())
+        except (OSError, ValueError, UnicodeDecodeError) as e:
+            print(f"{args[1]}: {e}", file=sys.stderr)
+            return 1
+        return 0
+    if len(args) in (2, 3) and args[0] == "check":
+        here = os.path.dirname(os.path.abspath(__file__))
+        keys = [args[2].lower()] if len(args) == 3 else store_keys_in(os.path.join(here, "..", "source", "store_key.h"))
+        if not keys or not all(STORE_KEY_RE.match(k) for k in keys):
+            print("No public key to check with: give one (64 hex digits), or put it in source/store_key.h.",
+                  file=sys.stderr)
+            return 2
+        routes, bad, first = ["/v1/store", "/v1/store/needs", "/v1/store/flathub", "/v1/store/steam",
+                              "/v1/store/all", "/v1/store/all?pc=1"], 0, ""
+        while routes:
+            route = routes.pop(0)
+            try:
+                with urllib.request.urlopen(f"http://{args[1]}{route}", timeout=20) as r:
+                    body, values = r.read(), r.headers.get_all(STORE_SIG_HEADER) or []
+            except urllib.error.HTTPError as e:
+                if "/icon/" in route and e.code == 404:
+                    print(f"     {route}: no thumbnail to check")
+                    continue
+                print(f"FAIL {route}: {e}")
+                bad += 1
+                continue
+            except (OSError, ValueError) as e:
+                print(f"FAIL {route}: {e}")
+                bad += 1
+                continue
+            url = urlparse(route)
+            good = store_sig_good(values, store_sig_name([p for p in url.path.split("/") if p], parse_qs(url.query)),
+                                  body, keys)
+            print(f"{'PASS' if good else 'FAIL'} {route}: "
+                  f"{'signed' if good else 'a signature that does not check out' if values else 'not signed'}")
+            bad += not good
+            if route == "/v1/store" and body and not first:
+                first = body.split(b"|", 1)[0].decode("ascii", "replace")
+                if ID_RE.match(first):
+                    routes.append(f"/v1/store/icon/{first}.ximg")
+        print("Every Store reply checked out." if not bad else f"{bad} didn't check out.")
+        return 1 if bad else 0
+    print(store_key_command.__doc__, file=sys.stderr)
+    return 2
+
+
 def lan_addr_ok(addr):
     """XENITH_LAN_ADDR: a private IPv4 address and port (the Xbox has no DNS)."""
     m = LAN_ADDR_RE.match(addr or "")
@@ -1102,13 +1393,15 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 return                       # several a second while a video plays
             sys.stderr.write("%s %s\n" % (self.client_address[0], line))
 
-        def reply(self, code, text="", ctype="text/plain; charset=ascii", cache=None):
+        def reply(self, code, text="", ctype="text/plain; charset=ascii", cache=None, headers=None):
             body = text.encode("ascii", "replace") if isinstance(text, str) else text
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             if cache:
                 self.send_header("Cache-Control", cache)
+            for name, value in (headers or {}).items():
+                self.send_header(name, value)
             self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
@@ -1119,6 +1412,12 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
         def send_file(self, path, ctype, cache="public, max-age=300"):
             with open(path, "rb") as f:
                 return self.reply(200, f.read(), ctype, cache)
+
+        def signed(self, name, text, ctype="text/plain; charset=ascii", cache=None):
+            """A Store reply, with its X-Xenith-Sig when there's a key."""
+            body = text.encode("ascii", "replace") if isinstance(text, str) else text
+            key = store.key
+            return self.reply(200, body, ctype, cache, {STORE_SIG_HEADER: key.header(name, body)} if key else None)
 
         def body(self):
             n = int(self.headers.get("Content-Length") or 0)
@@ -1150,7 +1449,8 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 lines = {"motd": state.data["motd"], "server": "XENITHOS CLOUD " + VERSION,
                          "consoles": str(len(state.data["consoles"])),
                          "players": str(len(state.data["accounts"])),
-                         "apps": str(len(store.items()))}
+                         "apps": str(len(store.items())),
+                         "store_key": store.key.key_id if store.key else "none"}
                 lines.update(server_stats())
                 return self.reply(200, kv(lines))
 
@@ -1241,22 +1541,22 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                                                for m in state.data["inbox"]))
 
             if parts == ["v1", "store"]:
-                return self.reply(200, store_rows(store.items()))
+                return self.signed("store", store_rows(store.items()))
 
             if parts == ["v1", "store", "all"]:
-                return self.reply(200, store_bundle(store, q.get("pc", [""])[0] == "1"),
-                                  "application/octet-stream", "no-store")
+                return self.signed(store_sig_name(parts, q), store_bundle(store, q.get("pc", [""])[0] == "1"),
+                                   "application/octet-stream", "no-store")
 
             if parts == ["v1", "store", "flathub"]:
                 # Their own routes: consoles that don't know these kinds never see them.
-                return self.reply(200, flathub_rows(store.flathub()))
+                return self.signed("flathub", flathub_rows(store.flathub()))
 
             if parts == ["v1", "store", "steam"]:
-                return self.reply(200, steam_rows(store.steam()))
+                return self.signed("steam", steam_rows(store.steam()))
 
             if parts == ["v1", "store", "needs"]:
                 # Its own route: a 9th field on /v1/store would end up in older consoles' descriptions.
-                return self.reply(200, needs_rows(store.needs()))
+                return self.signed("needs", needs_rows(store.needs()))
 
             if len(parts) == 4 and parts[:3] == ["v1", "store", "file"]:
                 item = store.find(parts[3])
@@ -1269,7 +1569,9 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 path = store.icon(iid, ext) if ext in ("ximg", "png") else None
                 if not path:
                     return self.error(404, "No thumbnail.")
-                return self.send_file(path, "image/png" if ext == "png" else "application/octet-stream")
+                with open(path, "rb") as f:
+                    return self.signed(store_sig_name(parts, q), f.read(),
+                                       "image/png" if ext == "png" else "application/octet-stream", "public, max-age=300")
 
             if len(parts) == 3 and parts[:2] == ["v1", "scores"] and parts[2] in GAMES:
                 rows = []
@@ -1513,6 +1815,13 @@ def serve():
     if lan and not lan_addr_ok(lan):
         log(f"XENITH_LAN_ADDR must be a private a.b.c.d:port, not {lan!r}; consoles won't be told one")
         lan = ""
+    key_file = os.environ.get("XENITH_STORE_KEY", "")
+    if key_file:
+        store.key = load_store_key(key_file, [store.dir, web_dir, downloads, os.path.dirname(state.path)])
+        if store.key:
+            log(f"Store lists go out signed with key {store.key.key_id}")
+    else:
+        log("XENITH_STORE_KEY isn't set: Store lists go out unsigned, and consoles that check refuse them")
     with state.lock:                          # tells this server apart from another at that address
         if not state.data.get("server_id"):
             state.data["server_id"] = secrets.token_hex(8)
@@ -1728,6 +2037,114 @@ else:
     check("store bundle for the Xbox: no Flathub or Steam",
           xbox is not None and "flathub" not in xbox and "steam" not in xbox and "icon:kodi" not in xbox
           and xbox.get("icon:game") == b"XIMGthumb")
+
+    # Store signatures: ed25519 as RFC 8032 has it (its first three test vectors), then the header
+    for seed_hex, pub_hex, msg_hex, sig_hex in (
+            ("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+             "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a", "",
+             "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e0652249015"
+             "55fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"),
+            ("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
+             "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c", "72",
+             "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da"
+             "085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"),
+            ("c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7",
+             "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025", "af82",
+             "6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac"
+             "18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a")):
+        seed, msg = bytes.fromhex(seed_hex), bytes.fromhex(msg_hex)
+        check(f"ed25519: RFC 8032 test {pub_hex[:6]}: public key, signature and check",
+              ed25519_public(seed).hex() == pub_hex and ed25519_sign(seed, msg).hex() == sig_hex
+              and ed25519_verify(bytes.fromhex(pub_hex), msg, bytes.fromhex(sig_hex)))
+    seed = bytes(range(32))
+    pub, text = ed25519_public(seed), store_sig_text("store", b"a|b\n")
+    sig = ed25519_sign(seed, text)
+    check("ed25519: refuses a changed text, R, S, S plus L, or another key",
+          ed25519_verify(pub, text, sig) and not ed25519_verify(pub, text + b"x", sig)
+          and not ed25519_verify(pub, text, bytes([sig[0] ^ 1]) + sig[1:])
+          and not ed25519_verify(pub, text, sig[:40] + bytes([sig[40] ^ 4]) + sig[41:])
+          and not ed25519_verify(pub, text, sig[:32] + (int.from_bytes(sig[32:], "little") + ED_L).to_bytes(32, "little"))
+          and not ed25519_verify(ed25519_public(bytes(32)), text, sig) and not ed25519_verify(pub, text, bytes(64)))
+
+    def sig_get(path):
+        try:
+            with urllib.request.urlopen(base + path) as resp:
+                return resp.status, resp.read(), resp.headers.get_all(STORE_SIG_HEADER) or []
+        except urllib.error.HTTPError as e:
+            return e.code, e.read(), e.headers.get_all(STORE_SIG_HEADER) or []
+
+    unsigned = sig_get("/v1/store")
+    check("store signing off: no signature, status says so",
+          unsigned[2] == [] and kvparse(req("GET", "/v1/status")[1]).get("store_key") == "none")
+    store.key = StoreKey(seed)
+    keys = [pub.hex()]
+    signed_routes = {"/v1/store": "store", "/v1/store/needs": "needs", "/v1/store/flathub": "flathub",
+                     "/v1/store/steam": "steam", "/v1/store/all": "all", "/v1/store/all?pc=1": "all pc",
+                     "/v1/store/icon/game.ximg": "icon game.ximg", "/v1/store/icon/kodi.ximg": "icon kodi.ximg"}
+    got = {route: sig_get(route) for route in signed_routes}
+    check("store signing: every list, the bundle and thumbnails signed, bodies as before",
+          all(code == 200 and len(values) == 1 and store_sig_good(values, signed_routes[route], body, keys)
+              for route, (code, body, values) in got.items())
+          and got["/v1/store"][1] == unsigned[1] and got["/v1/store/icon/game.ximg"][1] == b"XIMGthumb")
+    check("store signing: the header is 1, the key id and 128 hex digits",
+          re.fullmatch(r"1 " + pub.hex()[:16] + r" [0-9a-f]{128}", got["/v1/store"][2][0]) is not None)
+    check("store signing: the files themselves aren't signed (their SHA-256 is)",
+          sig_get("/v1/store/file/game")[2] == [] and sig_get("/v1/store/file/game")[0] == 200)
+    store_code, store_body, store_sig = got["/v1/store"]
+    check("store signing: a changed list fails", not store_sig_good(store_sig, "store", store_body.replace(b"Game X", b"Game Y"), keys)
+          and not store_sig_good(store_sig, "store", store_body + b"evil|app|Evil|1|9|" + b"0" * 64 + b"|e|x\n", keys))
+    check("store signing: one reply can't stand in for another",
+          not store_sig_good(store_sig, "needs", store_body, keys)
+          and not store_sig_good(got["/v1/store/all"][2], "all pc", got["/v1/store/all"][1], keys)
+          and not store_sig_good(got["/v1/store/icon/game.ximg"][2], "icon kodi.ximg", b"XIMGthumb", keys))
+    check("store signing: another key's console refuses it, and a missing header is refused",
+          not store_sig_good(store_sig, "store", store_body, [ed25519_public(bytes(32)).hex()])
+          and not store_sig_good([], "store", store_body, keys)
+          and not store_sig_good(["1 " + pub.hex()[:16] + " " + "0" * 128], "store", store_body, keys))
+    check("store signing: two keys at once, each console finds its own",
+          store_sig_good(["1 0123456789abcdef " + "ab" * 64] + store_sig, "store", store_body,
+                         [ed25519_public(bytes(32)).hex(), pub.hex()]))
+    check("store signing: the same list, the same signature (made once)",
+          sig_get("/v1/store")[2] == store_sig and kvparse(req("GET", "/v1/status")[1]).get("store_key") == pub.hex()[:16])
+    import contextlib
+    with contextlib.redirect_stdout(io.StringIO()) as said:
+        addr = f"127.0.0.1:{httpd.server_address[1]}"
+        checked = store_key_command(["check", addr, pub.hex()]) == 0 and store_key_command(["check", addr, "ab" * 32]) == 1
+    check("store-key check: passes a signed server, fails with another key",
+          checked and said.getvalue().count("PASS /v1/store") == 7 and "FAIL /v1/store:" in said.getvalue())
+
+    # The key file: made private, never overwritten, kept out of what the server serves
+    key_dir = os.path.join(tmp, "keys")
+    os.makedirs(key_dir)
+    key_file = os.path.join(key_dir, "store.key")
+    with contextlib.redirect_stdout(io.StringIO()) as said:
+        made = store_key_command(["new", key_file]) == 0
+        public_line = said.getvalue()
+    with contextlib.redirect_stderr(io.StringIO()):
+        again = store_key_command(["new", key_file])
+    file_pub = ed25519_public(read_store_key(key_file)).hex()
+    check("store-key new: a key only its owner can read, its public half printed, never overwritten",
+          made and again == 1 and os.stat(key_file).st_mode & 0o777 == 0o600 and f'"{file_pub}",' in public_line)
+    with contextlib.redirect_stderr(io.StringIO()) as said:
+        loaded = load_store_key(key_file, [store_dir, web_dir, dl_dir, os.path.join(tmp, "state")])
+        shutil.copy(key_file, os.path.join(store_dir, "store.key"))
+        in_store = load_store_key(os.path.join(store_dir, "store.key"), [store_dir, web_dir])
+        shutil.copy(key_file, os.path.join(tmp, "state", "k"))
+        in_state = load_store_key(os.path.join(tmp, "state", "k"), [store_dir, os.path.join(tmp, "state")])
+        with open(os.path.join(key_dir, "bad.key"), "w") as f:
+            f.write("# a comment\nnot a key\n")
+        bad_key = load_store_key(os.path.join(key_dir, "bad.key"), [store_dir])
+        missing = load_store_key(os.path.join(key_dir, "nope.key"), [store_dir])
+    os.remove(os.path.join(store_dir, "store.key"))
+    check("XENITH_STORE_KEY: loads from its own folder, refused in the store or state folder, or broken",
+          loaded is not None and loaded.public.hex() == file_pub and in_store is None and in_state is None
+          and bad_key is None and missing is None and said.getvalue().count("unsigned") == 4)
+    header_file = os.path.join(key_dir, "store_key.h")
+    with open(header_file, "w") as f:
+        f.write(f'/* "{"0" * 64}" in a comment doesn\'t count */\nstatic const char *const store_keys[] = {{\n'
+                f'    "{file_pub}",\n    // "{"1" * 64}",\n    NULL\n}};\n')
+    check("store_key.h: the keys a console build trusts", store_keys_in(header_file) == [file_pub])
+    store.key = None
     code, body = req("GET", "/v1/lan")
     check("lan: this server's id and its home address", code == 200 and kvparse(body) == {"id": "5e4e1d", "lan": "192.168.1.20:8795"})
     check("lan address must be private and numeric",
@@ -1990,6 +2407,8 @@ else:
 
 if __name__ == "__main__":
     args = sys.argv[1:]
+    if args[:1] == ["store-key"]:
+        sys.exit(store_key_command(args[1:]))
     if args == ["--selftest"]:
         sys.exit(selftest())
     if len(args) == 2 and args[0] in ("send", "motd"):

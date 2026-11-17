@@ -11,10 +11,21 @@
 
 static void (*idle_hook)(void);
 static uint64_t last_idle, last_audio;
+static volatile int cancel_asked;
 
 void net_set_idle_hook(void (*fn)(void))
 {
     idle_hook = fn;
+}
+
+void net_cancel(void)
+{
+    cancel_asked = 1;
+}
+
+int net_cancel_asked(void)
+{
+    return cancel_asked;
 }
 
 void net_idle(void)
@@ -41,6 +52,7 @@ const char *net_error(int status)
     case NE_TOO_BIG:    return "The reply was too large.";
     case NE_MEMORY:     return "Out of memory.";
     case NE_BAD_REPLY:  return "XenithOS Cloud sent something unexpected.";
+    case NE_CANCELLED:  return "Stopped.";
     default:            return "Network error.";
     }
 }
@@ -164,6 +176,7 @@ int http_request(const char *host, const char *method, const char *path,
 {
     char main_addr[64];
     int status;
+    cancel_asked = 0;
     if (!host || !net_lan_route_on() || strcmp(host, route_lan))
         return net_http_once(host, method, path, body, body_len, max_bytes, progress, ctx, out, NET_CONNECT_MS);
     status = net_http_once(host, method, path, body, body_len, max_bytes, progress, ctx, out, NET_LAN_CONNECT_MS);
@@ -177,5 +190,6 @@ int http_request(const char *host, const char *method, const char *path,
 
 int http_probe(const char *host, const char *path, int connect_ms, int max_bytes, struct http_resp *out)
 {
+    cancel_asked = 0;
     return net_http_once(host, "GET", path, NULL, 0, max_bytes, NULL, NULL, out, connect_ms);
 }

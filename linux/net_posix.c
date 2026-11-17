@@ -44,11 +44,13 @@ int net_up(void) { return find_address(); }
 int net_is_up(void) { return find_address(); }
 const char *net_ip(void) { find_address(); return ip_text; }
 
+/* 1 when fd is ready, 0 not yet, -1 on an error, -2 when net_cancel() was called. */
 static int wait_fd(int fd, short ev, int *idle_ms)
 {
     struct pollfd p = {fd, ev, 0};
     int r = poll(&p, 1, 30);
     net_idle();
+    if (net_cancel_asked()) return -2;
     if (r == 0) { *idle_ms += 30; return 0; }
     if (r < 0) return -1;
     *idle_ms = 0;
@@ -100,6 +102,7 @@ int net_http_once(const char *host, const char *method, const char *path,
     for (;;) {                                   /* wait for the connection */
         int r = wait_fd(fd, POLLOUT, &idle), e = 0;
         socklen_t el = sizeof e;
+        if (r == -2) { close(fd); free(req); return out->status = NE_CANCELLED; }
         if (r < 0 || idle > connect_ms) { close(fd); free(req); return out->status = NE_CONNECT; }
         if (r == 0) continue;
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &e, &el);
@@ -107,10 +110,12 @@ int net_http_once(const char *host, const char *method, const char *path,
         break;
     }
     while (sent < req_len) {
-        int n = (int)send(fd, req + sent, req_len - sent, 0);
+        int n = (int)send(fd, req + sent, req_len - sent, 0), w;
         if (n > 0) { sent += n; continue; }
         if (n < 0 && errno != EAGAIN) { close(fd); free(req); return out->status = NE_RESET; }
-        if (wait_fd(fd, POLLOUT, &idle) < 0 || idle > IDLE_TIMEOUT_MS) { close(fd); free(req); return out->status = NE_TIMEOUT; }
+        w = wait_fd(fd, POLLOUT, &idle);
+        if (w == -2) { close(fd); free(req); return out->status = NE_CANCELLED; }
+        if (w < 0 || idle > IDLE_TIMEOUT_MS) { close(fd); free(req); return out->status = NE_TIMEOUT; }
     }
     free(req);
 
@@ -118,6 +123,7 @@ int net_http_once(const char *host, const char *method, const char *path,
     if (!buf) { close(fd); return out->status = NE_MEMORY; }
     for (;;) {
         int r = wait_fd(fd, POLLIN, &idle), n;
+        if (r == -2) { close(fd); free(buf); return out->status = NE_CANCELLED; }
         if (r < 0) { close(fd); free(buf); return out->status = NE_RESET; }
         if (r == 0) {
             if (idle > IDLE_TIMEOUT_MS) { close(fd); free(buf); return out->status = NE_TIMEOUT; }

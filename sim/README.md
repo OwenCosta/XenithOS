@@ -41,6 +41,17 @@ More switches:
   (`sim/scripts/hostmc.txt`). It runs in real time, since the stand-in does. Without `XSIM_HOSTMC`, HostMC
   downloads Java and a real server and runs it. A server a script leaves running is stopped afterwards.
   The stand-in answers server list pings on its port (127.0.0.1 only), and `sim/hostmc/ping.py` sends one.
+- `XSIM_STORE_KEY=<public key in hex>` makes the Store trust that key instead of `source/store_key.h`'s, so a
+  local XenithOS Cloud can sign with a key made for a test (`xenith_cloud.py store-key new`), and
+  `XSIM_STORE_KEY=none` acts as a build without one. The Store's checks go to the log as `store: <reply>:
+  signed` or `... refused`.
+- `XSIM_NET_TIME=1` lets virtual time pass while waiting on the network, as real time does on a console, so a
+  screen that draws during a download (the Store's downloads queue) gets its frames and reads its buttons then.
+- `sim/store/test-store.sh` runs the Store's signatures and its downloads queue end to end through the
+  `store_signed.txt`, `store_refused.txt`, `store_install_first.txt`, `store_queue.txt` and `store_queue_pc.txt`
+  scripts, against a local XenithOS Cloud with a Store and a key of its own and `sim/store/between.py`
+  between the two (it swaps a file and its SHA-256 on the way, takes signatures off, hides the bundle, or sends
+  a download slowly enough to stop), and checks each step; screenshots go to `sim/out/store-signing`.
 - `sim/hostmc/test-vps.sh` runs HostMC's own-VPS route through the `hostmc_vps*.txt` scripts, with a private
   sshd (run as you, on spare ports) standing in for the VPS, and checks each step; screenshots go to
   `sim/out/hostmc-vps`.

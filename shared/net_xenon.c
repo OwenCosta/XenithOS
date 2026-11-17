@@ -193,7 +193,8 @@ int net_http_once(const char *host, const char *method, const char *path,
     while (!c.done && !c.err) {
         network_poll();
         net_idle();
-        if (!c.connected && tb_diff_msec(mftb(), c.last_activity) > connect_ms) c.err = NE_CONNECT;
+        if (net_cancel_asked()) c.err = NE_CANCELLED;
+        else if (!c.connected && tb_diff_msec(mftb(), c.last_activity) > connect_ms) c.err = NE_CONNECT;
         else if (tb_diff_msec(mftb(), c.last_activity) > IDLE_TIMEOUT_MS) c.err = NE_TIMEOUT;
     }
 
@@ -201,7 +202,8 @@ int net_http_once(const char *host, const char *method, const char *path,
         tcp_arg(c.pcb, NULL);
         tcp_recv(c.pcb, NULL);
         tcp_err(c.pcb, NULL);
-        if (tcp_close(c.pcb) != ERR_OK) tcp_abort(c.pcb);
+        /* Stopped: a reset, so the server stops sending the rest. */
+        if (c.err == NE_CANCELLED || tcp_close(c.pcb) != ERR_OK) tcp_abort(c.pcb);
     }
     free(req);
 

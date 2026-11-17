@@ -14,6 +14,7 @@ enum {
     NE_TOO_BIG    = -6,
     NE_MEMORY     = -7,
     NE_BAD_REPLY  = -8,
+    NE_CANCELLED  = -9,     /* net_cancel() while it waited */
 };
 
 int net_up(void);                   /* bring the network up (DHCP) if needed; 1 with an address */
@@ -21,6 +22,12 @@ int net_is_up(void);                /* 1 if it already has an address, never blo
 const char *net_ip(void);           /* "192.168.1.20", or "" */
 
 void net_set_idle_hook(void (*fn)(void));   /* called about 30 times a second while waiting */
+
+/* Called from the idle hook or a progress callback: the request waiting now stops and returns
+ * NE_CANCELLED (the Store's downloads, B on the one downloading). The next request starts
+ * without it. */
+void net_cancel(void);
+int  net_cancel_asked(void);                /* for the network stacks, as they wait */
 
 typedef void (*net_progress_fn)(int received, int total, void *ctx);   /* total -1 if unknown */
 
