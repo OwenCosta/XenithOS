@@ -72,7 +72,7 @@ More switches:
 - `sim/social/test-friends.sh` runs friends between two consoles: a XenithOS Cloud of its own (on port 18795,
   `XSIM_CLOUD_PORT` for another), two profiles, and simulator runs with one or the other (`friends_*.txt`):
   asking by gamertag, the request at start-up and saying yes, a friend playing Minecraft on a PC while their
-  HostMC server can be reached, the home screen, Cloud and Friends showing it, and "Show friends what I'm
+  MineNest server can be reached, the home screen, Cloud and Friends showing it, and "Show friends what I'm
   playing" turned off. Each step is checked through XenithOS Cloud's API; screenshots go to
   `sim/out/friends-*`. `sim/social/cloud.py` makes the profiles and does the API calls.
 - `sim/social/test-saves.sh` runs cloud saves between an Xbox and a PC signed in to one profile, each with a
@@ -83,7 +83,7 @@ More switches:
   so its saves are stand-ins with a save's name in the first 24 bytes.
 - `sim/social/test-achievements.sh` runs achievements: ones an offline Xbox earned going up when XenithOS
   starts, Tube's against stand-ins for yt-dlp and ffmpeg (`tube_achieve.txt`; the test server's requests to
-  anywhere else go to a closed port), HostMC's with its stand-in server (`hostmc.txt`), and XenithOS showing
+  anywhere else go to a closed port), MineNest's with its stand-in server (`minenest.txt`, with `MINENEST_BIN`), and XenithOS showing
   them (`ach_screens.txt`). Screenshots go to `sim/out/ach-*`.
 
 ## Scripts
@@ -129,7 +129,7 @@ that doesn't finish. `sim/test-scripts.sh boot tour` runs only those.
   the report `feedback.txt` sends, and the home-network route `store_route.txt` takes.
 - `doom.txt` needs a WAD (`XSIM_WAD=path/to/freedoom1.wad`), and Tube's script asks YouTube only where the
   machine has yt-dlp and ffmpeg (without them it shows Tube turned off). Scripts whose header names one of
-  the `sim/hostmc/test-*.sh` tests are left to that test. A new script runs with no switches until it's
+  the `sim/minenest/test-*.sh` tests are left to that test. A new script runs with no switches until it's
   given some in `sim/test-scripts.sh`.
 - Screenshots and each run's log go to `sim/out/test-<name>/`. `XSIM_LIMIT` is how long a run may take
   (900 s).
