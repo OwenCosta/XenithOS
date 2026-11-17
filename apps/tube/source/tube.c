@@ -26,6 +26,7 @@
 #include "net.h"
 #include "platform.h"
 #include "handoff.h"
+#include "social.h"
 #include "startlog.h"
 #include "theme.h"
 #include "ui.h"
@@ -621,6 +622,7 @@ int main(int argc, char **argv)
         draw_list();
         ui_end_frame();
         if (!started) { started = 1; startlog_ready("TUBE"); }
+        social_tick("tube", NULL);           /* friends keep seeing Tube while it's open */
 
         /* Fill in one missing thumbnail per frame, keeping the screen drawn meanwhile. */
         for (i = top_row * COLS; i < nresults && i < (top_row + 3) * COLS; i++)

@@ -72,6 +72,7 @@ static void take_session(struct http_resp *r)
     kv_get(r->body, "avatar", prof.avatar, sizeof prof.avatar);
     if (!avatar_valid(prof.avatar)) strcpy(prof.avatar, AVATAR_DEFAULT);
     kv_get(r->body, "joined", prof.joined, sizeof prof.joined);
+    prof.sharing = 1;                       /* until XenithOS Cloud says otherwise (cloud_sync) */
     prof.signed_in = prof.name[0] && prof.token[0];
     profile_save();
 }
@@ -147,9 +148,15 @@ static void load_stats(void)
     if (!prof.signed_in || !cfg.server[0] || !net_is_up()) return;
     snprintf(form, sizeof form, "token=%s", prof.token);
     if (cloud_post("/v1/accounts/me", form, &r) == 200) {
+        char v[8];
         kv_get(r.body, "volt_best", best, sizeof best);
         kv_get(r.body, "volt_rank", rank, sizeof rank);
         kv_get(r.body, "joined", prof.joined, sizeof prof.joined);
+        kv_get(r.body, "sharing", v, sizeof v);
+        if (v[0] && (atoi(v) != 0) != prof.sharing) {
+            prof.sharing = atoi(v) != 0;
+            profile_save();
+        }
     }
     http_free(&r);
 }

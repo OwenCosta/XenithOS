@@ -34,6 +34,7 @@ struct xenith_profile {
     char token[64];
     char avatar[16];          /* up to AVATAR_CODE_LEN + 1 */
     char joined[16];
+    int sharing;              /* friends see what's playing (Settings); kept on XenithOS Cloud too */
 };
 
 extern struct xenith_config cfg;

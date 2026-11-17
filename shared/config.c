@@ -156,11 +156,13 @@ static void on_profile(const char *k, const char *v)
     else if (!strcmp(k, "token")) copy_alnum(prof.token, sizeof prof.token, v, 0);
     else if (!strcmp(k, "avatar")) snprintf(prof.avatar, sizeof prof.avatar, "%s", v);
     else if (!strcmp(k, "joined")) snprintf(prof.joined, sizeof prof.joined, "%s", v);
+    else if (!strcmp(k, "sharing")) prof.sharing = atoi(v) != 0;
 }
 
 void profile_load(void)
 {
     memset(&prof, 0, sizeof prof);
+    prof.sharing = 1;
     read_kv(XENITH_PROFILE_PATH, on_profile);
     if (!avatar_valid(prof.avatar)) strcpy(prof.avatar, AVATAR_DEFAULT);
     prof.signed_in = prof.name[0] && prof.token[0];
@@ -171,7 +173,8 @@ void profile_save(void)
     FILE *f = open_write(XENITH_PROFILE_PATH);
     if (!f) return;
     fprintf(f, "# Written by XenithOS. Keep this file private: the token signs you in.\n"
-               "name=%s\ntoken=%s\navatar=%s\njoined=%s\n", prof.name, prof.token, prof.avatar, prof.joined);
+               "name=%s\ntoken=%s\navatar=%s\njoined=%s\nsharing=%d\n", prof.name, prof.token, prof.avatar, prof.joined,
+            prof.sharing);
     fclose(f);
 }
 

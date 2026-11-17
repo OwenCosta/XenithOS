@@ -1,0 +1,20 @@
+# Friends, on the second console (signed in as Bob Two): the request shows as a toast at start-up
+# and first in Friends; saying yes. Part of sim/social/test-friends.sh.
+wait 236
+shot fb_home_request
+press right
+press right
+press right
+press a
+wait 40
+shot fb_friends_request
+press down
+wait 15
+shot fb_request_detail
+press a
+wait 20
+shot fb_answer
+press a
+wait 40
+shot fb_friends_now
+quit

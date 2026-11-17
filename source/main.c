@@ -1,8 +1,8 @@
 /* XenithOS: a homebrew shell for the Xbox 360, built on libxenon.
  *
  * Boot: the wordmark and start-up chime, while storage and settings load.
- * Home: profile at the top, five tiles (Apps, Store, Cloud, Profile, Settings),
- *       and a "Jump back in" row of installed apps with their thumbnails.
+ * Home: profile at the top, seven tiles (Apps, Store, Cloud, Friends, Profile, Settings,
+ *       Feedback), and a "Jump back in" row of installed apps with their thumbnails.
  * Guide or Back on the home screen opens the power menu.
  */
 #include <stdio.h>
@@ -20,6 +20,7 @@
 #include "net.h"
 #include "platform.h"
 #include "screens.h"
+#include "social.h"
 #include "startlog.h"
 #include "theme.h"
 #include "ui.h"
@@ -112,9 +113,9 @@ static void boot(void)
 
 /* ------------------------------------------------------------------ home */
 
-enum { T_APPS, T_STORE, T_CLOUD, T_PROFILE, T_SETTINGS, T_FEEDBACK, T_COUNT };
-static const char *const tile_name[T_COUNT] = {"Apps", "Store", "Cloud", "Profile", "Settings", "Feedback"};
-static const int tile_icon[T_COUNT] = {ICON_APPS, ICON_STORE, ICON_CLOUD, ICON_PROFILE, ICON_SETTINGS, ICON_MAIL};
+enum { T_APPS, T_STORE, T_CLOUD, T_FRIENDS, T_PROFILE, T_SETTINGS, T_FEEDBACK, T_COUNT };
+static const char *const tile_name[T_COUNT] = {"Apps", "Store", "Cloud", "Friends", "Profile", "Settings", "Feedback"};
+static const int tile_icon[T_COUNT] = {ICON_APPS, ICON_STORE, ICON_CLOUD, ICON_FRIENDS, ICON_PROFILE, ICON_SETTINGS, ICON_MAIL};
 
 static int row, tile, card;
 static float lift_t[T_COUNT], lift_c[MAX_APPS];
@@ -126,11 +127,15 @@ static void tile_sub(int t, char *out, int n)
 {
     switch (t) {
     case T_APPS: snprintf(out, n, napps == 1 ? "1 installed" : "%d installed", napps); break;
-    case T_STORE: snprintf(out, n, "Apps and games"); break;
+    case T_STORE: snprintf(out, n, "Apps, games"); break;
     case T_CLOUD: snprintf(out, n, net_is_up() ? "Online" : "Offline"); break;
-    case T_PROFILE: snprintf(out, n, prof.signed_in ? "Your profile" : "Create or sign in"); break;
-    case T_FEEDBACK: snprintf(out, n, "Bugs and ideas"); break;
-    default: snprintf(out, n, "Sound and more"); break;
+    case T_FRIENDS:
+        if (cloud_friends_online() > 0) snprintf(out, n, "%d online", cloud_friends_online());
+        else snprintf(out, n, "Who's on");
+        break;
+    case T_PROFILE: snprintf(out, n, prof.signed_in ? "Your profile" : "Sign in"); break;
+    case T_FEEDBACK: snprintf(out, n, "Bugs, ideas"); break;
+    default: snprintf(out, n, plat_kind() == PLAT_XBOX ? "This console" : "This PC"); break;
     }
 }
 
@@ -146,6 +151,9 @@ static void draw_home(void)
     avatar_draw(prof.avatar, M, 34, asz);
     gfx_str(FONT_TITLE, M + asz + 18, 38, C_TEXT, prof.signed_in ? prof.name : "Guest");
     if (status_line) snprintf(sub, sizeof sub, "%s", status_line);
+    else if (net_is_up() && cloud_friends_online() > 0)
+        snprintf(sub, sizeof sub, cloud_friends_online() == 1 ? "Online, with 1 friend on" : "Online, with %d friends on",
+                 cloud_friends_online());
     else if (net_is_up()) snprintf(sub, sizeof sub, "Online");
     else if (!prof.signed_in) snprintf(sub, sizeof sub, "Press Y to create a profile");
     else snprintf(sub, sizeof sub, "Offline");
@@ -168,7 +176,7 @@ static void draw_home(void)
             icon_draw(tile_icon[i], x + w / 2.0f, y + h * 0.40f, 62, fg, fill);
         gfx_str(FONT_LABEL, x + 16, y + h - 70, C_TEXT, tile_name[i]);
         tile_sub(i, sub, sizeof sub);
-        gfx_str_fit(FONT_SMALL, x + 16, y + h - 38, C_SUB, sub, w - 28);   /* six tiles: 137 px for these words */
+        gfx_str_fit(FONT_SMALL, x + 16, y + h - 38, C_SUB, sub, w - 28);   /* seven tiles: 111 px for these words */
     }
 
     /* Jump back in */
@@ -246,6 +254,7 @@ static int power_menu(void)
     if (plat_kind() == PLAT_XBOX) {
         static const char *const opts[] = {"Restart", "Turn off", "Exit to XeLL", "Cancel"};
         int c = ui_dialog("Power", "XenithOS stays on your USB stick. Starting it again needs the exploit unless you have RGH.", opts, 4);
+        if (c >= 0 && c <= 2) social_bye();          /* friends see you go */
         if (c == 0) plat_reboot();
         if (c == 1) plat_power_off();
         return c == 2;
@@ -265,8 +274,10 @@ static int power_menu(void)
             sfx(SFX_ERROR);
             ui_message("Couldn't switch", "Desktop mode isn't set up on this machine.");
         } else if (c >= 0 && !strcmp(opts[c], "Restart")) {
+            social_bye();
             plat_reboot();
         } else if (c >= 0 && !strcmp(opts[c], "Turn off")) {
+            social_bye();
             plat_power_off();
         }
         return 0;
@@ -279,6 +290,7 @@ static void open_tile(int t)
     case T_APPS: screen_apps(); break;
     case T_STORE: screen_store(); break;
     case T_CLOUD: screen_cloud(); break;
+    case T_FRIENDS: screen_friends(); break;
     case T_PROFILE: screen_profile(); break;
     case T_SETTINGS: screen_settings(); break;
     case T_FEEDBACK: screen_feedback(); break;

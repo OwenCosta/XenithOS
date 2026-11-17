@@ -11,6 +11,7 @@
 #include "icons.h"
 #include "img.h"
 #include "platform.h"
+#include "screens.h"
 #include "startlog.h"
 #include "theme.h"
 #include "ui.h"
@@ -178,6 +179,7 @@ void app_launch(const struct app *a)
         snprintf(st.last_app, sizeof st.last_app, "%s", a->path);
         settings_save();
         sfx(SFX_LAUNCH);
+        cloud_playing(a->id);           /* friends see it until XenithOS is back */
         startlog_launching(a->name);
         /* The apps open with a loading screen laid out like this one, and on the Xbox the screen
          * is kept across the switch, so going into an app doesn't show. Other programs (PCs)
@@ -191,11 +193,13 @@ void app_launch(const struct app *a)
             why = plat_launch_error();
             snprintf(title, sizeof title, "Couldn't start %s", a->name);
             ui_message(title, why && *why ? why : "The file may be damaged. Try installing it again from the Store.");
+            cloud_playing(NULL);
             return;
         }
         /* On a PC it ran as its own program and has quit, or was left running. Switch game in
          * the guide chose what's next. */
         next = plat_next_launch();
         a = next ? app_by_path(next) : NULL;
+        if (!a && !plat_running()) cloud_playing(NULL);
     }
 }

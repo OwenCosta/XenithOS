@@ -44,6 +44,12 @@ More switches:
 - `sim/hostmc/test-vps.sh` runs HostMC's own-VPS route through the `hostmc_vps*.txt` scripts, with a private
   sshd (run as you, on spare ports) standing in for the VPS, and checks each step; screenshots go to
   `sim/out/hostmc-vps`.
+- `sim/social/test-friends.sh` runs friends between two consoles: a XenithOS Cloud of its own (on port 18795,
+  `XSIM_CLOUD_PORT` for another), two profiles, and simulator runs with one or the other (`friends_*.txt`):
+  asking by gamertag, the request at start-up and saying yes, a friend playing Minecraft on a PC while their
+  HostMC server can be reached, the home screen, Cloud and Friends showing it, and "Show friends what I'm
+  playing" turned off. Each step is checked through XenithOS Cloud's API; screenshots go to
+  `sim/out/friends-*`. `sim/social/cloud.py` makes the profiles and does the API calls.
 
 ## Scripts
 

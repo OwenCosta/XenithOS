@@ -10,6 +10,7 @@
 #include "net.h"
 #include "platform.h"
 #include "screens.h"
+#include "social.h"
 #include "ui.h"
 
 void kv_get(const char *body, const char *key, char *out, int size)
@@ -118,29 +119,159 @@ int cloud_get(const char *path, int max, struct http_resp *r)
     return http_request(cfg.server, "GET", path, NULL, 0, max, NULL, NULL, r);
 }
 
-/* Show newer XenithOS Cloud news as a toast. */
-static void check_inbox(void)
+/* "5 minutes ago" style, from a number of seconds. */
+void cloud_ago(long d, char *out, int n)
+{
+    if (d < 0) out[0] = 0;
+    else if (d < 120) snprintf(out, n, "Just now");
+    else if (d < 3600) snprintf(out, n, "%ld minutes ago", d / 60);
+    else if (d < 7200) snprintf(out, n, "An hour ago");
+    else if (d < 86400) snprintf(out, n, "%ld hours ago", d / 3600);
+    else if (d < 172800) snprintf(out, n, "Yesterday");
+    else if (d < 60L * 86400) snprintf(out, n, "%ld days ago", d / 86400);
+    else snprintf(out, n, "A long time ago");
+}
+
+/* Toasts from the regular check wait their turn, so news and friends don't hide each other. */
+#define TOASTS 4
+static struct { int icon; char title[64], body[160]; } toasts[TOASTS];
+static int ntoasts;
+static uint64_t toast_shown;
+
+static void toast_later(int icon, const char *title, const char *body)
+{
+    if (ntoasts == TOASTS) return;
+    toasts[ntoasts].icon = icon;
+    snprintf(toasts[ntoasts].title, sizeof toasts[0].title, "%s", title);
+    snprintf(toasts[ntoasts].body, sizeof toasts[0].body, "%s", body);
+    ntoasts++;
+}
+
+static void toast_next(void)
+{
+    uint64_t now = ui_ms();
+    if (!ntoasts || (toast_shown && now - toast_shown < 3700)) return;
+    toast_shown = now;
+    ui_toast_icon(toasts[0].icon);
+    ui_toast(toasts[0].title, toasts[0].body);
+    sfx(SFX_NOTIFY);
+    ntoasts--;
+    memmove(&toasts[0], &toasts[1], ntoasts * sizeof toasts[0]);
+}
+
+static void news_seen(int id, const char *text)
+{
+    if (id <= st.last_inbox) return;
+    st.last_inbox = id;
+    settings_save();
+    toast_later(ICON_MAIL, "XenithOS news", text);
+}
+
+/* Friends, from the last hello: how many are on, which ones, and the newest request, for the
+ * profile named in friends_of. */
+static int friends_on = -1;
+static char on_names[400], ask_seen[24], friends_of[20];
+
+int cloud_friends_online(void)
+{
+    return prof.signed_in ? friends_on : -1;
+}
+
+/* Is name in a comma-separated list? */
+static int listed(const char *list, const char *name)
+{
+    int n = (int)strlen(name);
+    const char *p = list;
+    while (*p) {
+        const char *e = strchr(p, ',');
+        int len = e ? (int)(e - p) : (int)strlen(p);
+        if (len == n && !strncmp(p, name, n)) return 1;
+        if (!e) break;
+        p = e + 1;
+    }
+    return 0;
+}
+
+static void read_friends(const char *body, int first)
+{
+    char on[400], ask[24], v[16], title[96];
+    char *name, *save = NULL;
+    int asks, came = 0;
+    if (strcmp(friends_of, prof.name)) {                 /* someone else signed in since */
+        snprintf(friends_of, sizeof friends_of, "%s", prof.name);
+        on_names[0] = ask_seen[0] = 0;
+        first = 1;
+    }
+    kv_get(body, "on", on, sizeof on);
+    kv_get(body, "ask", ask, sizeof ask);
+    kv_get(body, "asks", v, sizeof v);
+    asks = atoi(v);
+    kv_get(body, "friends_on", v, sizeof v);
+    if (asks > 0 && strcmp(ask, ask_seen)) {             /* someone new wants to be friends */
+        snprintf(title, sizeof title, "%s wants to be friends", ask);
+        toast_later(ICON_PERSON_ADD, title, asks > 1 ? "You have friend requests waiting in Friends." : "Say yes in Friends.");
+    }
+    snprintf(ask_seen, sizeof ask_seen, "%s", asks > 0 ? ask : "");
+    if (!first) {                                        /* friends who've just come on */
+        char list[400], who[24] = "";
+        snprintf(list, sizeof list, "%s", on);
+        for (name = strtok_r(list, ",", &save); name; name = strtok_r(NULL, ",", &save))
+            if (!listed(on_names, name)) {
+                if (!came++) snprintf(who, sizeof who, "%s", name);
+            }
+        if (came == 1) snprintf(title, sizeof title, "%s is online", who);
+        else if (came > 1) snprintf(title, sizeof title, "%s and %d more are online", who, came - 1);
+        if (came) toast_later(ICON_PROFILE, title, "See what they're up to in Friends.");
+    }
+    snprintf(on_names, sizeof on_names, "%s", on);
+    friends_on = atoi(v);
+}
+
+static void signed_out(void)
+{
+    profile_clear();
+    friends_on = -1;
+    ui_toast_icon(ICON_SIGN_OUT);
+    ui_toast("Signed out", "Your sign-in expired. Sign in again from Profile.");
+}
+
+/* The regular check: at start-up, then about once a minute on the home screen. With a profile
+ * it's a hello, which keeps you online for your friends and brings the news and theirs; without
+ * one, or with an older XenithOS Cloud, it's the news alone. */
+static int no_hello;
+
+static void check_in(int first)
 {
     struct http_resp r;
-    char *line, *f[3];
-    int st_code;
-    st_code = cloud_get("/v1/news", 16 * 1024, &r);
-    if (st_code == 200 && r.body_len) {
-        line = r.body;
-        {
-            char *nl = strchr(line, '\n');
-            if (nl) *nl = 0;
-        }
-        if (split_fields(line, f, 3) == 3) {
-            int id = atoi(f[0]);
-            if (id > st.last_inbox) {
-                st.last_inbox = id;
-                settings_save();
-                ui_toast_icon(ICON_MAIL);
-                ui_toast("XenithOS news", f[2]);
-                sfx(SFX_NOTIFY);
+    char *line, *f[3], v[160];
+    int code;
+    if (prof.signed_in && !no_hello) {
+        code = social_hello("", 0, NULL, &r);
+        if (code == 200) {
+            kv_get(r.body, "news_text", v, sizeof v);
+            {
+                char id[16];
+                kv_get(r.body, "news_id", id, sizeof id);
+                news_seen(atoi(id), v);
             }
+            kv_get(r.body, "sharing", v, sizeof v);
+            if (v[0] && (atoi(v) != 0) != prof.sharing) {
+                prof.sharing = atoi(v) != 0;
+                profile_save();
+            }
+            read_friends(r.body, first);
+            http_free(&r);
+            return;
         }
+        http_free(&r);
+        if (code == 401) { signed_out(); return; }
+        if (code == 404) no_hello = 1;
+        else return;
+    }
+    if (cloud_get("/v1/news", 16 * 1024, &r) == 200 && r.body_len) {
+        line = r.body;
+        if (strchr(line, '\n')) *strchr(line, '\n') = 0;
+        if (split_fields(line, f, 3) == 3) news_seen(atoi(f[0]), f[2]);
     }
     http_free(&r);
 }
@@ -163,24 +294,38 @@ void cloud_sync(int quiet)
             if (avatar_valid(v)) snprintf(prof.avatar, sizeof prof.avatar, "%s", v);
             kv_get(r.body, "joined", v, sizeof v);
             snprintf(prof.joined, sizeof prof.joined, "%s", v);
+            kv_get(r.body, "sharing", v, sizeof v);
+            if (v[0]) prof.sharing = atoi(v) != 0;
             profile_save();
         } else if (code == 401) {
-            profile_clear();
-            ui_toast_icon(ICON_SIGN_OUT);
-            ui_toast("Signed out", "Your sign-in expired. Sign in again from Profile.");
+            http_free(&r);
+            signed_out();
+            return;
         }
         http_free(&r);
     }
-    check_inbox();
+    check_in(1);
+    toast_next();
 }
 
 void cloud_poll_inbox(void)
 {
     static uint64_t last;
     uint64_t now = ui_ms();
+    toast_next();
     if (!net_is_up() || !cfg.server[0]) return;
     if (!last) { last = now; return; }        /* go_online() already checked at boot */
     if (now - last < 60000) return;
     last = now;
-    check_inbox();
+    check_in(0);
+}
+
+/* What friends see while an app or game runs: XenithOS says hello for it on the way in, since
+ * on the Xbox the app starts without the network, and again on the way back. */
+void cloud_playing(const char *app_id)
+{
+    struct http_resp r;
+    if (!prof.signed_in || no_hello) return;
+    if (social_hello(app_id ? app_id : "", app_id != NULL, NULL, &r) == 200 && !app_id) read_friends(r.body, 0);
+    http_free(&r);
 }

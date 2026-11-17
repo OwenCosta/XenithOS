@@ -1,6 +1,6 @@
-/* CLOUD: XenithOS Cloud's status, the news, and the VOLT leaderboard.
- * XenithOS Cloud is the free online service every copy of XenithOS uses for profiles, the
- * Store and leaderboards. */
+/* CLOUD: XenithOS Cloud's status and your friends who are on, the news, and the VOLT
+ * leaderboard. XenithOS Cloud is the free online service every copy of XenithOS uses for
+ * profiles, friends, the Store and leaderboards. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +12,7 @@
 #include "icons.h"
 #include "net.h"
 #include "screens.h"
+#include "social.h"
 #include "theme.h"
 #include "ui.h"
 
@@ -23,18 +24,13 @@ static char news[MAX_ROWS][120], news_when[MAX_ROWS][24];
 static int nnews;
 static struct { char rank[6], name[20], score[16], avatar[16]; } board[MAX_ROWS];
 static int nboard;
+static int have_friends;          /* the friends list came, so the first card can show who's on */
 
 /* "3 days ago" style, from a unix time and the server's clock. */
 static void ago(long t, long now, char *out, int n)
 {
-    long d = now - t;
     if (t <= 0 || now <= 0) { out[0] = 0; return; }
-    if (d < 120) snprintf(out, n, "Just now");
-    else if (d < 3600) snprintf(out, n, "%ld minutes ago", d / 60);
-    else if (d < 7200) snprintf(out, n, "An hour ago");
-    else if (d < 86400) snprintf(out, n, "%ld hours ago", d / 3600);
-    else if (d < 172800) snprintf(out, n, "Yesterday");
-    else snprintf(out, n, "%ld days ago", d / 86400);
+    cloud_ago(now - t, out, n);
 }
 
 static void read_news(struct http_resp *r, long now)
@@ -73,8 +69,15 @@ static int refresh(void)
         return 0;
     }
 
-    snprintf(path, sizeof path, "/v1/hello?name=%s&ver=" XENITH_VERSION, name);
-    if (cloud_get(path, 16 * 1024, &r) == 200) {
+    /* With a profile, the hello that keeps friends seeing you on (an older XenithOS Cloud only
+     * has the plain one) */
+    code = prof.signed_in ? social_hello("", 0, NULL, &r) : 0;
+    if (code != 200) {
+        http_free(&r);
+        snprintf(path, sizeof path, "/v1/hello?name=%s&ver=" XENITH_VERSION, name);
+        code = cloud_get(path, 16 * 1024, &r);
+    }
+    if (code == 200) {
         kv_get(r.body, "motd", motd, sizeof motd);
         kv_get(r.body, "server", version, sizeof version);
         kv_get(r.body, "players", players, sizeof players);
@@ -108,7 +111,55 @@ static int refresh(void)
         }
     }
     http_free(&r);
+
+    have_friends = prof.signed_in && friends_fetch() == 200;
     return 1;
+}
+
+/* Friends who are on, under the service's numbers: up to rows of them. */
+static void draw_friends(int x, int y, int w, int bottom)
+{
+    int i, shown = 0, on = 0, rowh = 52, fit;
+    char v[64];
+    uint32_t c;
+    for (i = 0; i < nfriend_rows; i++)
+        if (friend_rows[i].rel == REL_FRIEND && friend_rows[i].online) on++;
+    gfx_str(FONT_BODY_SB, x, y, C_TEXT, "Friends online");
+    if (on) {
+        snprintf(v, sizeof v, "%d", on);
+        gfx_str_r(FONT_BODY_SB, x + w, y, C_SUB, v);
+    }
+    y += 40;
+    if (!prof.signed_in) {
+        gfx_wrap(FONT_BODY, x, y, w, 2, C_SUB, "Sign in to see your friends here.", 2);
+        return;
+    }
+    if (!have_friends) return;
+    if (!on) {
+        int any = 0;
+        for (i = 0; i < nfriend_rows; i++) any |= friend_rows[i].rel == REL_FRIEND;
+        gfx_wrap(FONT_BODY, x, y, w, 2, C_SUB, any ? "None of your friends are on right now." :
+                 "Add friends with X, by their gamertag.", 2);
+        return;
+    }
+    fit = (bottom - y) / rowh;
+    if (on > fit) fit--;                                 /* the last line says how many more */
+    for (i = 0; i < nfriend_rows && shown < fit; i++) {
+        const struct friend_row *p = &friend_rows[i];
+        if (p->rel != REL_FRIEND || !p->online) continue;
+        avatar_draw(p->avatar, x, y, 40);
+        gfx_circle(x + 36.0f, y + 36.0f, 7, C_SURFACE, 255);
+        gfx_circle(x + 36.0f, y + 36.0f, 4.5f, C_OK, 255);
+        gfx_str_fit(FONT_BODY_SB, x + 54, y - 3, C_TEXT, p->name, w - 54);
+        friend_status(p, v, sizeof v, &c);
+        gfx_str_fit(FONT_SMALL, x + 54, y + 22, C_SUB, v, w - 54);
+        y += rowh;
+        shown++;
+    }
+    if (on > shown) {
+        snprintf(v, sizeof v, "and %d more in Friends", on - shown);
+        gfx_str(FONT_SMALL, x, y + 4, C_SUB, v);
+    }
 }
 
 static void stat_row(int x, int y, int w, const char *k, const char *v)
@@ -141,13 +192,13 @@ static void draw(void)
         gfx_str(FONT_SMALL, x1 + pad, y, C_SUB, "Status");
         gfx_circle(x1 + w - pad - gfx_str_w(FONT_BODY_SB, "Online") - 12.0f, y + 9.0f, 4, C_OK, 255);
         gfx_str_r(FONT_BODY_SB, x1 + w - pad, y - 3, C_TEXT, "Online");
-        y += 44;
-        stat_row(x1 + pad, y, iw, "Players", players[0] ? players : "-"); y += 44;
-        stat_row(x1 + pad, y, iw, "Online now", online[0] ? online : "-"); y += 44;
+        y += 38;
+        stat_row(x1 + pad, y, iw, "Players", players[0] ? players : "-"); y += 38;
+        stat_row(x1 + pad, y, iw, "Online now", online[0] ? online : "-"); y += 38;
         snprintf(v, sizeof v, "%d ms", ping_ms);
-        stat_row(x1 + pad, y, iw, "Ping", v); y += 44;
-        gfx_wrap(FONT_SMALL, x1 + pad, top + h - pad - 52, iw, 2, C_DIM,
-                 "Free for everyone on XenithOS, on Xbox, PC and Raspberry Pi.", 2);
+        stat_row(x1 + pad, y, iw, "Ping", v); y += 38;
+        gfx_rect(x1 + pad, y + 4, iw, 1, C_LINE);
+        draw_friends(x1 + pad, y + 22, iw, top + h - pad);
     }
 
     /* News */
@@ -179,7 +230,7 @@ static void draw(void)
         gfx_str_r(FONT_BODY_SB, x3 + w - pad, y + 2, C_TEXT, board[i].score);
         y += 56;
     }
-    ui_hints("Y=Refresh;B=Back");
+    ui_hints("X=Friends;Y=Refresh;B=Back");
 }
 
 void screen_cloud(void)
@@ -194,6 +245,12 @@ void screen_cloud(void)
     for (;;) {
         ui_poll();
         if (PRESSED(b)) { sfx(SFX_BACK); return; }
+        if (PRESSED(x)) {
+            sfx(SFX_SELECT);
+            screen_friends();
+            have_friends = prof.signed_in && friends_fetch() == 200;
+            ui_fade_in();
+        }
         if (PRESSED(y) || ui_ms() - last > 15000) {
             if (PRESSED(y)) sfx(SFX_SELECT);
             if (!refresh()) return;

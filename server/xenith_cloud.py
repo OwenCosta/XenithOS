@@ -43,10 +43,24 @@ Tube (YouTube; needs a signed-in profile)
                                                         error=: it couldn't be played)
   GET  /v1/tube/stop?s=<session>
 
+Friends (form posts with a profile's token; see Friends)
+  POST /v1/hello                      token, ver, app (what's running), hold=1 (handing over to an
+                                      app that can't say hello itself), mc (HostMC server's address,
+                                      "" when it isn't reachable), bye=1 (going offline)
+                                      -> as GET /v1/hello, plus news_id, news_text, sharing, asks,
+                                      ask (newest asker), friends_on, on (friends on, comma-separated)
+  POST /v1/friends                    token  -> name|avatar|rel|online|app|app name|seconds since
+                                      seen|HostMC address   (rel: friend, in, out)
+  POST /v1/friends/add                token, name  -> now (asked, or friends if they'd asked you)
+  POST /v1/friends/accept             token, name
+  POST /v1/friends/remove             token, name  (a friend, a request to you, or your own)
+  POST /v1/friends/sharing            token, on  (show friends what you play and your server)
+
 Accounts (form posts; errors come back as "error=<message>")
   POST /v1/accounts/create            name, pin, avatar   -> name, token, avatar, joined
   POST /v1/accounts/login             name, pin           -> name, token, avatar, joined
-  POST /v1/accounts/me                token               -> name, avatar, joined, volt_best, volt_rank
+  POST /v1/accounts/me                token               -> name, avatar, joined, volt_best, volt_rank,
+                                                             sharing
   POST /v1/accounts/avatar            token, avatar
   POST /v1/accounts/logout            token
   POST /v1/scores/<game>              token, score  (or legacy: name, score, for names without a profile)
@@ -528,6 +542,218 @@ class Store:
             return None
         path = os.path.join(self.dir, f"{iid}.{ext}")
         return path if os.path.isfile(path) else None
+
+
+# ---------------------------------------------------------------------- friends
+
+# Friends are asked for by gamertag and only become friends once the other person accepts.
+# Friends see each other's presence: whether they're on, what they're playing (unless they
+# turned that off in Settings) and the address of a HostMC server of theirs that people on the
+# internet can reach. Presence is kept in memory only, so what someone plays is never written
+# to disk, and it's gone once they go offline or turn sharing off.
+FRIENDS_MAX = 100                # friends one profile can have
+ASKS_WAITING_MAX = 50            # requests waiting on one profile at a time
+ASKS_PER_HOUR = 20               # new requests one profile can send in an hour
+DECLINED_WAIT_S = 7 * 86400      # after a "no thanks", the same person can't ask again for a week
+PRESENCE_S = 15 * 60             # a hello keeps someone online this long
+PRESENCE_HOLD_S = 60 * 60        # or this long when XenithOS hands over to an app that can't say hello
+SEEN_SAVE_S = 10 * 60            # hellos write last_seen to disk at most this often
+MC_KEEP_S = 24 * 3600            # a HostMC server's address is shown this long after HostMC last said so
+MC_ADDR_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,94}[A-Za-z0-9])?(?::[0-9]{1,5})?$")
+OWN_APPS = {"xenithos": "XenithOS", "volt": "VOLT", "doom": "DOOM", "tube": "Tube", "photos": "Photos",
+            "hostmc": "HostMC"}
+
+
+class Friends:
+    def __init__(self, state, store):
+        self.state, self.store = state, store
+        self.presence = {}               # profile key -> {"t", "until", "app"}; never saved
+        self.asks = RateLimit(ASKS_PER_HOUR, 3600)
+        self.names = (-1e9, {})          # (when, app id -> name) from the Store's lists
+        self.clock = time.time
+
+    def app_names(self):
+        """App ids friends can be seen playing, with their names: XenithOS's own apps and what
+        the Store lists (its apps, Flathub's, and Steam's games, also as steam-<app id>, the way
+        PCs name Steam games). Read again every few minutes."""
+        when, names = self.names
+        if time.monotonic() - when < 300:
+            return names
+        names = dict(OWN_APPS)
+        try:
+            names.update({i["id"]: i["name"] for i in self.store.items() if i["kind"] == "app"})
+            names.update({a["id"]: a["name"] for a in self.store.flathub()})
+            for g in self.store.steam():
+                names[g["id"]] = names[f"steam-{g['appid']}"] = g["name"]
+        except (OSError, ValueError):
+            pass
+        self.names = (time.monotonic(), names)
+        return names
+
+    @staticmethod
+    def app_name(names, app):
+        if not app:
+            return ""
+        return names.get(app) or ("a game on Steam" if re.match(r"^steam-[0-9]{1,10}$", app) else "")
+
+    def online(self, key, now):
+        p = self.presence.get(key)
+        return p if p and p["until"] > now else None
+
+    def hello(self, acc, ip, app="", hold=False, mc=None, bye=False):
+        """A signed-in console or app says it's here, and what it's running. mc: the address of
+        the profile's HostMC server ("" when it isn't reachable any more, None: not about it)."""
+        names, now, key = self.app_names(), self.clock(), acc["name"].lower()
+        with self.state.lock:
+            sharing = acc.get("sharing", True)
+            if bye:
+                self.presence.pop(key, None)
+            else:
+                shown = app if sharing and self.app_name(names, app) else ""
+                self.presence[key] = {"t": now, "until": now + (PRESENCE_HOLD_S if hold else PRESENCE_S),
+                                      "app": shown}
+                self.state.data["consoles"][acc["name"]] = {"t": int(now), "ip": ip}
+            save = now - acc.get("last_seen", 0) > SEEN_SAVE_S
+            if mc is not None:
+                old = acc.get("mc") or {}
+                if mc and sharing:
+                    save = save or old.get("addr") != mc or now - old.get("t", 0) > 3600
+                    acc["mc"] = {"addr": mc, "t": int(now)}
+                elif acc.pop("mc", None):
+                    save = True
+            acc["last_seen"] = int(now)
+            if save:
+                self.state.save()
+
+    def set_sharing(self, acc, on):
+        with self.state.lock:
+            acc["sharing"] = bool(on)
+            if not on:
+                acc.pop("mc", None)
+                p = self.presence.get(acc["name"].lower())
+                if p:
+                    p["app"] = ""
+            self.state.save()
+
+    def summary(self, acc):
+        """For a console's regular hello: requests waiting, and which friends are on."""
+        now, accounts = self.clock(), self.state.data["accounts"]
+        with self.state.lock:
+            asks = sorted((t, k) for k, t in acc.get("asks_in", {}).items() if k in accounts)
+            on = sorted((accounts[k]["name"] for k in acc.get("friends", {})
+                         if k in accounts and self.online(k, now)), key=str.lower)
+        return {"asks": len(asks), "ask": accounts[asks[-1][1]]["name"] if asks else "",
+                "friends_on": len(on), "on": ",".join(on[:20])}
+
+    def rows(self, acc):
+        """name|avatar|rel|online|app|app name|seconds since seen|HostMC address, one a line:
+        requests to you first, then friends who are on, friends who aren't (most recently seen
+        first), then your own requests. rel is friend, in (they asked you) or out (you asked).
+        Only friends get presence."""
+        names, now, accounts = self.app_names(), self.clock(), self.state.data["accounts"]
+        asking, on, off, asked = [], [], [], []
+        with self.state.lock:
+            for key, t in acc.get("asks_in", {}).items():
+                o = accounts.get(key)
+                if o:
+                    asking.append((-t, f"{o['name']}|{o['avatar']}|in|0|||0|\n"))
+            for key in acc.get("friends", {}):
+                o = accounts.get(key)
+                if not o:
+                    continue
+                p, sharing = self.online(key, now), o.get("sharing", True)
+                app = p["app"] if p and sharing else ""
+                mc = (o.get("mc") or {}) if sharing else {}
+                addr = mc.get("addr", "") if now - mc.get("t", 0) < MC_KEEP_S else ""
+                seen = 0 if p else max(0, int(now - o.get("last_seen", 0)))
+                line = f"{o['name']}|{o['avatar']}|friend|{1 if p else 0}|{app}|{self.app_name(names, app)}|{seen}|{addr}\n"
+                (on if p else off).append((o["name"].lower() if p else seen, line))
+            for key, t in acc.get("asks_out", {}).items():
+                o = accounts.get(key)
+                if o:
+                    asked.append((-t, f"{o['name']}|{o['avatar']}|out|0|||0|\n"))
+        return "".join(line for group in (asking, on, off, asked) for _, line in sorted(group))
+
+    # ------------------------------------------------------------- asking
+    def add(self, acc, name):
+        """Ask someone to be friends, or say yes if they asked first. (status, message, extra)."""
+        me, key = acc["name"].lower(), (name or "").strip().lower()
+        with self.state.lock:
+            other = self.state.data["accounts"].get(key)
+            if not other:
+                return 404, f"There's no profile called {clean(name, 15) or 'that'}.", {}
+            if other is acc:
+                return 400, "That's you. Ask someone else.", {}
+            if key in acc.get("friends", {}):
+                return 409, f"You're friends with {other['name']} already.", {}
+            if key in acc.get("asks_in", {}):
+                return self._befriend(acc, other)
+            if key in acc.get("asks_out", {}):
+                return 409, f"You've asked {other['name']} already. They'll see it next time they're on.", {}
+            if len(acc.get("friends", {})) >= FRIENDS_MAX:
+                return 409, f"You have {FRIENDS_MAX} friends, the most there can be. Remove one first.", {}
+            if len(other.get("friends", {})) >= FRIENDS_MAX:
+                return 409, f"{other['name']} has as many friends as there can be.", {}
+            if other.get("declined", {}).get(me, 0) > self.clock():
+                return 403, f"You can't ask {other['name']} again yet.", {}
+            other.get("declined", {}).pop(me, None)
+            if len(other.get("asks_in", {})) >= ASKS_WAITING_MAX:
+                return 429, f"{other['name']} has a lot of requests waiting. Try again another day.", {}
+            if not self.asks.allow(me):
+                return 429, "That's a lot of requests at once. Try again in an hour.", {}
+            now = int(self.clock())
+            acc.setdefault("asks_out", {})[key] = now
+            other.setdefault("asks_in", {})[me] = now
+            self.state.save()
+            return 200, "", {"now": "asked", "name": other["name"]}
+
+    def _befriend(self, acc, other):
+        me, key, now = acc["name"].lower(), other["name"].lower(), int(self.clock())
+        for a, b in ((acc, key), (other, me)):
+            for k in ("asks_in", "asks_out", "declined"):
+                a.get(k, {}).pop(b, None)
+            a.setdefault("friends", {})[b] = now
+        self.state.save()
+        return 200, "", {"now": "friends", "name": other["name"]}
+
+    def accept(self, acc, name):
+        key = (name or "").strip().lower()
+        with self.state.lock:
+            other = self.state.data["accounts"].get(key)
+            if not other or key not in acc.get("asks_in", {}):
+                return 404, "That request isn't there any more.", {}
+            if len(acc.get("friends", {})) >= FRIENDS_MAX:
+                return 409, f"You have {FRIENDS_MAX} friends, the most there can be. Remove one first.", {}
+            if len(other.get("friends", {})) >= FRIENDS_MAX:
+                return 409, f"{other['name']} has as many friends as there can be.", {}
+            return self._befriend(acc, other)
+
+    def remove(self, acc, name):
+        """Stop being friends, say no to a request, or take back your own."""
+        me, key = acc["name"].lower(), (name or "").strip().lower()
+        with self.state.lock:
+            other = self.state.data["accounts"].get(key) or {}
+            if key in acc.get("friends", {}):
+                acc["friends"].pop(key, None)
+                other.get("friends", {}).pop(me, None)
+                now = "removed"
+            elif key in acc.get("asks_in", {}):
+                acc["asks_in"].pop(key, None)
+                other.get("asks_out", {}).pop(me, None)
+                declined = acc.setdefault("declined", {})
+                cutoff = self.clock()
+                for k in [k for k, until in declined.items() if until < cutoff]:
+                    del declined[k]
+                declined[key] = int(cutoff + DECLINED_WAIT_S)
+                now = "declined"
+            elif key in acc.get("asks_out", {}):
+                acc["asks_out"].pop(key, None)
+                other.get("asks_in", {}).pop(me, None)
+                now = "cancelled"
+            else:
+                return 404, "You're not friends, and there's no request.", {}
+            self.state.save()
+            return 200, "", {"now": now, "name": other.get("name", name)}
 
 
 # ---------------------------------------------------------------------- stats
@@ -1091,6 +1317,7 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
     logins = RateLimit(LOGIN_PER_10MIN, 600)
     feedback_by_ip = RateLimit(30, 3600)          # consoles reached through the relay share an address
     feedback_by_name = RateLimit(6, 3600)
+    friends = Friends(state, store)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "XenithOS-Cloud/" + VERSION
@@ -1357,6 +1584,9 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                                      daemon=True).start()
                 return self.reply(200, "ok=1\n")
 
+            if parts == ["v1", "hello"] or parts[:2] == ["v1", "friends"]:
+                return self.friends_post(parts, form, ip)
+
             if parts in (["v1", "tube", "search"], ["v1", "tube", "start"]):
                 if not tube or not tube.available():
                     return self.error(503, "Tube isn't available on this server.")
@@ -1400,7 +1630,8 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                     state.seen(acc["name"], ip)
                     best, rank = state.best_of("volt", acc["name"])
                     return self.reply(200, kv({"name": acc["name"], "avatar": acc["avatar"], "joined": acc["joined"],
-                                               "volt_best": best, "volt_rank": rank}))
+                                               "volt_best": best, "volt_rank": rank,
+                                               "sharing": 1 if acc.get("sharing", True) else 0}))
                 if parts[2] == "avatar":
                     if not valid_avatar(form.get("avatar", "")):
                         return self.error(400, "That avatar code isn't valid.")
@@ -1450,6 +1681,41 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
 
             return self.error(404, "Not found.")
 
+        # -------------------------------------------------------------- friends
+        def friends_post(self, parts, form, ip):
+            acc = state.by_token(form.get("token", ""))
+            if not acc:
+                return self.error(401, "Your sign-in expired. Sign in again.")
+            if parts == ["v1", "hello"]:
+                if form.get("bye") == "1":
+                    friends.hello(acc, ip, bye=True)
+                    return self.reply(200, "ok=1\n")
+                app, mc = form.get("app", ""), form.get("mc")
+                if mc is not None:
+                    mc = mc.strip()
+                    if mc and not MC_ADDR_RE.match(mc):
+                        return self.error(400, "That isn't a server address.")
+                friends.hello(acc, ip, app if ID_RE.match(app) else "", form.get("hold") == "1", mc)
+                news = state.data["inbox"][0] if state.data["inbox"] else {"id": 0, "text": ""}
+                lines = {"motd": state.data["motd"], "server": "XENITHOS CLOUD " + VERSION,
+                         "players": len(state.data["accounts"]), "online": state.online(),
+                         "news": len(state.data["inbox"]), "news_id": news["id"], "news_text": news["text"],
+                         "now": int(time.time()), "sharing": 1 if acc.get("sharing", True) else 0}
+                lines.update(friends.summary(acc))
+                return self.reply(200, kv(lines), cache="no-store")
+            if parts == ["v1", "friends"]:
+                return self.reply(200, friends.rows(acc), cache="no-store")
+            if parts == ["v1", "friends", "sharing"]:
+                friends.set_sharing(acc, form.get("on") == "1")
+                return self.reply(200, kv({"sharing": 1 if acc["sharing"] else 0}))
+            if len(parts) == 3 and parts[2] in ("add", "accept", "remove"):
+                code, message, extra = getattr(friends, parts[2])(acc, form.get("name", ""))
+                if code != 200:
+                    return self.error(code, message)
+                return self.reply(200, kv({"ok": 1, **extra}))
+            return self.error(404, "Not found.")
+
+    Handler.friends = friends                     # for the self-test
     return Handler
 
 
@@ -1541,6 +1807,115 @@ def serve():
 
 
 # ---------------------------------------------------------------------- selftest
+
+
+def selftest_friends(req, kvparse, check, state, friends):
+    """Friends and presence, for selftest(). Profiles are made directly, past the sign-up limit."""
+    def make(name):
+        (_, token), _ = state.create(name, "2468", "1202001000")
+        return token
+
+    def post(path, token, extra=""):
+        return req("POST", path, f"token={token}{extra}")
+
+    def rows(token):
+        code, body = post("/v1/friends", token)
+        return {r.split("|")[0]: r.split("|") for r in body.decode().splitlines()} if code == 200 else {}
+
+    def later(seconds):
+        friends.clock = lambda: real() + seconds
+
+    real = friends.clock
+    ta, tb, tc = make("Alice"), make("Bob Two"), make("Carol")
+    check("friends: need a profile", req("POST", "/v1/friends", "token=nope")[0] == 401
+          and req("POST", "/v1/hello", "app=volt")[0] == 401)
+    code, body = post("/v1/friends/add", ta, "&name=bob%20two")
+    check("friends: asking (any case)", code == 200 and kvparse(body) == {"ok": "1", "now": "asked", "name": "Bob Two"})
+    check("friends: the request shows on both sides",
+          rows(ta).get("Bob Two", [""] * 3)[2] == "out" and rows(tb).get("Alice", [""] * 3)[2] == "in")
+    post("/v1/hello", ta, "&app=volt")
+    check("friends: no presence before a yes", rows(tb)["Alice"][3:] == ["0", "", "", "0", ""])
+    for bad, want in (("Nobody", 404), ("ALICE", 400), ("Bob%20Two", 409)):
+        check(f"friends: asking {bad} refused", post("/v1/friends/add", ta, "&name=" + bad)[0] == want)
+    hello = kvparse(post("/v1/hello", tb, "&ver=0.6.9")[1])
+    check("hello: a request waiting, and who from", hello.get("asks") == "1" and hello.get("ask") == "Alice"
+          and hello.get("friends_on") == "0" and "motd" in hello and int(hello.get("now", "0")) > 0)
+    check("friends: accepting", kvparse(post("/v1/friends/accept", tb, "&name=Alice")[1]) ==
+          {"ok": "1", "now": "friends", "name": "Alice"} and rows(ta)["Bob Two"][2] == "friend")
+    check("friends: accepting twice", post("/v1/friends/accept", tb, "&name=Alice")[0] == 404)
+
+    # Presence: what friends are playing, for how long a hello counts
+    post("/v1/hello", tb, "&app=doom")
+    check("presence: a friend on, playing DOOM", rows(ta)["Bob Two"][2:7] == ["friend", "1", "doom", "DOOM", "0"])
+    hello = kvparse(post("/v1/hello", ta)[1])
+    check("hello: which friends are on", hello.get("on") == "Bob Two" and hello.get("friends_on") == "1")
+    post("/v1/hello", tb, "&app=my-own-thing")
+    check("presence: apps XenithOS Cloud doesn't know aren't named", rows(ta)["Bob Two"][3:6] == ["1", "", ""])
+    post("/v1/hello", tb, "&app=..%2Fx")
+    check("presence: a bad app id is left out", rows(ta)["Bob Two"][3:6] == ["1", "", ""])
+    post("/v1/hello", tb, "&app=volt")
+    later(PRESENCE_S + 5)
+    gone = rows(ta)["Bob Two"]
+    check("presence: gone a while after the last hello", gone[3:6] == ["0", "", ""] and int(gone[6]) >= PRESENCE_S)
+    friends.clock = real
+    post("/v1/hello", tb, "&app=volt&hold=1")
+    later(PRESENCE_S + 5)
+    check("presence: held while an app that can't say hello runs", rows(ta)["Bob Two"][3:6] == ["1", "volt", "VOLT"])
+    later(PRESENCE_HOLD_S + 5)
+    check("presence: not held for ever", rows(ta)["Bob Two"][3] == "0")
+    friends.clock = real
+    post("/v1/hello", tb, "&app=volt")
+    check("presence: bye", post("/v1/hello", tb, "&bye=1")[0] == 200 and rows(ta)["Bob Two"][3] == "0")
+
+    # A HostMC server friends can join
+    post("/v1/hello", tb, "&app=hostmc&mc=cheery-panda-61.mc.example.net:25566")
+    check("HostMC: friends see the server's address", rows(ta)["Bob Two"][7] == "cheery-panda-61.mc.example.net:25566")
+    check("HostMC: a bad address is refused", post("/v1/hello", tb, "&mc=a%20b;rm%20-rf")[0] == 400)
+    later(MC_KEEP_S + 5)
+    check("HostMC: an address not heard about for a day isn't shown", rows(ta)["Bob Two"][7] == "")
+    friends.clock = real
+    post("/v1/hello", tb, "&app=hostmc&mc=")
+    check("HostMC: gone when it isn't reachable", rows(ta)["Bob Two"][7] == "" and "mc" not in state.account("bob two"))
+
+    # Showing what you play can be turned off, and then nothing about it is kept
+    post("/v1/hello", tb, "&app=doom&mc=203.0.113.5")
+    check("sharing: turned off", kvparse(post("/v1/friends/sharing", tb, "&on=0")[1]) == {"sharing": "0"})
+    r = rows(ta)["Bob Two"]
+    check("sharing off: on, but not what or where", r[3:6] == ["1", "", ""] and r[7] == "" and "mc" not in state.account("bob two"))
+    post("/v1/hello", tb, "&app=doom&mc=203.0.113.5")
+    check("sharing off: what's said isn't kept", rows(ta)["Bob Two"][4] == "" and "mc" not in state.account("bob two")
+          and friends.presence["bob two"]["app"] == "")
+    check("sharing: on again", kvparse(post("/v1/friends/sharing", tb, "&on=1")[1]) == {"sharing": "1"}
+          and kvparse(post("/v1/accounts/me", tb)[1]).get("sharing") == "1")
+    check("presence is never saved", '"app"' not in json.dumps(state.data) and "presence" not in json.dumps(state.data))
+
+    # No, taking a request back, asking someone who asked you, unfriending
+    post("/v1/friends/add", tc, "&name=Alice")
+    check("friends: saying no", kvparse(post("/v1/friends/remove", ta, "&name=Carol")[1]).get("now") == "declined"
+          and "Alice" not in rows(tc) and "Carol" not in rows(ta))
+    check("friends: after a no, no asking again straight away", post("/v1/friends/add", tc, "&name=Alice")[0] == 403)
+    later(DECLINED_WAIT_S + 5)
+    check("friends: a week later, asking again", post("/v1/friends/add", tc, "&name=Alice")[0] == 200)
+    friends.clock = real
+    check("friends: taking a request back", kvparse(post("/v1/friends/remove", tc, "&name=Alice")[1]).get("now") == "cancelled"
+          and "Carol" not in rows(ta) and "Alice" not in rows(tc))
+    post("/v1/friends/add", tc, "&name=Alice")
+    check("friends: asking someone who asked you", kvparse(post("/v1/friends/add", ta, "&name=carol")[1]).get("now") == "friends"
+          and rows(tc)["Alice"][2] == "friend" and not state.account("alice").get("asks_in"))
+    td, te = make("Dave"), make("Erin")
+    post("/v1/friends/add", td, "&name=Alice")
+    post("/v1/friends/add", ta, "&name=Erin")
+    post("/v1/hello", tc, "&app=tube")
+    post("/v1/hello", tb, "&bye=1")
+    check("friends: requests first, then who's on, who isn't, and requests sent",
+          list(rows(ta)) == ["Dave", "Carol", "Bob Two", "Erin"])
+    check("friends: unfriending", kvparse(post("/v1/friends/remove", ta, "&name=Carol")[1]).get("now") == "removed"
+          and "Alice" not in rows(tc) and "Carol" not in rows(ta))
+    check("friends: removing a stranger", post("/v1/friends/remove", ta, "&name=Carol")[0] == 404)
+    pals = [make(f"Pal{i}") for i in range(ASKS_PER_HOUR)]
+    sent = [post("/v1/friends/add", ta, f"&name=Pal{i}")[0] for i in range(len(pals))]
+    check("friends: only so many requests an hour", sent[:ASKS_PER_HOUR - 2] == [200] * (ASKS_PER_HOUR - 2)
+          and sent[-1] == 429)
 
 
 def selftest():
@@ -1861,6 +2236,8 @@ else:
     code, body = req("GET", "/install.sh")
     check("install.sh filled in", code == 200 and f'SERVER="127.0.0.1:{httpd.server_address[1]}"'.encode() in body
           and b"/download/xenithos-source.tar.gz" in body)
+
+    selftest_friends(req, kvparse, check, state, httpd.RequestHandlerClass.friends)
 
     # Tube, with stand-in yt-dlp and ffmpeg
     calls_file = os.path.join(tmp, "calls.txt")

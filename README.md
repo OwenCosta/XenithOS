@@ -7,8 +7,8 @@ its Store also installs apps from Flathub (Roblox through Sober, Minecraft, Kodi
 with its games. It's written in C: on the Xbox on [libxenon](https://github.com/Free60Project/libxenon), on PCs
 and Pis on SDL2.
 
-XenithOS Cloud is the free online service every copy uses for profiles, the Store, news, leaderboards and
-YouTube. Nothing to set up: the downloads come with its address.
+XenithOS Cloud is the free online service every copy uses for profiles, friends, the Store, news, leaderboards
+and YouTube. Nothing to set up: the downloads come with its address.
 
 I'm building it on a 360 S (Trinity board). The 0.4 redesign runs on the real console. 0.5.0 (sound fixes, faster
 app starts, PC and Pi support, Tube, the new avatar editor) has so far been tested in the simulator and on Linux.
@@ -17,16 +17,19 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
 
 **System** (`source/`)
 - Start-up screen with the XenithOS chime, which is synthesized in code like every other sound
-- Home: your profile and avatar at the top, five tiles (Apps, Store, Cloud, Profile, Settings), and a row of
-  installed apps with thumbnails
+- Home: your profile and avatar at the top, seven tiles (Apps, Store, Cloud, Friends, Profile, Settings,
+  Feedback), and a row of installed apps with thumbnails
 - Apps: a thumbnail grid of everything installed
 - Store: apps, game data and system updates from XenithOS Cloud. Each download's SHA-256 is checked before
   anything is written. On PCs it has sections: apps from Flathub, Steam and games on Steam, and XenithOS.
-- Cloud: who's playing, XenithOS news, and the VOLT leaderboard with avatars
+- Cloud: your friends who are on, XenithOS news, and the VOLT leaderboard with avatars
+- Friends: ask someone by their gamertag and they say yes on their own console. Friends see who's on and what
+  they're playing (also as a notification when one comes on), and the address of a friend's HostMC server to
+  join. "Show friends what I'm playing" in Settings keeps that to yourself.
 - Profile: a gamertag and passcode, saved to XenithOS Cloud so it follows you to any machine
 - Avatar editor: thirteen parts in three tabs (face, hair, outfit), colour swatches, random looks
-- Settings: volume, interface sounds, start-up chime, network, system info (with start-up times and sound
-  stats), controller test, about
+- Settings: volume, interface sounds, start-up chime, showing friends what you play, network, system info
+  (with start-up times and sound stats), controller test, about
 
 **Apps** (`apps/`)
 - VOLT: a light-trail game. Scores go to your profile on the leaderboard.
@@ -39,7 +42,8 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
 - HostMC (PCs and Pis): a Minecraft: Java Edition server for you and your friends, Minecraft's own or Paper.
   Start and stop it, see who's on, type commands, change its settings, back the world up, and with
   [playit.gg](https://playit.gg) turned on, let friends join from anywhere. It keeps running after you leave
-  HostMC, so you can play on it. See [linux/README.md](linux/README.md#hostmc-a-minecraft-server).
+  HostMC, so you can play on it. Your friends on XenithOS see its address in Friends while it's reachable.
+  See [linux/README.md](linux/README.md#hostmc-a-minecraft-server).
 
 | DOOM control | |
 |---|---|
@@ -115,7 +119,7 @@ updates all of it (ffmpeg, Deno, the yt-dlp standalone build, the plugin and the
 download against its published checksum.
 
 ```bash
-python3 server/xenith_cloud.py --selftest      # 90 checks, no network needed
+python3 server/xenith_cloud.py --selftest      # 156 checks, no network needed
 ```
 
 Profiles: passcodes are stored as salted PBKDF2 hashes and sign-in tokens as SHA-256 hashes, so the state
@@ -123,6 +127,13 @@ file never holds either. Five wrong passcodes lock a profile for 15 minutes, and
 rate limited per address. Because the Xbox speaks plain HTTP, don't reuse a passcode from anywhere else. Tube
 needs a signed-in profile, plays one video per profile and a few at a time overall, so the server can't be used
 as an open proxy.
+
+Friends: requests only become friends once the other person says yes, a "no" stops the same person asking
+again for a week, and requests are rate limited per profile. Consoles say hello with what's running when
+they start something (and every minute or so on the home screen); only friends see it. What someone plays is
+kept in memory, never in the state file, and with "Show friends what I'm playing" off it isn't even sent. A
+HostMC server's address is shown to friends while HostMC says people on the internet can reach it, and for a
+day after.
 
 Running your own copy (the unit runs as a throwaway user on a read-only system):
 
