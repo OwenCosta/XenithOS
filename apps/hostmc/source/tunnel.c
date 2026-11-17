@@ -13,9 +13,10 @@
  * and runs it again when it drops, waiting a little longer each time (up to a minute), whether
  * HostMC is open or not. The next HostMC finds the loop by its PID file (PID and start time,
  * checked against /proc before it's ever signalled). The loop marks each try in tunnel.log, so
- * ssh's own words there say whether it's in, still connecting, or why it stopped. Nothing here is
- * particular to the player's own VPS: a relay run by someone else would be the same tunnel, to
- * its address, account and port.
+ * ssh's own words there say whether it's in, still connecting, or why it stopped. The supporter
+ * relay (relay.c) is the same tunnel to its address, account and port, with one difference: its
+ * host key comes from XenithOS Cloud and is the only one trusted (tunnel_pin), never one first
+ * seen on the way.
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -122,7 +123,14 @@ static int ssh_cmd(struct ssh_cmd *s, const struct tunnel *t, const struct tunne
     ARG("-o"); ARG("IdentityAgent=none");
     ARG("-o"); ARG("BatchMode=yes");                 /* never a password prompt */
     ARG("-o"); ARG("ConnectTimeout=15");
-    ARG("-o"); ARG("StrictHostKeyChecking=accept-new");
+    if (c->relay) {                                  /* the host key XenithOS Cloud gave, and no other */
+        ARG("-o"); ARG("StrictHostKeyChecking=yes");
+        ARG("-o"); ARG("HostKeyAlgorithms=ssh-ed25519");
+        ARG("-o"); ARG("UpdateHostKeys=no");
+        ARG("-o"); ARG("CheckHostIP=no");
+    } else {
+        ARG("-o"); ARG("StrictHostKeyChecking=accept-new");
+    }
     ARG("-o"); ARG(s->hosts);
     ARG("-o"); ARG("GlobalKnownHostsFile=/dev/null");
     ARG("-o"); ARG("LogLevel=VERBOSE");              /* says "Authenticated to" once it's in */
@@ -276,11 +284,40 @@ static char *log_tail(const struct tunnel *t, long long *from)
     return buf;
 }
 
+/* The same, for the supporter relay. */
+static void explain_relay(const char *text, const struct tunnel_cfg *c, char *out, int n)
+{
+    if (strstr(text, "Permission denied"))
+        snprintf(out, n, "The relay didn't let HostMC in yet. It takes new keys every 30 seconds, and HostMC tries again by itself. "
+                         "If it lasts, choose Check my membership.");
+    else if (strstr(text, "remote port forwarding failed") || strstr(text, "Error: remote port forwarding"))
+        snprintf(out, n, "The relay is still holding your server's port from an earlier connection. HostMC tries again by itself.");
+    else if (strstr(text, "IDENTIFICATION HAS CHANGED") || strstr(text, "Host key verification failed") ||
+             strstr(text, "No ED25519 host key is known"))
+        snprintf(out, n, "The relay didn't prove it's the one XenithOS Cloud named, so HostMC didn't connect. Choose Check my membership "
+                         "to get its current identity.");
+    else if (strstr(text, "Could not resolve hostname"))
+        snprintf(out, n, "%s doesn't lead anywhere right now. HostMC tries again by itself.", c->host);
+    else if (strstr(text, "Connection refused") || strstr(text, "timed out") || strstr(text, "No route to host"))
+        snprintf(out, n, "The relay didn't answer. HostMC tries again by itself.");
+    else if (strstr(text, "Network is unreachable"))
+        snprintf(out, n, "This PC isn't on the internet right now.");
+    else if (strstr(text, "Timeout, server") || strstr(text, "Connection closed") || strstr(text, "Broken pipe") ||
+             strstr(text, "Connection reset"))
+        snprintf(out, n, "The connection to the relay dropped. HostMC connects again.");
+    else if (strstr(text, "UNPROTECTED PRIVATE KEY"))
+        snprintf(out, n, "HostMC's key can be read by other users, so ssh won't use it. Turn the relay off and on to make a new one.");
+}
+
 /* What ssh's own words in a log mean, for people. "" if it said nothing that's wrong. */
 static void explain(const char *text, const struct tunnel_cfg *c, char *out, int n)
 {
     out[0] = 0;
     if (!text) return;
+    if (c->relay) {
+        explain_relay(text, c, out, n);
+        return;
+    }
     if (strstr(text, "Permission denied"))
         snprintf(out, n, "The VPS didn't let HostMC in: add HostMC's key (in the setup steps) to ~/.ssh/authorized_keys for %s on it.", c->user);
     else if (strstr(text, "remote port forwarding failed") || strstr(text, "Error: remote port forwarding"))
@@ -329,7 +366,8 @@ int tunnel_state(struct tunnel *t, const struct tunnel_cfg *c, char *why, int n,
             for (; *line && k < n - 1; line++)
                 if (*line >= ' ' && *line <= '~') why[k++] = *line;
             why[k] = 0;
-            if (!strncmp(why, "hostmc:", 7) || !why[0]) snprintf(why, n, "The connection to the VPS closed.");
+            if (!strncmp(why, "hostmc:", 7) || !why[0])
+                snprintf(why, n, "The connection to the %s closed.", c->relay ? "relay" : "VPS");
         }
     } else if (start && strstr(start, "Authenticated to")) {
         state = TS_UP;
@@ -369,4 +407,25 @@ void tunnel_forget_host(struct tunnel *t)
     char p[160];
     rel(t, T_HOSTS, p, sizeof p);
     unlink(p);
+}
+
+/* Makes hostkey ("ssh-ed25519 <base64>") the only one trusted for the server in c, with
+ * StrictHostKeyChecking=yes (c->relay). 0 if it isn't a key like that. */
+int tunnel_pin(struct tunnel *t, const struct tunnel_cfg *c, const char *hostkey)
+{
+    char p[160], line[420], *old;
+    const char *b64 = hostkey + 12;
+    int len, ok;
+    if (strncmp(hostkey, "ssh-ed25519 ", 12) || strlen(b64) != 68 || strspn(b64, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/") != 68)
+        return 0;
+    if (c->ssh_port == 22) len = snprintf(line, sizeof line, "%s %s\n", c->host, hostkey);
+    else len = snprintf(line, sizeof line, "[%s]:%d %s\n", c->host, c->ssh_port, hostkey);
+    rel(t, T_HOSTS, p, sizeof p);
+    old = file_read(p, NULL);
+    ok = old && !strcmp(old, line);
+    free(old);
+    if (ok) return 1;
+    mkdirs(t->dir);
+    chmod(t->dir, 0700);
+    return file_write(p, line, len, 0600);
 }

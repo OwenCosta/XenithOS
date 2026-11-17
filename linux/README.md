@@ -136,7 +136,7 @@ playit.gg gives it. Its pages: Server (start, stop, where to join, who's on), Co
 and commands), Players (operators, kicks, bans, the whitelist), Settings (`server.properties`: message,
 game mode, difficulty, max players, whitelist, seed, online mode, port, and the server's memory), Version
 (Minecraft or Paper, the latest release or an earlier one), World (backups, putting one back, a new world)
-and Internet (playit.gg).
+and Internet (playit.gg, a VPS of your own, or the supporter relay).
 
 - The server keeps running after you leave HostMC, so you can go and play on it, and HostMC picks it up
   again next time. It's started in a session of its own; `server/hostmc.pid` holds its PID and start time,
@@ -172,9 +172,29 @@ and Internet (playit.gg).
   - `sim/hostmc/test-vps.sh` tries all of it with a private sshd standing in for the VPS (run as you, on
     spare ports): the key, the login test, a ping through the VPS, ssh killed and coming back by itself, a
     new HostMC picking the tunnel up, and the message when GatewayPorts is off.
+- Or the supporter relay, for supporters on Patreon: the server gets a name of its own,
+  `<name>.mc.owencosta.diy`, that friends type in, with nothing to set up on a router or a server.
+  - HostMC asks XenithOS Cloud (with the signed-in XenithOS profile) whether the profile is a supporter's:
+    OCAccounts knows, once Patreon and the profile are linked to an OCAccount at owencosta.diy/account.
+    If not yet, it shows the three steps, with QR codes of the Patreon page and the account page.
+  - Then a name: XenithOS Cloud suggests a free one (like `brave-otter-42`), or you type one, 3 to 20
+    letters, numbers and hyphens. One name each; changing it keeps the old one for you for a week, and
+    giving it up does too. If the membership ends, the relay stops passing players and the name is kept
+    for you for 30 days.
+  - While the server runs, HostMC keeps the same kind of tunnel as to a VPS, to the relay, with a key of
+    its own (in `relay/`), allowed to open one port on the relay's loopback and nothing else. The relay's
+    address, that port and its host key come from XenithOS Cloud (kept in `relay/relay.txt`); the host key
+    is the only one trusted (`StrictHostKeyChecking=yes`). The relay reads the name a player's game sends
+    and passes them down that supporter's tunnel. Each time it comes up, HostMC checks from outside by the
+    name, as with a VPS (`relay/check.txt`).
+  - Through the relay, too, every player arrives from 127.0.0.1. The relay itself is in
+    [server/mcrelay](../server/mcrelay/README.md).
+  - `sim/hostmc/test-relay.sh` tries all of it here: XenithOS Cloud, a stand-in OCAccounts, the relay's
+    router, sync and sshd, two supporters' servers, a membership ending and coming back, and a name
+    changed and given up.
 - In `~/.local/share/xenithos/hostmc/`: `server/` (the server, its world, `server.properties` and
-  `console.log`), `java/`, `backups/` (the newest 20, as `.tar.gz`), `playit/`, `vps/` and `cache/`
-  (version lists). `HOSTMC_JAVA` points it at another `java` (the simulator uses a stand-in).
+  `console.log`), `java/`, `backups/` (the newest 20, as `.tar.gz`), `playit/`, `vps/`, `relay/` and
+  `cache/` (version lists). `HOSTMC_JAVA` points it at another `java` (the simulator uses a stand-in).
 
 ## Updates
 

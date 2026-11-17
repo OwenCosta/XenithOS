@@ -44,6 +44,11 @@ More switches:
 - `sim/hostmc/test-vps.sh` runs HostMC's own-VPS route through the `hostmc_vps*.txt` scripts, with a private
   sshd (run as you, on spare ports) standing in for the VPS, and checks each step; screenshots go to
   `sim/out/hostmc-vps`.
+- `sim/hostmc/test-relay.sh` runs HostMC's supporter relay through the `hostmc_relay*.txt` scripts against a
+  local XenithOS Cloud, a stand-in for OCAccounts (`sim/hostmc/ocaccounts.py`) and the relay's own software
+  (`server/mcrelay`, with its sshd run as you on a spare port), and checks each step; screenshots go to
+  `sim/out/hostmc-relay`. HostMC runs in a user namespace with a hosts file of its own (`unshare`,
+  `nsenter`), so its check asks by name. `ping.py` takes a third argument, the name a player typed.
 
 ## Scripts
 

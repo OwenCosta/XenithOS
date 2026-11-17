@@ -9,7 +9,7 @@
  *   Settings  server.properties (message, game mode, difficulty...) and its memory
  *   Version   Minecraft or Paper, the latest release or an earlier one
  *   World     backups, putting one back, a new world
- *   Internet  playit.gg
+ *   Internet  playit.gg, a VPS of their own, or the supporter relay
  *
  * The server keeps running after HostMC closes (server.c), so the user can go and play on it,
  * and HostMC picks it up again next time. Before the first start the user agrees to Minecraft's
@@ -47,6 +47,7 @@ void hm_frame(void)
     sv_poll();
     pi_poll();
     vps_poll();
+    relay_poll();
 }
 
 /* ------------------------------------------------------------------ rows */
@@ -90,6 +91,7 @@ enum {
     W_BACKUP, W_RESTORE, W_RESET,
     N_ON, N_OFF, N_FORGET,
     N_VPS, N_VPS_CHECK, N_VPS_STEPS, N_VPS_EDIT, N_VPS_FORGET, N_VPS_OFF,
+    N_RELAY, N_RELAY_CHECK, N_RELAY_MEMBER, N_RELAY_NAME, N_RELAY_OFF, N_RELAY_GIVEUP,
     ID_PLAYER = 100, ID_WL = 200, ID_OP = 300,
 };
 
@@ -485,14 +487,16 @@ static void build_server(void)
     if (lan_address(ip, sizeof ip)) snprintf(text, sizeof text, "%s%s", ip, port);
     else snprintf(text, sizeof text, "Not on a network");
     add(R_INFO, 0, "Your home network", text);
-    if (hs.vps) vps_address(text, sizeof text);
+    if (hs.relay) relay_address(text, sizeof text);
+    else if (hs.vps) vps_address(text, sizeof text);
     else if (!hs.internet) snprintf(text, sizeof text, "Off. Turn it on in Internet");
     else if (pi.address[0]) snprintf(text, sizeof text, "%s", pi.address);
     else if (pi.state == PI_CLAIM) snprintf(text, sizeof text, "Waiting for playit.gg to be set up");
     else snprintf(text, sizeof text, "Waiting for playit.gg");
     r = add(R_INFO, 0, "The internet", text);
-    if (!hs.internet && !hs.vps) r->color = C_DIM;
+    if (!hs.internet && !hs.vps && !hs.relay) r->color = C_DIM;
     else if (hs.vps && (!vps_up() || (vps.check[0] && !vps.check_ok))) r->color = C_SUB;   /* not yet working */
+    else if (hs.relay && (!relay_up() || (relay.w.check[0] && !relay.w.check_ok))) r->color = C_SUB;
     if (prop_bool("white-list", 1) && !sv.nplayers)
         add(R_TEXT, 0, NULL, "The whitelist is on: add your friends' Minecraft names in Players first.")->color = C_SUB;
     snprintf(text, sizeof text, "%d of %d", sv.nplayers, props_get_int("max-players", 20));
@@ -648,17 +652,46 @@ static void build_vps(void)
                          "bans by name do. It carries Java Edition, not Bedrock.")->color = C_DIM;
 }
 
+/* The supporter relay, when that's the way in. */
+static void build_relay(void)
+{
+    uint32_t color;
+    const char *st = relay_status(&color);
+    add(R_INFO, 0, "Friends join at", relay.address[0] ? relay.address : "No name yet");
+    if (relay.tier[0] && !strcmp(relay.step, "ok")) add(R_INFO, 0, "Membership", relay.tier);
+    add(R_INFO, 0, "Tunnel", st)->color = color;
+    if (relay.message[0]) add(R_TEXT, 0, NULL, relay.message)->color = C_WARN;
+    if (relay.w.why[0] && !relay_up() && sv.state == SV_RUNNING) add(R_TEXT, 0, NULL, relay.w.why)->color = C_BAD;
+    if (relay.w.checking) add(R_TEXT, 0, NULL, "Checking the way in from the internet...")->color = C_SUB;
+    else if (relay.w.check[0]) add(R_TEXT, 0, NULL, relay.w.check)->color = relay.w.check_ok ? C_OK : C_BAD;
+    add(R_GAP, 0, NULL, NULL);
+    if (relay_up()) add(R_BUTTON, N_RELAY_CHECK, "Check from the internet", NULL);
+    add(R_BUTTON, N_RELAY_MEMBER, "Check my membership", NULL);
+    add(R_BUTTON, N_RELAY_NAME, "Change the name", NULL);
+    add(R_BUTTON, N_RELAY_OFF, "Turn off the supporter relay", NULL);
+    add(R_BUTTON, N_RELAY_GIVEUP, "Give up the name", NULL);
+    add(R_TEXT, 0, NULL, "Through the relay every player shows up as 127.0.0.1, so bans by address don't work for them; "
+                         "bans by name do. It carries Java Edition, not Bedrock.")->color = C_DIM;
+    add(R_TEXT, 0, NULL, "The relay is a thank-you to supporters, kept running as well as it can be, with no promise "
+                         "that it's always up.")->color = C_DIM;
+}
+
 static void build_internet(void)
 {
     struct row *r;
+    char text[220];
+    if (hs.relay) {
+        build_relay();
+        return;
+    }
     if (hs.vps) {
         build_vps();
         return;
     }
     switch (pi.state) {
     case PI_OFF:
-        add(R_TEXT, 0, NULL, "Friends who aren't on your home network can join through playit.gg, or through a server of your own "
-                             "on the internet (a VPS). Your router stays as it is either way.");
+        add(R_TEXT, 0, NULL, "Friends who aren't on your home network can join through playit.gg, through a server of your own "
+                             "on the internet (a VPS), or through the supporter relay. Your router stays as it is.");
         add(R_HEAD, 0, "playit.gg", NULL);
         add(R_TEXT, 0, NULL, "A free service: you approve HostMC with a playit.gg account, and its agent (about 9 MB, from playit's "
                              "releases on GitHub) runs while the server does.")->color = C_SUB;
@@ -667,6 +700,12 @@ static void build_internet(void)
         add(R_TEXT, 0, NULL, "HostMC logs in to your VPS over SSH with a key of its own and keeps a tunnel to it open while the "
                              "server runs. You add one line and one setting on the VPS. Java Edition only.")->color = C_SUB;
         add(R_BUTTON, N_VPS, "Use your own server (VPS)", NULL);
+        add(R_HEAD, 0, "Supporter relay", NULL);
+        snprintf(text, sizeof text, "For supporters on Patreon: your server gets a name of its own for friends to type in, like "
+                                    "brave-otter-42.%s. Nothing to set up anywhere. Java Edition only.",
+                 relay.domain[0] ? relay.domain : "mc.owencosta.diy");
+        add(R_TEXT, 0, NULL, text)->color = C_SUB;
+        add(R_BUTTON, N_RELAY, "Use the supporter relay", NULL);
         break;
     case PI_CLAIM:
         add(R_QR, 0, NULL, pi.claim_url);
@@ -1067,10 +1106,175 @@ static void vps_setup(void)
     vps_steps();
 }
 
+/* What a profile needs before the relay gives it a name, once: supporting on Patreon, then
+ * Patreon and this XenithOS profile linked to an OCAccount. 1 once XenithOS Cloud says it's a
+ * supporter's, 0 for Back. */
+static int relay_steps(void)
+{
+    static const char *const opts[2] = {"Check again", "Back"};
+    int sel = 0;
+    ui_fade_in();
+    for (;;) {
+        int top = HEADER_H + 4, ph = SCR_H - top - 70, qs = 196, x = M + 28, w = SCR_W - 2 * M - 56 - 2 * qs - 64, y, i, d;
+        int lh = gfx_line_h(FONT_SMALL) + 3, qx = SCR_W - M - 28 - qs;
+        const char *site = strstr(relay.account, "://") ? strstr(relay.account, "://") + 3 : relay.account;
+        char text[300];
+        ui_poll();
+        hm_frame();
+        d = ui_nav_x();
+        if (d && sel + d >= 0 && sel + d < 2) { sel += d; sfx(SFX_MOVE); }
+        if (PRESSED(b)) { sfx(SFX_BACK); ui_settle_input(); return 0; }
+        if (PRESSED(a)) {
+            char why[240];
+            sfx(SFX_SELECT);
+            if (sel == 1) { ui_settle_input(); return 0; }
+            if (!relay_ask("status", NULL, why, sizeof why)) message("XenithOS Cloud couldn't be asked", why);
+            else if (!strcmp(relay.step, "ok")) { sfx(SFX_SUCCESS); ui_settle_input(); return 1; }
+            else sfx(SFX_ERROR);
+            ui_settle_input();
+        }
+        ui_bg();
+        ui_header("The supporter relay", "Three steps, once");
+        ui_panel(M, top, SCR_W - 2 * M, ph);
+        y = top + 20;
+        gfx_str(FONT_BODY_SB, x, y, C_TEXT, "1   Support on Patreon");
+        y += gfx_line_h(FONT_BODY_SB) + 4;
+        y += wrap(FONT_SMALL, x + 28, y, w - 28, 3, C_SUB, relay.patreon[0] ? "Join at the supporter tier or a higher one. The first code "
+                                                                             "opens the Patreon page." : "Join at the supporter tier or a higher one.", 3, 1) * lh + 14;
+        gfx_str(FONT_BODY_SB, x, y, C_TEXT, "2   Link Patreon to an OCAccount");
+        y += gfx_line_h(FONT_BODY_SB) + 4;
+        snprintf(text, sizeof text, "On %s (the second code), sign in or make an OCAccount, and link your Patreon to it.", site);
+        y += wrap(FONT_SMALL, x + 28, y, w - 28, 3, C_SUB, text, 3, 1) * lh + 14;
+        gfx_str(FONT_BODY_SB, x, y, C_TEXT, "3   Link this XenithOS profile");
+        y += gfx_line_h(FONT_BODY_SB) + 4;
+        snprintf(text, sizeof text, "On the same page, link your XenithOS profile, %s, with its passcode.", prof.name);
+        y += wrap(FONT_SMALL, x + 28, y, w - 28, 3, C_SUB, text, 3, 1) * lh + 14;
+        if (relay.message[0]) wrap(FONT_SMALL, x, y, w, 3, C_WARN, relay.message, 3, 1);
+        if (relay.patreon[0]) {
+            qr_draw(relay.patreon, qx - qs - 36, top + 20, qs);
+            gfx_str_c(FONT_SMALL, qx - 36 - qs / 2, top + 28 + qs, C_DIM, "Patreon");
+        }
+        qr_draw(relay.account, qx, top + 20, qs);
+        gfx_str_c(FONT_SMALL, qx + qs / 2, top + 28 + qs, C_DIM, "OCAccount");
+        for (i = 0; i < 2; i++) {
+            int bw = 260, bx = x + i * (bw + 16), by = top + ph - 66;
+            gfx_fill_rrect((float)bx, (float)by, (float)bw, 46, 10, i == sel ? C_TEXT : C_SURFACE2, 255);
+            gfx_str_vc(FONT_BODY_SB, bx + 20, by + 23, i == sel ? C_INK : C_TEXT, opts[i]);
+        }
+        ui_hints("A=Select;Left=Previous;Right=Next;B=Back");
+        ui_end_frame();
+    }
+}
+
+/* A name for the server on the relay: the one XenithOS Cloud suggests, or one typed in. 1 once
+ * it's theirs. */
+static int relay_pick_name(int changing)
+{
+    char name[24] = "", why[240], body[320], use[48];
+    const char *opts[3];
+    int n, c, i;
+    for (;;) {
+        n = 0;
+        if (relay.suggest[0]) {
+            snprintf(use, sizeof use, "Use %s", relay.suggest);
+            opts[n++] = use;
+        }
+        opts[n++] = "Type a name";
+        opts[n++] = "Cancel";
+        snprintf(body, sizeof body, "Friends type it to join, as <name>.%s. Take %s, or type your own: 3 to 20 letters, numbers and "
+                                    "hyphens, starting with a letter.%s", relay.domain, relay.suggest[0] ? relay.suggest : "a suggestion",
+                 changing ? " Your old name is kept for you for a week." : "");
+        c = ui_dialog(changing ? "A new name for your server" : "Your server's name", body, opts, n);
+        if (c < 0 || c == n - 1) return 0;
+        if (relay.suggest[0] && c == 0) {
+            snprintf(name, sizeof name, "%s", relay.suggest);
+        } else {
+            if (!ask_text("Your server's name", "3 to 20 letters, numbers and hyphens, starting with a letter", name, 20) || !name[0]) continue;
+            for (i = 0; name[i]; i++)
+                if (name[i] >= 'A' && name[i] <= 'Z') name[i] = (char)(name[i] - 'A' + 'a');
+        }
+        if (relay_ask("claim", name, why, sizeof why)) return 1;
+        message("That name can't be used", why);
+    }
+}
+
+/* The supporter relay, from the start: membership, the name, then the way in. */
+static void relay_setup(void)
+{
+    char why[240], body[200];
+    if (!relay_ask("status", NULL, why, sizeof why)) {
+        message("XenithOS Cloud couldn't be asked", why);
+        return;
+    }
+    if (!relay.open) {
+        message("The supporter relay isn't open yet", relay.message[0] ? relay.message : "Try again another day.");
+        return;
+    }
+    if (strcmp(relay.step, "ok") && !relay_steps()) return;
+    if (relay.name[0]) {                               /* theirs already: this PC's key goes to the relay too */
+        if (!relay_ask("claim", relay.name, why, sizeof why)) {
+            message("The relay can't be used right now", why);
+            return;
+        }
+    } else if (!relay_pick_name(0)) {
+        return;
+    }
+    if (!relay_turn_on(why, sizeof why)) {
+        message("The relay can't be used right now", why);
+        return;
+    }
+    sfx(SFX_SUCCESS);
+    snprintf(body, sizeof body, sv.state == SV_RUNNING ? "Friends join at %s within a minute" : "Friends join at %s once the server runs",
+             relay.address);
+    ui_toast_icon(ICON_NETWORK);
+    ui_toast("The supporter relay is on", body);
+}
+
 static void act_internet(int id)
 {
-    char why[220] = "";
+    char why[240] = "", body[200];
     switch (id) {
+    case N_RELAY:
+        relay_setup();
+        if (hs.relay) sel_id = N_RELAY_MEMBER;
+        break;
+    case N_RELAY_CHECK:
+        if (relay_up()) relay_check();
+        break;
+    case N_RELAY_MEMBER:
+        if (!relay_ask("status", NULL, why, sizeof why)) {
+            message("XenithOS Cloud couldn't be asked", why);
+        } else if (strcmp(relay.step, "ok")) {
+            relay_steps();                             /* what's missing, and Check again */
+        } else if (!strcmp(relay.state, "on")) {
+            sfx(SFX_SUCCESS);
+            ui_toast_icon(ICON_CHECK);
+            ui_toast("Your membership counts", relay.tier[0] ? relay.tier : relay.address);
+        }
+        break;
+    case N_RELAY_NAME:
+        if (relay_pick_name(1)) {
+            sfx(SFX_SUCCESS);
+            snprintf(body, sizeof body, "%s works within a minute", relay.address);
+            ui_toast_icon(ICON_NETWORK);
+            ui_toast("Your server has a new name", body);
+        }
+        break;
+    case N_RELAY_OFF:
+        relay_turn_off();
+        sel_id = N_RELAY;
+        break;
+    case N_RELAY_GIVEUP:
+        snprintf(body, sizeof body, "The relay stops passing players to your server, and %s is kept for you for a week, then "
+                                    "anyone can have it.", relay.address);
+        if (!ui_confirm("Give up the name?", body, "Give it up", "Cancel")) break;
+        if (!relay_ask("release", NULL, why, sizeof why)) {
+            message("The name wasn't given up", why);
+            break;
+        }
+        relay_turn_off();
+        sel_id = N_RELAY;
+        break;
     case N_VPS:
     case N_VPS_EDIT:
         vps_setup();
@@ -1168,6 +1372,7 @@ static void act(int id, int dir)
     case W_BACKUP: case W_RESTORE: case W_RESET: act_world(id); break;
     case N_ON: case N_OFF: case N_FORGET:
     case N_VPS: case N_VPS_CHECK: case N_VPS_STEPS: case N_VPS_EDIT: case N_VPS_FORGET: case N_VPS_OFF:
+    case N_RELAY: case N_RELAY_CHECK: case N_RELAY_MEMBER: case N_RELAY_NAME: case N_RELAY_OFF: case N_RELAY_GIVEUP:
         act_internet(id);
         break;
     }
@@ -1438,9 +1643,10 @@ static void draw_menu(int x, int y, int w)
             gfx_circle(x + w - 22.0f, (float)cy, 5, c, 255);
         } else if (i == P_INTERNET && hs.internet) {
             gfx_circle(x + w - 22.0f, (float)cy, 5, pi.state == PI_ON ? C_OK : pi.state == PI_PROBLEM ? C_BAD : C_WARN, 255);
-        } else if (i == P_INTERNET && hs.vps) {
-            uint32_t c = vps_up() && (vps.check_ok || !vps.check[0]) ? C_OK : sv.state != SV_RUNNING ? C_DIM
-                       : vps.why[0] || vps.check[0] ? C_BAD : C_WARN;
+        } else if (i == P_INTERNET && (hs.vps || hs.relay)) {
+            const struct way *wy = hs.relay ? &relay.w : &vps;
+            uint32_t c = way_up(wy) && (wy->check_ok || !wy->check[0]) ? C_OK : sv.state != SV_RUNNING ? C_DIM
+                       : wy->why[0] || wy->check[0] ? C_BAD : C_WARN;
             gfx_circle(x + w - 22.0f, (float)cy, 5, c, 255);
         } else if (i == P_PLAYERS && sv.nplayers) {
             char n[8];
@@ -1532,6 +1738,7 @@ int main(int argc, char **argv)
     sv_attach();
     pi_init();
     vps_init();
+    relay_init();
     ui_fade_in();
 
     for (;;) {
@@ -1565,6 +1772,10 @@ int main(int argc, char **argv)
                         int paper = !strcmp(hs.type, "paper");
                         /* The list from last time is enough to show what's newest; Check asks again. */
                         if (versions_get(paper, -1, &versions[paper], why, sizeof why)) versions_ok[paper] = 1;
+                    }
+                    if (page == P_INTERNET && hs.relay && (!relay.asked || ui_ms() - relay.asked > 10 * 60 * 1000)) {
+                        char why[240];
+                        relay_ask("status", NULL, why, sizeof why);   /* as it is now; without an answer, the last one shows */
                     }
                 }
             }

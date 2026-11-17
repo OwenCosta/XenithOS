@@ -1,9 +1,11 @@
 """A Minecraft server list ping, as a player's game sends it:
 
-    python3 sim/hostmc/ping.py HOST PORT
+    python3 sim/hostmc/ping.py HOST PORT [NAME]
 
 prints the server's answer (JSON) and exits 0, or exits 1 if no Minecraft server answered.
-sim/hostmc/test-vps.sh uses it as a player outside, reaching the server through the VPS."""
+NAME is the address the player typed, sent in the handshake, when it isn't HOST (a name on the
+supporter relay, connecting to the relay's own address). sim/hostmc/test-vps.sh and
+test-relay.sh use it as a player outside, reaching the server through the VPS or the relay."""
 import socket
 import struct
 import sys
@@ -36,7 +38,7 @@ def main():
     host, port = sys.argv[1], int(sys.argv[2])
     try:
         s = socket.create_connection((host, port), timeout=5)
-        name = host.encode()
+        name = (sys.argv[3] if len(sys.argv) > 3 else host).encode()
         body = varint(0) + varint(-1) + varint(len(name)) + name + struct.pack(">H", port) + varint(1)
         s.sendall(varint(len(body)) + body + bytes([1, 0]))
         length = read_varint(s)

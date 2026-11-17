@@ -32,7 +32,8 @@ struct hm_settings {
     int ram_mb;
     char eula[40];          /* when the EULA was agreed to; "" until it is */
     int internet;           /* playit.gg on */
-    int vps;                /* the player's own VPS on (one of the two at a time) */
+    int vps;                /* the player's own VPS on */
+    int relay;              /* the supporter relay on (one of the three at a time) */
     int told_detach;        /* has been told the server keeps running after HostMC */
 };
 extern struct hm_settings hs;
@@ -235,6 +236,7 @@ struct tunnel_cfg {
     char bind[48];                              /* where it listens: "0.0.0.0", or "" for sshd's choice */
     int public_port;                            /* what players connect to there */
     int local_port;                             /* the Minecraft server here */
+    int relay;                                  /* the supporter relay: its host key pinned, its own words */
 };
 struct tunnel {
     char dir[64];                               /* its folder (key, known_hosts, PID file, log) */
@@ -254,18 +256,45 @@ enum { TS_STOPPED, TS_CONNECTING, TS_UP, TS_RETRYING };
 int  tunnel_state(struct tunnel *t, const struct tunnel_cfg *c, char *why, int n, long long *attempt);
 int  tunnel_test(struct tunnel *t, const struct tunnel_cfg *c, char *why, int n);     /* log in and out */
 void tunnel_forget_host(struct tunnel *t);                              /* trust a new host key */
+int  tunnel_pin(struct tunnel *t, const struct tunnel_cfg *c, const char *hostkey);  /* the only key to trust */
 
-/* -------------------------------------------------------------- vps.c */
+/* -------------------------------------------------------------- way.c */
 
-/* The player's own VPS as the way in from the internet. */
-struct hm_vps {
+/* A way in from the internet through a tunnel that runs with the server: the player's own VPS
+ * (vps.c) or the supporter relay (relay.c). way.c starts and stops the tunnel with the server,
+ * follows its tries, and checks from outside each time it comes up. */
+struct way {
     struct tunnel_cfg cfg;
     struct tunnel t;
     char why[220];                              /* why the tunnel isn't up */
     char check[320];                            /* what the check from the internet found */
     int check_ok;
+    /* set by its owner */
+    const char *name, *Name;                    /* "your VPS", "Your VPS": in notes and toasts */
+    const int *on;                              /* its setting in hs */
+    const char *check_file;                     /* where the check's finding is kept */
+    void (*address)(char *out, int n);          /* what friends type */
+    void (*target)(char *host, int n, int *port);           /* where the check asks */
+    void (*finding)(const struct mcping *p, char *out, int n);   /* "" when friends get in */
+    /* way.c's */
+    struct mcping ping;
+    int checking, state;
+    uint64_t check_at, retry_at, next;
+    long long checked_try, told_try;            /* the tries in tunnel.log already checked, told */
 };
-extern struct hm_vps vps;
+void way_reset(struct way *w);                  /* nothing running, nothing found */
+void way_poll(struct way *w);
+void way_started(struct way *w);                /* the server is up */
+void way_stopped(struct way *w);                /* the server stopped */
+void way_off(struct way *w);
+void way_check(struct way *w);
+int  way_up(const struct way *w);
+const char *way_status(const struct way *w, uint32_t *color);
+
+/* -------------------------------------------------------------- vps.c */
+
+/* The player's own VPS as the way in from the internet. */
+extern struct way vps;
 void vps_init(void);
 void vps_load(void);
 void vps_save(void);
@@ -279,6 +308,36 @@ int  vps_checking(void);
 int  vps_up(void);
 void vps_address(char *out, int n);             /* what friends type */
 const char *vps_status(uint32_t *color);
+
+/* ------------------------------------------------------------ relay.c */
+
+/* The supporter relay as the way in: a name of their own on the relay, for supporters on
+ * Patreon, given out by XenithOS Cloud (see relay.c). */
+struct hm_relay {
+    struct way w;
+    int known;                                  /* XenithOS Cloud has answered once (relay/relay.txt) */
+    int open;                                   /* the relay is taking supporters */
+    char step[12];                              /* ok, link, patreon, tier, error */
+    char tier[44], name[24], state[12], address[96], domain[64], held[100], suggest[24];
+    char hostkey[100], patreon[160], account[160];
+    char message[240];                          /* what XenithOS Cloud says about where they are */
+    long long until;                            /* a lapsed name is kept until then */
+    uint64_t asked;                             /* when XenithOS Cloud was last asked (ui_ms) */
+};
+extern struct hm_relay relay;
+void relay_init(void);
+void relay_poll(void);
+/* Asks XenithOS Cloud: "status", "claim" (name) or "release", behind a loading screen. 0 with
+ * why set when it couldn't, or said no. */
+int  relay_ask(const char *what, const char *name, char *why, int n);
+int  relay_turn_on(char *why, int n);           /* turns the other ways off */
+void relay_turn_off(void);
+void relay_server_started(void);
+void relay_server_stopped(void);
+void relay_check(void);
+int  relay_up(void);
+void relay_address(char *out, int n);
+const char *relay_status(uint32_t *color);
 
 /* --------------------------------------------------------------- qr.c */
 
