@@ -10,7 +10,9 @@ Public
   GET  /v1/ping                       pong
   GET  /v1/lan                        key=value: id (this server's), and lan, its address on its
                                       own network when XENITH_LAN_ADDR is set. Consoles there use
-                                      that instead, once it answers with the same id.
+                                      that instead, once it answers with the same id. And https,
+                                      its HTTPS address when XENITH_PUBLIC_HTTPS is set, which PCs
+                                      and Raspberry Pis use the same way (the Xbox has no TLS).
   GET  /v1/status                     key=value server stats (does not log a console)
   GET  /v1/hello?name=Owen&ver=0.5    key=value: motd, players, online now (logs the console)
   GET  /v1/news                       id|unix_time|text   (newest first), XenithOS news
@@ -71,6 +73,10 @@ Environment
                      connection with a PROXY protocol v1 line naming the console's own address,
                      so XenithOS Cloud can run behind a home connection while consoles keep a
                      public address. Off when unset; only the relay should reach this port.
+  XENITH_EDGE_PORT   a port for Cloudflare's tunnel (cloudflared) to bring HTTPS requests to.
+                     Cloudflare names each console's own address in CF-Connecting-IP, which is
+                     used the way the relay's PROXY line is; a request without one gets no
+                     answer. Off when unset; only cloudflared should reach this port.
   XENITH_STATE_DIR   default ./state      (state.json lives here)
   XENITH_STORE_DIR   default ./store      (store.json + the files it lists, flathub.json, steam.json,
                                           and <id>.ximg / <id>.png thumbnails)
@@ -81,6 +87,9 @@ Environment
                      address each download was requested from
   XENITH_LAN_ADDR    the private "a.b.c.d:port" consoles on this server's own network can reach
                      it at directly, skipping the relay (/v1/lan). Off when unset.
+  XENITH_PUBLIC_HTTPS  the name (with :port when it isn't 443) PCs and Raspberry Pis can reach
+                     this server at over HTTPS, such as a Cloudflare tunnel's hostname whose
+                     service is XENITH_EDGE_PORT (/v1/lan). Off when unset.
   XENITH_DOWNLOAD_DIR default ./downloads   (install.sh, xenithos-source.tar.gz)
   XENITH_YTDLP, XENITH_FFMPEG  paths for Tube (default: found on PATH); Tube is off without them
   XENITH_TUBE_STREAMS default 3: videos playing at once, across everyone
@@ -131,6 +140,7 @@ AVATAR_COUNTS = [10, 14, 13, 8, 10, 8, 12, 11, 12, 6, 5, 5, 3]     # "2" + 13 di
 ONLINE_WINDOW = 15 * 60        # "online now": seen in the last 15 minutes
 PUBLIC_ADDR_RE = re.compile(r"^[A-Za-z0-9.-]{1,64}:[0-9]{1,5}$")
 LAN_ADDR_RE = re.compile(r"^([0-9]{1,3}(?:\.[0-9]{1,3}){3}):([0-9]{1,5})$")
+HTTPS_ADDR_RE = re.compile(r"^([A-Za-z0-9.-]{1,64})(?::([0-9]{1,5}))?$")
 PIN_RE = re.compile(r"^[0-9]{4,8}$")
 STATIC_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}\.(png|js|css|svg|ico|webp|wav)$")
 KINDS = {"app", "data", "system", "pc"}      # pc: XenithOS's source, which PCs and Pis build themselves
@@ -255,6 +265,18 @@ class RateLimit:
             hits.append(now)
             self.hits[key] = hits
             return True
+
+
+def rate_key(ip):
+    """What rate limits count by: the address, or an IPv6 address's /64, which is one home or
+    phone the way an IPv4 address is (and has more addresses than any limit)."""
+    try:
+        a = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if a.version == 6 and not a.ipv4_mapped:
+        return str(ipaddress.ip_network(f"{a}/64", strict=False))
+    return ip
 
 
 # ---------------------------------------------------------------------- state
@@ -1065,6 +1087,12 @@ def store_bundle(store, pc):
     return b"".join(out)
 
 
+def https_addr_ok(addr):
+    """XENITH_PUBLIC_HTTPS: a name, or name:port, for PCs (linux/http_posix.c)."""
+    m = HTTPS_ADDR_RE.match(addr or "")
+    return bool(m) and not addr.startswith((".", "-")) and (not m.group(2) or 0 < int(m.group(2)) < 65536)
+
+
 def lan_addr_ok(addr):
     """XENITH_LAN_ADDR: a private IPv4 address and port (the Xbox has no DNS)."""
     m = LAN_ADDR_RE.match(addr or "")
@@ -1095,6 +1123,8 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
     class Handler(BaseHTTPRequestHandler):
         server_version = "XenithOS-Cloud/" + VERSION
         protocol_version = "HTTP/1.0"
+        https = ""                                # XENITH_PUBLIC_HTTPS, which serve() sets: for /v1/lan
+        secure = False                            # the request came over HTTPS (edge())
 
         def log_message(self, fmt, *args):
             line = fmt % args
@@ -1144,7 +1174,8 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 return self.reply(200, "pong\n")
 
             if parts == ["v1", "lan"]:
-                return self.reply(200, kv({"id": server_id, **({"lan": lan} if lan else {})}), cache="no-store")
+                return self.reply(200, kv({"id": server_id, **({"lan": lan} if lan else {}),
+                                           **({"https": self.https} if self.https else {})}), cache="no-store")
 
             if parts == ["v1", "status"]:
                 lines = {"motd": state.data["motd"], "server": "XENITHOS CLOUD " + VERSION,
@@ -1229,7 +1260,9 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                     script = f.read()
                 addr = public_addr(self, public)
                 host = (self.headers.get("Host") or "").strip()
-                source = f"http://{host}/download/xenithos-source.tar.gz" if PUBLIC_ADDR_RE.match(host) or re.match(r"^[A-Za-z0-9.-]{1,64}$", host) else ""
+                # The source the way this script came: over HTTPS when it did.
+                scheme = "https" if self.secure else "http"
+                source = f"{scheme}://{host}/download/xenithos-source.tar.gz" if PUBLIC_ADDR_RE.match(host) or re.match(r"^[A-Za-z0-9.-]{1,64}$", host) else ""
                 script = script.replace("@XENITHOS_SERVER@", addr).replace("@XENITHOS_SOURCE@", source)
                 return self.reply(200, script.encode(), "text/plain; charset=utf-8", "no-store")
 
@@ -1314,6 +1347,7 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 return self.error(413, "Too large.")
             form = {k: v[0] for k, v in parse_qs(body, keep_blank_values=True).items()}
             ip = self.client_address[0]
+            limit_key = rate_key(ip)
 
             if parts == ["v1", "accounts", "create"]:
                 name, pin, avatar = form.get("name", "").strip(), form.get("pin", ""), form.get("avatar", "")
@@ -1324,7 +1358,7 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                     return self.error(400, "Passcodes are 4 to 8 digits.")
                 if not valid_avatar(avatar):
                     return self.error(400, "That avatar code isn't valid.")
-                if not creates.allow(ip):
+                if not creates.allow(limit_key):
                     return self.error(429, "Too many new profiles from this network. Try again later.")
                 result, err = state.create(name, pin, avatar)
                 if err:
@@ -1332,7 +1366,7 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 return self.session_reply(*result)
 
             if parts == ["v1", "accounts", "login"]:
-                if not logins.allow(ip):
+                if not logins.allow(limit_key):
                     return self.error(429, "Too many sign-in attempts. Wait a few minutes.")
                 result, err = state.login(form.get("name", "").strip(), form.get("pin", ""))
                 if err:
@@ -1346,7 +1380,7 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                 if len(text) < 3:
                     return self.error(400, "Write a little more.")
                 acc = state.by_token(form.get("token", ""))
-                if not feedback_by_ip.allow(ip) or (acc and not feedback_by_name.allow(acc["name"])):
+                if not feedback_by_ip.allow(limit_key) or (acc and not feedback_by_name.allow(acc["name"])):
                     return self.error(429, "That's a lot of feedback at once. Try again in a while.")
                 who = acc["name"] if acc else "Guest"
                 version, platform = clean(form.get("version", ""), 16) or "?", clean(form.get("platform", ""), 32) or "?"
@@ -1429,9 +1463,9 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                         return self.error(409, "That name belongs to a profile. Sign in to use it.")
                 with last_score_lock:
                     now = time.monotonic()
-                    if now - last_score.get(ip, -1e9) < SCORE_COOLDOWN_S:
+                    if now - last_score.get(limit_key, -1e9) < SCORE_COOLDOWN_S:
                         return self.error(429, "Slow down a little.")
-                    last_score[ip] = now
+                    last_score[limit_key] = now
                 rank, entry = state.submit(parts[2], name, score)
                 return self.reply(200, f"{rank or 0}|{entry['name']}|{entry['score']}\n")
 
@@ -1491,9 +1525,32 @@ def proxied(handler):
     return Proxied
 
 
+def edge(handler):
+    """handler, for requests from Cloudflare's tunnel (XENITH_EDGE_PORT), which came over HTTPS.
+    Cloudflare names the console's own address in CF-Connecting-IP, and that's used as
+    client_address (logs, rate limits, who's online); every request through the tunnel would
+    otherwise come from cloudflared's one address. One without a good address gets no answer."""
+    class Edge(handler):
+        secure = True
+        timeout = 300                         # a connection that stalls doesn't keep its thread
+
+        def parse_request(self):
+            if not super().parse_request():
+                return False
+            try:
+                ip = ipaddress.ip_address((self.headers.get("CF-Connecting-IP") or "").strip())
+            except ValueError:
+                return False
+            self.client_address = (str(ip), self.client_address[1])
+            return True
+
+    return Edge
+
+
 def serve():
     port = int(os.environ.get("XENITH_PORT", "8795"))
     proxy_port = int(os.environ.get("XENITH_PROXY_PORT", "0") or 0)
+    edge_port = int(os.environ.get("XENITH_EDGE_PORT", "0") or 0)
     state = State(os.environ.get("XENITH_STATE_DIR", "state"))
     store = Store(os.environ.get("XENITH_STORE_DIR", "store"))
     admin_key = os.environ.get("XENITH_ADMIN_KEY", "")
@@ -1513,6 +1570,10 @@ def serve():
     if lan and not lan_addr_ok(lan):
         log(f"XENITH_LAN_ADDR must be a private a.b.c.d:port, not {lan!r}; consoles won't be told one")
         lan = ""
+    https = os.environ.get("XENITH_PUBLIC_HTTPS", "").strip()
+    if https and not https_addr_ok(https):
+        log(f"XENITH_PUBLIC_HTTPS must be a name or name:port, not {https!r}; PCs won't be told one")
+        https = ""
     with state.lock:                          # tells this server apart from another at that address
         if not state.data.get("server_id"):
             state.data["server_id"] = secrets.token_hex(8)
@@ -1527,11 +1588,19 @@ def serve():
 
     handler = make_handler(state, store, admin_key, web_dir, console_key, tube, public, downloads, lan, server_id)
     httpd = ThreadingHTTPServer(("0.0.0.0", port), handler)
+    handler.https = https
     httpd.daemon_threads = True
     if proxy_port:
         relayed = ThreadingHTTPServer(("0.0.0.0", proxy_port), proxied(handler))
         relayed.daemon_threads = True
         threading.Thread(target=relayed.serve_forever, daemon=True).start()
+    if edge_port:
+        edged = ThreadingHTTPServer(("0.0.0.0", edge_port), edge(handler))
+        edged.daemon_threads = True
+        threading.Thread(target=edged.serve_forever, daemon=True).start()
+        print(f"Cloudflare's tunnel on :{edge_port}", flush=True)
+    if https:
+        print(f"PCs and Raspberry Pis are told to use https://{https}", flush=True)
     tube_mode = ("on, Deno and PO tokens when needed" if tube.deno and tube.plugins else
                  "on, Deno when needed" if tube.deno else "on") if tube.available() else "off"
     print(f"XenithOS Cloud {VERSION} on :{port}{f' (relay on :{proxy_port})' if proxy_port else ''} "
@@ -1733,6 +1802,17 @@ else:
     check("lan address must be private and numeric",
           lan_addr_ok("192.168.50.145:8795") and lan_addr_ok("10.0.0.2:80") and not lan_addr_ok("37.1.2.3:8795")
           and not lan_addr_ok("keystone:8795") and not lan_addr_ok("192.168.1.2") and not lan_addr_ok("192.168.1.2:0"))
+    httpd.RequestHandlerClass.https = "cloud.example.org"         # XENITH_PUBLIC_HTTPS
+    code, body = req("GET", "/v1/lan")
+    check("lan: and the HTTPS address, when there is one", code == 200 and kvparse(body) ==
+          {"id": "5e4e1d", "lan": "192.168.1.20:8795", "https": "cloud.example.org"})
+    check("https address: a name, or name:port",
+          https_addr_ok("cloud.example.org") and https_addr_ok("localhost:8443") and not https_addr_ok("https://x.org")
+          and not https_addr_ok("x.org/path") and not https_addr_ok("-x.org") and not https_addr_ok("x.org:0")
+          and not https_addr_ok("x.org:99999") and not https_addr_ok(""))
+    check("rate limits count an IPv6 /64 as one address",
+          rate_key("2001:db8:1:2::5") == rate_key("2001:db8:1:2:ffff::9") != rate_key("2001:db8:1:3::5")
+          and rate_key("203.0.113.7") == "203.0.113.7" and rate_key("::ffff:203.0.113.7") == "::ffff:203.0.113.7")
 
     # Accounts
     code, body = req("POST", "/v1/accounts/create", "name=Owen&pin=1234&avatar=1202001000")
@@ -1944,6 +2024,58 @@ else:
     check("tube stop ends a slow ask", slow and not slow.helper and time.monotonic() - t0 < 3
           and req("GET", f"/v1/tube/chunk?s={sid}&off=0")[0] == 410)
     check("tube thumb bad id", req("GET", "/v1/tube/thumb/..x.jpg")[0] == 404)
+
+    # Cloudflare's tunnel (XENITH_EDGE_PORT): CF-Connecting-IP names the console
+    import socket
+    edged = ThreadingHTTPServer(("127.0.0.1", 0), edge(httpd.RequestHandlerClass))
+    edged.daemon_threads = True
+    threading.Thread(target=edged.serve_forever, daemon=True).start()
+
+    def send_raw(port, data):
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+            sock.sendall(data)
+            out = b""
+            while True:
+                part = sock.recv(65536)
+                if not part:
+                    return out
+                out += part
+
+    def via_tunnel(method, path, ip, body=""):
+        head = f"{method} {path} HTTP/1.1\r\nHost: cloud.example.org\r\nConnection: keep-alive\r\n"
+        head += f"CF-Connecting-IP: {ip}\r\n" if ip else ""
+        head += f"Content-Length: {len(body)}\r\n" if body else ""
+        return send_raw(edged.server_address[1], (head + "\r\n" + body).encode())
+
+    def code_of(out):
+        return (out.split(b" ", 2) + [b"", b""])[1]
+
+    out = via_tunnel("GET", "/v1/hello?name=TUNNELED&ver=0.6", "198.51.100.4")
+    check("edge: CF-Connecting-IP accepted", out.startswith(b"HTTP/1.0 200") and b"motd=" in out)
+    check("edge: the console's own address is recorded",
+          state.data["consoles"].get("TUNNELED", {}).get("ip") == "198.51.100.4")
+    check("edge: no CF-Connecting-IP, no answer", via_tunnel("GET", "/v1/ping", "") == b"")
+    check("edge: a bad address, no answer", via_tunnel("GET", "/v1/ping", "999.1.1.1") == b"")
+    send_raw(httpd.server_address[1], b"GET /v1/hello?name=DIRECTCF&ver=0.6 HTTP/1.0\r\n"
+                                      b"CF-Connecting-IP: 198.51.100.9\r\n\r\n")
+    check("edge: the direct port ignores CF-Connecting-IP",
+          state.data["consoles"].get("DIRECTCF", {}).get("ip") == "127.0.0.1")
+
+    def score(ip, name):
+        return code_of(via_tunnel("POST", "/v1/scores/volt", ip, f"name={name}&score=5"))
+
+    check("edge: rate limits go by each console's address",
+          score("198.51.100.4", "EDGEA") == b"200" and score("198.51.100.4", "EDGEA") == b"429"
+          and score("198.51.100.5", "EDGEB") == b"200")
+    check("edge: an IPv6 /64 counts as one address",
+          score("2001:db8:1:2::5", "EDGEC") == b"200" and score("2001:db8:1:2::6", "EDGEC") == b"429"
+          and score("2001:db8:1:3::5", "EDGED") == b"200")
+    check("edge: install.sh gets the source over HTTPS too",
+          b'SOURCE_URL="https://cloud.example.org/download/xenithos-source.tar.gz"' in
+          via_tunnel("GET", "/install.sh", "198.51.100.4"))
+    check("edge: install.sh from the direct port stays plain",
+          b'SOURCE_URL="http://127.0.0.1:' in req("GET", "/install.sh")[1])
+    edged.shutdown()
 
     # A relay's connections (XENITH_PROXY_PORT): the PROXY line names the console
     import socket

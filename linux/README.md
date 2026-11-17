@@ -76,6 +76,26 @@ In the on-screen keyboard you can type on the real keyboard: letters type, Backs
 XenithOS's own apps (VOLT, DOOM, Tube, Photos, and HostMC on PCs) come with it on PCs and Pis. The Store has three sections here
 (LB and RB switch between them): **Apps** from Flathub, **Steam**, and **XenithOS** (updates and game data).
 
+## XenithOS Cloud over HTTPS
+
+The Xbox talks to XenithOS Cloud over plain HTTP, since it has no TLS. PCs and Pis use HTTPS when XenithOS Cloud
+has an HTTPS address, so passcodes, sign-ins and everything else can't be read on the way.
+
+- Each time XenithOS starts it asks the address in `config.txt` what else it answers at (`/v1/lan`). When that
+  names an HTTPS address, and the server answers there as itself with a certificate this machine trusts for
+  that name, everything goes there until the next start: profiles, the Store, Tube, scores. Settings > System
+  info says "Connected securely".
+- The address is kept in `uda:/xenith/route.txt` (`https=`) for the apps, next to the home-network address.
+  At home that one still comes first, with HTTPS as the way out if the machine leaves.
+- If the HTTPS address doesn't answer, or its certificate doesn't check out, XenithOS stays on plain HTTP for
+  that start, and says why in `~/.config/xenithos/xenithos.log`. If the address in `config.txt` doesn't answer
+  at all, it keeps the HTTPS address it had.
+- `config.txt` can say `server=https://name` itself (with `:port` when it isn't 443).
+- It's the system's OpenSSL (libssl, which ca-certificates needs, so every Debian, Ubuntu and Raspberry Pi OS
+  has it), opened when it's first needed, and the system's certificates. Building XenithOS doesn't need
+  OpenSSL's headers, so updates from the Store build as before.
+- `sim/test-https.sh` tries all of it here, with a stand-in for Cloudflare (`sim/tls_proxy.py`).
+
 ## Apps from Flathub, and Steam
 
 The Store's Apps section lists apps from [Flathub](https://flathub.org) that XenithOS Cloud picks

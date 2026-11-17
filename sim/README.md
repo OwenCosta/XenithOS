@@ -13,6 +13,12 @@ XSIM_BIN=xvolt sim/run.sh sim/scripts/volt.txt volt
 the USB stick (copied from `usb/`, so run `build.sh` first). Pass a server like `127.0.0.1:8795` to test the
 online screens against a local `server/xenith_cloud.py`.
 
+The network is the PC's own client (`linux/http_posix.c`, through `net_sim.c`). Playing an Xbox it takes only
+`a.b.c.d:port`, like the console; with `XSIM_KIND=pc` it takes names and `https://` addresses too.
+`sim/test-https.sh` checks HTTPS on PCs end to end: a local XenithOS Cloud behind `sim/tls_proxy.py` (a stand-in
+for Cloudflare's edge and tunnel, with certificates from a test authority it makes), the simulator as PCs and an
+Xbox, and the server's log to see which way each request came. Screenshots go to `sim/out/https`.
+
 Environment: `XSIM_KEY` (console key for the inbox), `XSIM_PROFILE` (a profile.txt to boot signed in),
 `XSIM_BIN` (`xsim` or `xvolt`).
 

@@ -1,0 +1,9 @@
+# Tube: a search for the first suggestion, signed in (XSIM_PROFILE). sim/test-https.sh uses it to
+# see an app send its token the way route.txt says (its XenithOS Cloud has no Tube, so the search
+# itself fails).
+wait 30
+press down
+press a
+wait 120
+shot tube_searched
+quit
