@@ -6,7 +6,10 @@
 Search, pick a video and it plays in the window. Space pauses, Left and Right skip 10 seconds,
 F11 fills the screen and Esc goes back. It signs in with the XenithOS profile XenithOS Console
 uses (Tube needs one), through the same XenithOS Cloud: the address is in XenithOS Console's
-uda:/xenith/config.txt and the profile in uda:/xenith/profile.txt.
+uda:/xenith/config.txt and the profile in uda:/xenith/profile.txt. Tube goes the way XenithOS
+Console found at its last start (uda:/xenith/route.txt): XenithOS Cloud's address on this
+network, otherwise its HTTPS address when it has one, so the profile's token isn't sent in the
+clear away from home.
 
 XenithOS Cloud does the YouTube part, as for the console (shared there with yt-dlp and ffmpeg):
 POST /v1/tube/search and /v1/tube/start, GET /v1/tube/thumb/<id>.jpg, /v1/tube/chunk and
@@ -14,6 +17,7 @@ POST /v1/tube/search and /v1/tube/start, GET /v1/tube/thumb/<id>.jpg, /v1/tube/c
 which works out what it is. Tube asks for a stream made for a PC (q=pc); a Cloud that doesn't
 make those sends the console's (426x240 pictures), which plays the same way.
 """
+import http.client
 import os
 import sys
 import threading
@@ -81,15 +85,22 @@ def read_kv(name):
 
 
 def addresses():
-    """Where XenithOS Cloud is: its address on this network first, when XenithOS Console found
-    it there (route.txt), then its own."""
+    """Where XenithOS Cloud is, as base addresses: its address on this network first, when
+    XenithOS Console found it there (route.txt), then its HTTPS address if XenithOS Console found
+    one, else the address in config.txt. Like XenithOS Console, never plain HTTP away from home
+    once there's an HTTPS address."""
     main = read_kv("config.txt").get("server", "").strip()
-    route = read_kv("route.txt")
+    if not main:
+        return []
+    route = {k: v.strip() for k, v in read_kv("route.txt").items()}
     out = []
-    if main and route.get("for") == main and route.get("lan") and route.get("id"):
-        out.append(route["lan"])
-    if main:
-        out.append(main)
+    away = main if main.startswith(("http://", "https://")) else "http://" + main
+    if route.get("for") == main:                    # written for this XenithOS Cloud
+        if route.get("lan") and route.get("id"):
+            out.append("http://" + route["lan"])
+        if route.get("https", "").startswith("https://"):
+            away = route["https"]
+    out.append(away.rstrip("/"))
     return out
 
 
@@ -112,8 +123,10 @@ class Cloud:
         """(status, body bytes); status 0 when no address answered."""
         data = urllib.parse.urlencode(fields).encode() if fields is not None else None
         for i, server in enumerate(self.servers):
-            req = urllib.request.Request(f"http://{server}{path}", data=data, method=method)
-            req.add_header("User-Agent", "XenithOS-Tube-Desktop")
+            req = urllib.request.Request(server + path, data=data, method=method)
+            # As XenithOS Console introduces itself: Cloudflare, in front of the HTTPS address,
+            # turns Python's own User-Agent away.
+            req.add_header("User-Agent", "XenithOS/0.4 (XenithOS Desktop; Tube)")
             try:
                 with urllib.request.urlopen(req, timeout=timeout) as r:
                     if i:                   # the network route didn't answer: stay with this one
@@ -121,7 +134,7 @@ class Cloud:
                     return r.status, r.read()
             except urllib.error.HTTPError as e:
                 return e.code, e.read()
-            except (urllib.error.URLError, OSError):
+            except (OSError, ValueError, http.client.HTTPException):
                 continue
         return 0, b""
 

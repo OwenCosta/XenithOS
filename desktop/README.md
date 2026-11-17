@@ -111,7 +111,9 @@ menu. All of them keep XenithOS Console's data, so scores, saves and HostMC's se
   through XenithOS Cloud as XenithOS Console's Tube does, signed in with the same XenithOS profile (sign
   in on XenithOS Console first). Space pauses, Left and Right skip 10 seconds, F11 fills the screen. It
   plays with GStreamer, and asks the Cloud for a stream made for a PC (`q=pc`); a Cloud that doesn't make
-  those sends the console's 426x240 one, which plays the same way, just less sharply.
+  those sends the console's 426x240 one, which plays the same way, just less sharply. It goes the way
+  XenithOS Console found at its last start (`route.txt`): XenithOS Cloud's address on the home network,
+  otherwise its HTTPS address when there is one, so the profile's token isn't sent in the clear.
 
 **Your own apps** go on XenithOS Console's home screen too: Settings > Console apps lists the apps on the
 PC (with a box to find one), each with an Add button, and Remove once it's there. Any app with an entry in
@@ -139,6 +141,12 @@ the desktop when updates are ready. No terminal, and no writing the USB stick ag
 - XenithOS Desktop's own parts are four packages (`xenithos-archive`, `xenithos-desktop`,
   `xenithos-desktop-apps`, `xenithos-security-tools`). An update is a bundle of them, signed with XenithOS
   Desktop's key; the updater checks the signature before it installs anything, and apt does the installing.
+- XenithOS Console's updates come from XenithOS Cloud's Store, as on XenithOS Console itself
+  (`rootfs/usr/lib/xenithos-desktop/consoleupdate.py`). The Store's list has to come signed with XenithOS
+  Cloud's key, the one XenithOS Console checks since 0.7.0; the download is checked against the SHA-256 in
+  that list, and only a newer version is ever installed. It asks the way XenithOS Console found at its last
+  start (home network, then HTTPS, then the address in `config.txt`); the signature is what's trusted.
+  `~/.cache/xenithos-update/last-check.txt` says what the last check found at each address.
 - An update that's cut off (the power goes, say) is finished the next time the PC starts.
 - Where updates come from is in `channel.txt` (built into every install). The addresses are tried in order.
 - Ubuntu's security fixes also install themselves once a day.
