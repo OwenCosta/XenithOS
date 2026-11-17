@@ -2,12 +2,15 @@
 # every script in sim/scripts, XenithOS Cloud's self-tests, HostMC's tests and the Xbox 360 build.
 # Each step runs the same commands as on a PC (README.md, "Checks").
 #
-# On every push and pull request, and twice a week, which keeps the Xbox toolchain in the cache
-# (GitHub drops a cache nobody has used for a week, and building it again takes about an hour).
+# On every push to a branch and every pull request, and twice a week, which keeps the Xbox
+# toolchain in the cache (GitHub drops a cache nobody has used for a week, and building it again
+# takes about an hour). Not when a tag moves: desktop-stable and desktop-2-stable are tags that
+# installed PCs update from, and they point at commits that were checked on their branch.
 name: CI
 
 on:
   push:
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
   schedule:
