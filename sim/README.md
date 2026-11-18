@@ -59,6 +59,8 @@ More switches:
   signed` or `... refused`.
 - `XSIM_NET_TIME=1` lets virtual time pass while waiting on the network, as real time does on a console, so a
   screen that draws during a download (the Store's downloads queue) gets its frames and reads its buttons then.
+- `XSIM_NET_UP=1` starts with the network up, as a PC's simply is. Otherwise it's down until something asks
+  for it, as on the Xbox, so an app that never needs it (VOLT before uploading a score) says Offline.
 - `XSIM_DESKTOP=1` runs the program as a desktop app, as XenithOS Desktop's Apps menu opens it
   (`plat_desktop()`): the script drives a mouse and the keyboard's own keys too (below), and
   `XSIM_CLIPBOARD` is what's been copied when it starts (what the program copies is said on stderr, as
