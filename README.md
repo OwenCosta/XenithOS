@@ -26,7 +26,7 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
   XenithOS.
 - Cloud: your friends who are on, XenithOS news, and the VOLT leaderboard with avatars
 - Friends: ask someone by their gamertag and they say yes on their own console. Friends see who's on and what
-  they're playing (also as a notification when one comes on), and the address of a friend's HostMC server to
+  they're playing (also as a notification when one comes on), and the address of a friend's MineNest server to
   join. "Show friends what I'm playing" in Settings keeps that to yourself.
 - Profile: a gamertag and passcode, saved to XenithOS Cloud so it follows you to any machine
 - Cloud saves: DOOM's saves and settings, and XenithOS's own (interface sounds, the start-up chime), follow
@@ -34,7 +34,7 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
   sharing a console never mix saves. If a save changed on two machines before they matched up, XenithOS
   asks which one to keep; nothing is replaced without asking. Profile, Cloud saves shows what's kept (up to
   4 MB) and deletes it; Settings turns them off for one machine.
-- Achievements: fifteen across VOLT, DOOM, Tube and HostMC, earned on the machine (offline too: they wait on
+- Achievements: fifteen across VOLT, DOOM, Tube and MineNest, earned on the machine (offline too: they wait on
   the stick until XenithOS is online) and kept on your profile. Profile shows yours, the Cloud screen the ones
   just earned by anyone, and the website everyone's.
 - Avatar editor: thirteen parts in three tabs (face, hair, outfit), colour swatches, random looks
@@ -62,11 +62,14 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
 - Music: your own songs (MP3, OGG, FLAC, WAV) from a `music` folder on the USB stick, or `~/Music` on a PC, by
   album (with covers from a cover.jpg or inside the songs), artist or song. Shuffle, repeat, and it keeps
   playing while you look around. See the table below.
-- HostMC (PCs and Pis): a Minecraft: Java Edition server for you and your friends, Minecraft's own or Paper.
-  Start and stop it, see who's on, type commands, change its settings, back the world up, and with
-  [playit.gg](https://playit.gg) turned on, let friends join from anywhere. It keeps running after you leave
-  HostMC, so you can play on it. Your friends on XenithOS see its address in Friends while it's reachable.
-  See [linux/README.md](linux/README.md#hostmc-a-minecraft-server).
+- MineNest (PCs and Pis): Minecraft servers for you and your friends. It used to be HostMC; it's its own
+  project now, [MineNest](https://github.com/OwenCosta/minenest), and the app is its screen on XenithOS.
+  Paper, Purpur, Fabric, NeoForge, Forge or Minecraft's own, any version; mods, plugins and modpacks from
+  Modrinth; start and stop, see who's on, type commands, change settings, back the world up; friends join
+  through [playit.gg](https://playit.gg), a VPS of your own, or, for supporters on Patreon, the supporter
+  relay with a name of its own. Servers keep running after you leave the app, and your friends on XenithOS
+  see the address in Friends. On XenithOS Desktop it opens MineNest's own window.
+  See [linux/README.md](linux/README.md#minenest-minecraft-servers).
 
 | DOOM control | |
 |---|---|
@@ -159,7 +162,7 @@ updates all of it (ffmpeg, Deno, the yt-dlp standalone build, the plugin and the
 download against its published checksum.
 
 ```bash
-python3 server/xenith_cloud.py --selftest      # 238 checks, no network needed
+python3 server/xenith_cloud.py --selftest      # 302 checks, no network needed
 ```
 
 Profiles: passcodes are stored as salted PBKDF2 hashes and sign-in tokens as SHA-256 hashes, so the state
@@ -189,7 +192,7 @@ Friends: requests only become friends once the other person says yes, a "no" sto
 again for a week, and requests are rate limited per profile. Consoles say hello with what's running when
 they start something (and every minute or so on the home screen); only friends see it. What someone plays is
 kept in memory, never in the state file, and with "Show friends what I'm playing" off it isn't even sent. A
-HostMC server's address is shown to friends while HostMC says people on the internet can reach it, and for a
+MineNest server's address is shown to friends while MineNest says people on the internet can reach it, and for a
 day after.
 
 Cloud saves: each file is kept as it came, in `saves/` in the state folder (in folders named by a random id,
@@ -228,6 +231,20 @@ bash /opt/xenith-cloud/setup-tube.sh
 
 From the server: `xenith send "XenithOS 0.5 is out"` (news), `xenith motd "Welcome"` (banner), `xenith status`,
 `xenith tube-update` (newest yt-dlp, Deno and token helper, when YouTube changes something).
+
+The supporter relay (off unless `XENITH_RELAY_DOMAIN` is set) gives supporters on Patreon a name for their
+MineNest server and tells the relay machine (`server/mcrelay/`, a VPS of its own) the names, ports and
+MineNest keys, and which servers want players' real addresses (Paper), which the relay's router then sends them
+in a PROXY protocol header, in syncs signed both ways with a secret the two share. Who's a supporter comes from OCAccounts
+(`XENITH_OCACCOUNT_URL`). `xenith relay list`, `xenith relay off <name>`, `xenith relay on <name>` and
+`xenith relay check <name>` look after it. Setting it up: [server/mcrelay/README.md](server/mcrelay/README.md).
+
+MineNest signs in with an OCAccount through XenithOS Cloud (`/v1/oc/start`, `callback`, `poll`): it's an
+OCAccounts client of its own (`XENITH_OC_CLIENT_ID` and `XENITH_OC_CLIENT_SECRET`, from
+`owencosta_web.py client add`, with the redirect `https://<XENITH_PUBLIC_HTTPS>/v1/oc/callback`), and the
+XenithOS profile linked to the OCAccount is the one signed in. Supporters can use MineNest from anywhere at
+`/remote/`: their MineNest keeps asking `/v1/remote/poll` for what their browser asked for, and answers at
+`/v1/remote/reply`. Off without the supporter relay (it checks who's a supporter the same way).
 
 ## Building
 
@@ -273,8 +290,7 @@ the same on a PC:
 make -C linux                                 # the PC version, as Ubuntu 24.04 and Debian 12 build it
 sim/test-scripts.sh                           # every simulator script: ASan, UBSan, the tiled framebuffer
 python3 server/xenith_cloud.py --selftest     # and server/xenith-relay.py --selftest
-linux/test-hostmc.sh                          # HostMC on a PC, in a virtual display
-sim/hostmc/test-vps.sh                        # HostMC's own-VPS route, with a private sshd
+MINENEST_BIN=path/to/minenest linux/test-minenest.sh   # MineNest on a PC, in a virtual display
 ./build.sh                                    # the Xbox 360 build
 ```
 
@@ -302,7 +318,7 @@ shared/crash.h           crash reports: crash files (linux/crash_linux.c on PCs,
 shared/net_*.c           HTTP client: lwIP on the Xbox (linux/net_posix.c and sim/net_sim.c elsewhere)
 source/store_sig.c       checks the Store's signatures (the key: store_key.h; ed25519: shared/monocypher*.c)
 apps/volt, doom, tube,   the apps
-  photos, music, hostmc  (hostmc is for PCs only: it has no Xbox Makefile)
+  photos, music, minenest (minenest is for PCs only: it has no Xbox Makefile)
 linux/apps_linux.c       apps from Flathub (Flatpak) and Steam's library, on PCs
 linux/kiosk.c            console mode's window manager: apps' windows over XenithOS on its own X server
 shared/picture.c         JPEG, PNG, BMP and GIF through stb_image
@@ -320,7 +336,7 @@ themes, high contrast and bigger text work in it too; `ui_poll()` hands over the
 moved them. `build.sh`
 picks up every folder in `apps/` that has a Makefile; add `app.txt` (name, version) and `art/thumbs/<name>.ximg`
 for its tile, a target in `linux/Makefile` for PCs, and its name to the lists in `linux/install.sh` and
-`linux/update.sh`. An app for PCs only (like HostMC) leaves the Makefile out.
+`linux/update.sh`. An app for PCs only (like MineNest) leaves the Makefile out.
 
 ## License
 
@@ -345,8 +361,9 @@ XenithOS is licensed under the **GNU GPL v3.0**, see [LICENSE](LICENSE).
 - Apps from Flathub and Steam aren't part of XenithOS: Flatpak downloads them from Flathub on your machine,
   under their own licenses. Sober is a VinegarHQ project, not affiliated with Roblox.
 - Freedoom (served by the Store, not included here) is BSD licensed, see [freedoom.github.io](https://freedoom.github.io).
-- What HostMC downloads isn't part of XenithOS either: the Minecraft server (Mojang's, under Minecraft's EULA,
-  which you agree to in HostMC first), Paper, Eclipse Temurin and playit.gg's agent come from their makers to
+- MineNest's program, and what it downloads, aren't part of XenithOS: MineNest comes from its own repository
+  (GPL-3.0), and the Minecraft server (Mojang's, under Minecraft's EULA, which you agree to in MineNest first),
+  Paper and the other servers, Eclipse Temurin, Modrinth's mods and playit.gg's agent come from their makers to
   your machine, under their own licenses.
 
 Not affiliated with or endorsed by Microsoft, Mojang, Google, YouTube, id Software, Valve, Roblox or playit.gg.

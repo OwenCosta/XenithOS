@@ -15,6 +15,7 @@ sim/xtube
 sim/xphotos
 sim/xhostmc
 sim/xmusic
+sim/xminenest
 linux/xenithos
 linux/volt
 linux/doom
@@ -22,4 +23,5 @@ linux/tube
 linux/photos
 linux/hostmc
 linux/music
+linux/minenest
 desktop/out/

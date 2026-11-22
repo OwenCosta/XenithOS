@@ -251,7 +251,7 @@ void screen_profile(void)
         };
         static const struct action member[] = {
             {ICON_PALETTE, "Change avatar", "Edit your look"},
-            {ICON_TROPHY, "Achievements", "Earned in VOLT, DOOM, Tube and HostMC"},
+            {ICON_TROPHY, "Achievements", "Earned in VOLT, DOOM, Tube and MineNest"},
             {ICON_CLOUD, "Cloud saves", "Saves and settings that follow you between machines"},
             {ICON_SIGN_OUT, "Sign out", "Play as a guest on this console"},
         };

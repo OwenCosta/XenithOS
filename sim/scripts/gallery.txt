@@ -15,6 +15,13 @@ shot shot-cloud
 press b
 wait 20
 press right
+press a
+wait 80
+press down
+wait 20
+shot shot-friends
+press b
+wait 20
 press right
 press a
 wait 60

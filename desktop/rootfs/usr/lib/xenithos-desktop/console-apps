@@ -22,6 +22,11 @@
 # the desktop's Apps menu, and opens on the desktop by itself. The entries are files of yours,
 # ~/.local/share/applications/xenithos-app-APP.desktop; console-menu.list says which group each
 # app goes in.
+#
+# MineNest also gets an icon on the desktop itself, next to Brave's and Files', while it's on the
+# home screen: xenithos-app-minenest.desktop on the desktop, the same as its Apps menu entry. It's
+# put there the first time MineNest is on the home screen and goes when MineNest does. One you delete
+# stays deleted, and one you change is yours (~/.config/xenithos/desktop-icons keeps track).
 set -u
 LIST=/usr/share/xenithos-desktop/console-apps.list
 LIB=${XENITHOS_LIB:-/usr/lib/xenithos}
@@ -33,11 +38,21 @@ CHOSEN="${XDG_CONFIG_HOME:-$HOME/.config}/xenithos/console-apps"
 MENU="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 MENU_LIST=/usr/share/xenithos-desktop/console-menu.list
 ICONS=/usr/share/icons/XenithOS/scalable/apps
+ON_DESKTOP="minenest"             # the apps with an icon on the desktop too
+PLACED="${XDG_CONFIG_HOME:-$HOME/.config}/xenithos/desktop-icons"    # "APP SHA-256" of each icon put there
+DESK=$(xdg-user-dir DESKTOP 2>/dev/null)
+[ -n "$DESK" ] && [ "$DESK" != "$HOME" ] || DESK="$HOME/Desktop"
 
 optional() { sed -n 's/^\([a-z0-9][a-z0-9_-]*\)\([[:space:]].*\)\{0,1\}$/\1/p' "$LIST" 2>/dev/null; }
 is_optional() { optional | grep -qx -- "$1"; }
 about() { sed -n "s/^$1[[:space:]]\{1,\}//p" "$LIST" 2>/dev/null | head -n 1; }
 chosen() { grep -qx -- "$1" "$CHOSEN" 2>/dev/null; }
+
+# HostMC became MineNest: a choice made for HostMC carries over (before sync could take MineNest
+# off the home screen as never chosen).
+if grep -qx hostmc "$CHOSEN" 2>/dev/null && ! is_optional hostmc && is_optional minenest; then
+    { grep -vx -e hostmc -e minenest "$CHOSEN"; echo minenest; } > "$CHOSEN.new" && mv -f "$CHOSEN.new" "$CHOSEN"
+fi
 title() {
     local name="" f
     for f in "$APPS/$1.txt" "$KEPT/$1.txt" "$LIB/$1.txt" "$SHARE/$1.txt"; do
@@ -110,9 +125,49 @@ entry() {
     echo "Exec=/usr/lib/xenithos-desktop/console-app $app --$action"
 }
 
+# The desktop's icons for the apps in ON_DESKTOP, a line "APP SHA-256" in PLACED for each one put
+# there. The SHA-256 is of the icon as it was written, so an icon still the same is ours to bring in
+# step with the Apps menu entry or take away, and one that isn't is the person's.
+placed() { sed -n "s/^$1 \([0-9a-f]\{64\}\)$/\1/p" "$PLACED" 2>/dev/null | head -n 1; }
+remember() {                    # APP SHA-256, or APP alone to forget it
+    mkdir -p "$(dirname "$PLACED")" 2>/dev/null || return 0
+    { grep -v "^$1 " "$PLACED" 2>/dev/null; [ -z "${2:-}" ] || echo "$1 $2"; } > "$PLACED.new" && mv -f "$PLACED.new" "$PLACED"
+}
+sum() { sha256sum < "$1" | cut -c1-64; }
+# XFCE starts a launcher on the desktop without asking once it's marked as checked, as
+# desktop-start does for XenithOS's own launchers.
+trust() {
+    chmod +x "$1"
+    gio set -t string "$1" metadata::xfce-exe-checksum "$(sum "$1")" 2>/dev/null || true
+}
+desktop_icon() {                # APP, 1 when it's on the home screen and 0 when it isn't
+    local app=$1 icon="$DESK/xenithos-app-$1.desktop" was
+    # An app that no longer gets an icon (HostMC, now MineNest) only ever has its old one taken
+    # away, and only if it's still as written.
+    case " $ON_DESKTOP " in *" $app "*) ;; *) set -- "$app" 0 ;; esac
+    was=$(placed "$app")
+    if [ "$2" = 1 ]; then
+        if [ -z "$was" ]; then
+            [ -e "$icon" ] && return 0                 # there already, put there by someone else
+            mkdir -p "$DESK" 2>/dev/null || return 0
+            entry "$app" > "$icon"
+        elif [ -f "$icon" ] && [ "$(sum "$icon")" = "$was" ]; then
+            entry "$app" > "$icon.new"                 # as written: kept in step with the entry
+            if cmp -s "$icon.new" "$icon"; then rm -f "$icon.new"; else mv -f "$icon.new" "$icon"; fi
+        else
+            return 0                                   # deleted or changed: the person's
+        fi
+        trust "$icon"
+        remember "$app" "$(sum "$icon")"
+    elif [ -n "$was" ]; then
+        if [ -f "$icon" ] && [ "$(sum "$icon")" = "$was" ]; then rm -f "$icon"; fi
+        remember "$app"                                # it comes back if the app does
+    fi
+}
+
 # Makes the Apps menu match the home screen: an entry for each of XenithOS Console's apps that's
 # on it, none for the rest. It goes by the home screen itself, so it's right whoever changed
-# that: this tool, or XenithOS Console's Store.
+# that: this tool, or XenithOS Console's Store. The desktop's icons (ON_DESKTOP) follow too.
 menu() {
     local f app file
     [ -d "$APPS" ] || return 0         # XenithOS Console hasn't been set up for this account
@@ -125,14 +180,26 @@ menu() {
         if [ -e "$APPS/$app.elf32" ]; then
             entry "$app" > "$file.new"
             if cmp -s "$file.new" "$file"; then rm -f "$file.new"; else mv -f "$file.new" "$file"; fi
+            desktop_icon "$app" 1
         else
             rm -f "$file"
+            desktop_icon "$app" 0
         fi
     done
     for file in "$MENU"/xenithos-app-*.desktop; do         # apps that have left the PC since
         [ -f "$file" ] || continue
         app=${file##*/xenithos-app-}
-        [ -x "$LIB/${app%.desktop}" ] || rm -f "$file"
+        app=${app%.desktop}
+        if [ ! -x "$LIB/$app" ]; then
+            rm -f "$file"
+            desktop_icon "$app" 0
+        fi
+    done
+    # Icons put on the desktop for an app that no longer gets one, even when its Apps menu entry
+    # has gone already.
+    for app in $(sed -n 's/ .*//p' "$PLACED" 2>/dev/null); do
+        [ -e "$APPS/$app.elf32" ] && case " $ON_DESKTOP " in *" $app "*) continue ;; esac
+        desktop_icon "$app" 0
     done
     return 0
 }

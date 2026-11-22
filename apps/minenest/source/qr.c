@@ -7,7 +7,7 @@
 #include <string.h>
 
 #include "gfx.h"
-#include "hostmc.h"
+#include "mn.h"
 
 static const int ECC_PER_BLOCK[11] = {0, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26};   /* level M */
 static const int NUM_BLOCKS[11]    = {0, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5};

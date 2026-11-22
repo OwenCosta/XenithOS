@@ -7,18 +7,18 @@
 #   console-app APP --window              the console version in a window
 #   console-app --has-desktop-version APP     exit 0 when APP has a desktop version
 #
-# The desktop versions: VOLT and DOOM are the same programs as on XenithOS Console, run as
-# desktop apps (XENITHOS_DESKTOP=1: a window, the mouse and the keyboard, from the XenithOS
-# Console that has desktop mode on; an older one just opens in a window). Photos and Tube are
-# desktop apps of their own, photos.py and tube.py in this folder. The others (HostMC) open as on
-# the console.
+# The desktop versions: VOLT and DOOM are the same programs as on XenithOS Console, run as desktop
+# apps (XENITHOS_DESKTOP=1: a window, the mouse and the keyboard, from a XenithOS Console that has
+# desktop mode for them; an older one just opens in a window). Photos and Tube are desktop apps of
+# their own, photos.py and tube.py in this folder. MineNest's is its own window (minenest gui,
+# github.com/OwenCosta/minenest). Any other app opens as on the console.
 #
-# Everything keeps XenithOS Console's data, so a game's scores or HostMC's servers are the same
+# Everything keeps XenithOS Console's data, so a game's scores or MineNest's servers are the same
 # in both. Leaving an app closes it (XenithOS Console 0.6.6 and newer).
 LIB=/usr/lib/xenithos-desktop
 
 has_desktop_version() {
-    case "$1" in volt|doom|photos|tube) return 0 ;; *) return 1 ;; esac
+    case "$1" in volt|doom|minenest|photos|tube) return 0 ;; *) return 1 ;; esac
 }
 
 if [ "${1:-}" = --has-desktop-version ]; then
@@ -49,5 +49,6 @@ case "$how" in
 esac
 if [ "$app" = photos ] && [ -x "$LIB/photos.py" ]; then exec "$LIB/photos.py" ${2:+"$2"}; fi
 if [ "$app" = tube ] && [ -x "$LIB/tube.py" ]; then exec "$LIB/tube.py"; fi
+if [ "$app" = minenest ] && [ -x /usr/lib/xenithos/bin/minenest ]; then exec /usr/lib/xenithos/bin/minenest gui; fi
 export XENITHOS_DESKTOP=1
 exec "$prog"

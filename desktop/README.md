@@ -49,6 +49,10 @@ What comes with it:
 
 - **Brave** as the browser, **Mullvad VPN**, Files, Terminal, a text editor, picture, PDF and video
   viewers, an archive tool, a calculator, screenshots, a task manager, Disks, and Bluetooth.
+- **On the desktop itself**, not only in the Apps menu: Return to XenithOS Console, Brave, Files, Terminal,
+  Settings and Mullvad VPN (`rootfs/usr/share/xenithos-desktop/launchers/`, put there by `desktop-start` the
+  first time and by `user-migrate` when a later version adds one), and HostMC while it's on XenithOS
+  Console's home screen (`console-apps menu`). An icon you delete stays deleted.
 - **Security tools** from Ubuntu's archive, for networks, the web, passwords, Wi-Fi, forensics and privacy.
   `packages/security.list` is the whole list, and it's also how they're sorted in the Apps menu.
 - **Settings**, XenithOS Desktop's own: Wi-Fi (join, forget, hidden networks), Sound (volume, output,
@@ -81,19 +85,26 @@ the Apps menu, under Games or Media, with an icon of its own. The entries follow
 desktop brings them in step each time it starts, and Settings > Console apps as it installs or removes
 one. `rootfs/usr/share/xenithos-desktop/console-menu.list` says which group each app goes in.
 
-VOLT, DOOM, Photos and Tube have **desktop versions**, made for the mouse and keyboard, which their entries
-open; each entry's right-click menu still has "Open the console version" (full screen, for a controller).
-The others (HostMC, for now) open as on XenithOS Console, or in a window from the right-click menu. All of
-them keep XenithOS Console's data, so scores, saves and HostMC's servers are the same in both.
+VOLT, DOOM, HostMC, Photos and Tube have **desktop versions**, made for the mouse and keyboard, which their
+entries open; each entry's right-click menu still has "Open the console version" (full screen, for a
+controller). An app without one would open as on XenithOS Console, or in a window from the right-click
+menu. All of them keep XenithOS Console's data, so scores, saves and HostMC's servers are the same in both.
 
-- **VOLT** and **DOOM** are XenithOS Console's own programs in desktop mode (`console-app` starts them
-  with `XENITHOS_DESKTOP=1`; `linux/platform_sdl.c` and `shared/ui.c` do the rest): a window of their own
-  (F11 for full screen), the mouse, and keys in the hints instead of the controller's buttons. VOLT
-  steers with the arrows or WASD, starts with Space or a click, pauses with Esc or Space (Q quits from
-  there), and its crash card's buttons can be clicked. DOOM has the usual PC controls: the mouse turns
-  and fires, WASD walks and strafes, E or Space uses, Shift runs, the number keys pick weapons, and Esc
-  is Doom's menu, which lets go of the mouse. This needs a XenithOS Console with desktop mode; an older
-  one opens them in a window as they are.
+- **VOLT**, **DOOM** and **HostMC** are XenithOS Console's own programs in desktop mode (`console-app`
+  starts them with `XENITHOS_DESKTOP=1`; `linux/platform_sdl.c` and `shared/ui.c` do the rest): a window
+  of their own (F11 for full screen), the mouse, and hints that show keys and the mouse instead of the
+  controller's buttons. VOLT steers with the arrows or WASD, starts with Space or a click, pauses with Esc
+  or Space (Q quits from there), and its crash card's buttons can be clicked. DOOM has the usual PC
+  controls: the mouse turns and fires, WASD walks and strafes, E or Space uses, Shift runs, the number keys
+  pick weapons, and Esc is Doom's menu, which lets go of the mouse. In HostMC a click opens a page and
+  chooses a row or a button, the wheel scrolls, a click on either end of a setting's value (or a right
+  click) changes it, and text (the server's message, names, a VPS's address) is typed into a text box
+  with Ctrl+V to paste. The console page has a command line of its own: what's typed goes to the server,
+  Tab switches to saying it to everyone, F2 has the quick commands. Links (the EULA, playit.gg's claim,
+  Patreon and OCAccounts for the supporter relay) open in the browser, and the command for a VPS can be
+  copied. The server keeps running when HostMC's window is closed, as it does when you leave it on the
+  console. This needs a XenithOS Console with desktop mode for them; an older one opens them in a window
+  as they are.
 - **Photos** (`rootfs/usr/lib/xenithos-desktop/photos.py`) shows the pictures XenithOS Console's Photos
   shows, and a photos or pictures folder on any USB stick or drive, newest first with the folders at the
   side. A picture opens in the window: the wheel zooms where the pointer is, dragging moves a zoomed one,
@@ -104,7 +115,9 @@ them keep XenithOS Console's data, so scores, saves and HostMC's servers are the
   through XenithOS Cloud as XenithOS Console's Tube does, signed in with the same XenithOS profile (sign
   in on XenithOS Console first). Space pauses, Left and Right skip 10 seconds, F11 fills the screen. It
   plays with GStreamer, and asks the Cloud for a stream made for a PC (`q=pc`); a Cloud that doesn't make
-  those sends the console's 426x240 one, which plays the same way, just less sharply.
+  those sends the console's 426x240 one, which plays the same way, just less sharply. It goes the way
+  XenithOS Console found at its last start (`route.txt`): XenithOS Cloud's address on the home network,
+  otherwise its HTTPS address when there is one, so the profile's token isn't sent in the clear.
 
 **Your own apps** go on XenithOS Console's home screen too: Settings > Console apps lists the apps on the
 PC (with a box to find one), each with an Add button, and Remove once it's there. Any app with an entry in
@@ -132,6 +145,12 @@ the desktop when updates are ready. No terminal, and no writing the USB stick ag
 - XenithOS Desktop's own parts are four packages (`xenithos-archive`, `xenithos-desktop`,
   `xenithos-desktop-apps`, `xenithos-security-tools`). An update is a bundle of them, signed with XenithOS
   Desktop's key; the updater checks the signature before it installs anything, and apt does the installing.
+- XenithOS Console's updates come from XenithOS Cloud's Store, as on XenithOS Console itself
+  (`rootfs/usr/lib/xenithos-desktop/consoleupdate.py`). The Store's list has to come signed with XenithOS
+  Cloud's key, the one XenithOS Console checks since 0.7.0; the download is checked against the SHA-256 in
+  that list, and only a newer version is ever installed. It asks the way XenithOS Console found at its last
+  start (home network, then HTTPS, then the address in `config.txt`); the signature is what's trusted.
+  `~/.cache/xenithos-update/last-check.txt` says what the last check found at each address.
 - An update that's cut off (the power goes, say) is finished the next time the PC starts.
 - Where updates come from is in `channel.txt` (built into every install). The addresses are tried in order.
 - Ubuntu's security fixes also install themselves once a day.

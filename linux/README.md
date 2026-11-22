@@ -85,9 +85,10 @@ Bluetooth adapter works.
 | `~/.local/share/xenithos/uda:/` | your settings, profile, game data and saves (same layout as the Xbox's USB stick) |
 | `~/.local/share/xenithos/uda:/xenith/crash/` | crash files waiting to be sent, one a program (see Crash reports) |
 | `~/.config/xenithos/` | the mode file and logs |
-| `~/.local/share/xenithos/hostmc/` | HostMC's Minecraft server, its world, Java and backups |
+| `~/.local/share/minenest/` | MineNest's Minecraft servers, their worlds, Java and backups |
+| `/usr/lib/xenithos/bin/minenest` | MineNest's own program (also `minenest` in a terminal) |
 
-XenithOS's own apps (VOLT, DOOM, Tube, Photos, Music, and HostMC on PCs) come with it on PCs and Pis. The Store has three sections here
+XenithOS's own apps (VOLT, DOOM, Tube, Photos, Music, and MineNest on PCs) come with it on PCs and Pis. The Store has three sections here
 (LB and RB switch between them): **Apps** from Flathub, **Steam**, and **XenithOS** (updates and game data).
 
 ## XenithOS Cloud over HTTPS
@@ -161,54 +162,39 @@ Apps get XenithOS's environment minus its own SDL settings, under both SDL names
 on top of SDL3, `SDL_VIDEODRIVER=kmsdrm` is also copied to `SDL_VIDEO_DRIVER`, which sent SDL3 programs
 (Sober) to the bare console in 0.5.4 and made them stop with "no video subsystem".
 
-## HostMC: a Minecraft server
+## MineNest: Minecraft servers
 
-HostMC (in Apps) runs a Minecraft: Java Edition server on the PC. Start it, and Minecraft on the same PC
-(Prism Launcher) joins at `localhost`, friends at home join at the PC's address on the network, which
-HostMC shows, and with playit.gg turned on in its Internet page, friends anywhere join at the address
-playit.gg gives it. Its pages: Server (start, stop, where to join, who's on), Console (the server's output,
-and commands), Players (operators, kicks, bans, the whitelist), Settings (`server.properties`: message,
-game mode, difficulty, max players, whitelist, seed, online mode, port, and the server's memory), Version
-(Minecraft or Paper, the latest release or an earlier one), World (backups, putting one back, a new world)
-and Internet (playit.gg).
+MineNest (in Apps) runs Minecraft servers on the PC. It used to be HostMC; it's its own project now,
+[MineNest](https://github.com/OwenCosta/minenest), for any Windows or Linux PC, and on XenithOS the
+app is its screen, in XenithOS's look, for a controller or the mouse.
 
-- The server keeps running after you leave HostMC, so you can go and play on it, and HostMC picks it up
-  again next time. It's started in a session of its own; `server/hostmc.pid` holds its PID and start time,
-  and HostMC checks the process is still that server, running in its folder, before it signals it.
-  Commands reach it through `server/console.in`, a named pipe that's its standard input.
-- Before the first start HostMC shows Minecraft's EULA (https://aka.ms/MinecraftEULA) and starts the server
-  only once you agree. It writes your answer into `eula.txt`.
-- The first start downloads the server from Mojang (or Paper from PaperMC) and the Java it needs:
-  Minecraft 26.x needs Java 25, 1.20.5 to 1.21.x need 21, and Debian 12 only packages 17. So HostMC
-  downloads Eclipse Temurin's runtime from Adoptium (about 60 MB) into its own folder, where nothing else
-  uses it. It says what it's about to download first, and checks each download against the checksum its
-  source publishes. Downloads go through `curl`, which the installer puts in.
-- playit.gg is off unless you turn it on. Then HostMC downloads playit's agent (playitd, about 9 MB) from
-  playit's releases on GitHub, checked against the SHA-256 GitHub publishes, and shows a link and a QR code
-  to approve it with your playit.gg account. The agent's key stays in `playit/playit.toml`, readable by you
-  only, and the agent runs while the server does. HostMC asks playit.gg for a Minecraft tunnel to the
-  server, and shows its address.
-- Or, in place of playit.gg, a VPS of your own: HostMC asks for its address, the user it logs in as, its SSH
-  port and the port for players, then keeps an SSH reverse tunnel to it while the server runs
-  (`ssh -N -R 0.0.0.0:<port for players>:127.0.0.1:<server port>`), so friends join at the VPS's address.
-  - HostMC logs in with a key of its own (ed25519, in `vps/`, readable by you only), never a password, and
-    shows the one line to add to `~/.ssh/authorized_keys` on the VPS, with a QR code of a command that adds
-    it. The VPS's host key is trusted the first time and checked after that, in a `known_hosts` of its own.
-  - The VPS needs `GatewayPorts clientspecified` in `/etc/ssh/sshd_config` (without it sshd listens on its
-    own loopback only) and the port open in its firewall. Each time the tunnel comes up, HostMC pings the
-    server through the VPS's public address, the way a friend's game would, and says plainly which of
-    those is missing (and keeps what it found in `vps/check.txt`).
-  - A small `sh` loop keeps ssh going and starts it again when it drops, waiting a little longer each time
-    (up to a minute), whether HostMC is open or not; the next HostMC finds it by `vps/tunnel.pid`. Its
-    tries are in `vps/tunnel.log`.
-  - TCP only, which Java Edition is. Every player arrives from 127.0.0.1, so bans by address don't work
-    for them; bans by name do. It needs `ssh` (openssh-client), which the installer puts in.
-  - `sim/hostmc/test-vps.sh` tries all of it with a private sshd standing in for the VPS (run as you, on
-    spare ports): the key, the login test, a ping through the VPS, ssh killed and coming back by itself, a
-    new HostMC picking the tunnel up, and the message when GatewayPorts is off.
-- In `~/.local/share/xenithos/hostmc/`: `server/` (the server, its world, `server.properties` and
-  `console.log`), `java/`, `backups/` (the newest 20, as `.tar.gz`), `playit/`, `vps/` and `cache/`
-  (version lists). `HOSTMC_JAVA` points it at another `java` (the simulator uses a stand-in).
+- MineNest's own program runs the servers: `/usr/lib/xenithos/bin/minenest`. It's the release that
+  `linux/minenest.sha256` names, kept only if it matches the SHA-256 written there (the release's own
+  SHA256SUMS isn't trusted), downloaded by `linux/get-minenest.sh` as the XenithOS user (install.sh
+  runs it with sudo -u; nothing downloaded runs as root). That file comes inside XenithOS's source,
+  whose SHA-256 is in XenithOS Cloud's signed Store list, so a new MineNest reaches PCs only through a
+  XenithOS commit that changes the version and both hashes. The app starts the program the first time
+  it's needed, and talks to it on the loopback with the key in its folder. Servers keep running after
+  the app closes. `minenest help` in a terminal does everything the app does.
+- Paper, Purpur, Fabric, NeoForge, Forge or Minecraft's own, any version and loader; mods, plugins
+  and modpacks from Modrinth; backups; players; settings; playit.gg, a VPS of your own or the
+  supporter relay; Bedrock players through Geyser. MineNest's README says how each works.
+- Before a server's first start the app shows Minecraft's EULA (https://aka.ms/MinecraftEULA) and
+  starts it only once you've agreed.
+- The XenithOS profile you're signed in with is handed to MineNest, for the supporter relay. On a
+  PC without XenithOS, MineNest signs in with your OCAccount instead.
+- A server HostMC made (`~/.local/share/xenithos/hostmc/server`) is offered for bringing in on the
+  Server page: MineNest copies it, world and all, and leaves HostMC's folder as it was.
+- HostMC's achievements carry on in MineNest, under the same names.
+- New MineNest versions come with XenithOS's updates. get-minenest.sh leaves `bin/minenest.managed`
+  beside the program, so the app has no Update button, and MineNest (from the version after 0.2.0)
+  leaves its own Update button and `minenest update` alone. MineNest 0.2.0's own window still offers
+  Update: it replaces only the program this account owns, until XenithOS's next update puts the pinned
+  one back.
+- On XenithOS Desktop, MineNest in the Apps menu opens MineNest's own window.
+- `linux/test-minenest.sh` tries the app in a virtual display with MineNest's program
+  (`MINENEST_BIN`) and a stand-in server (`sim/minenest/java`): starting, a player joining, leaving
+  the app with the server running, finding it again, stopping it, and the desktop window.
 
 ## Updates
 

@@ -540,8 +540,29 @@ static int key_code(SDL_Keycode k)
     case SDLK_LCTRL: case SDLK_RCTRL: return PLAT_KEY_CTRL;
     case SDLK_LALT: case SDLK_RALT: return PLAT_KEY_ALT;
     case SDLK_PAUSE: return PLAT_KEY_PAUSE;
+    case SDLK_HOME: return PLAT_KEY_HOME;
+    case SDLK_END: return PLAT_KEY_END;
+    case SDLK_PAGEUP: return PLAT_KEY_PAGEUP;
+    case SDLK_PAGEDOWN: return PLAT_KEY_PAGEDOWN;
     default: return 0;
     }
+}
+
+/* The desktop's clipboard (copy and paste), as plain text. */
+int plat_clipboard_set(const char *text)
+{
+    return desktop && win && SDL_SetClipboardText(text ? text : "") == 0;
+}
+
+int plat_clipboard_get(char *out, int n)
+{
+    char *t;
+    if (n <= 0) return 0;
+    out[0] = 0;
+    if (!desktop || !win || !SDL_HasClipboardText() || !(t = SDL_GetClipboardText())) return 0;
+    snprintf(out, (size_t)n, "%s", t);
+    SDL_free(t);
+    return out[0] != 0;
 }
 
 static void queue_key(int key, int down)

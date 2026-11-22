@@ -1,0 +1,9 @@
+# The MineNest release XenithOS installs (github.com/OwenCosta/minenest), and the SHA-256 of each of
+# its Linux programs. get-minenest.sh downloads that release and keeps a file only if it matches the
+# hash here. The release's own SHA256SUMS isn't trusted, so a changed release can't reach a PC.
+# This file comes inside XenithOS's source, whose own SHA-256 is in XenithOS Cloud's signed Store
+# list. A new MineNest for XenithOS is a commit that changes the version and both hashes, checked
+# against the files themselves (not only against the release's list).
+version=0.2.0
+364a70f88e190adee74c62b6841134b5fa8d84b1f92a46618d98ef0d44dfba33  minenest-linux-amd64
+4927ba668a851966b1bd383414aac4f374410437d94f76aef85a5d4f2221bbb6  minenest-linux-arm64

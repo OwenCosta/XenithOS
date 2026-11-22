@@ -1,0 +1,20 @@
+# HostMC's supporter relay: a second sshd, for HostMC's tunnels only, with its own settings
+# (/etc/mcrelay/sshd_config, from `mcrelay.py sshd-config`). This machine's own SSH is left as
+# it is. setup.sh installs it.
+[Unit]
+Description=HostMC supporter relay: sshd for HostMC's tunnels
+After=network.target
+
+[Service]
+ExecStartPre=/usr/bin/install -d -m 755 /run/sshd
+ExecStartPre=/usr/sbin/sshd -t -f /etc/mcrelay/sshd_config
+ExecStart=/usr/sbin/sshd -D -e -f /etc/mcrelay/sshd_config
+ExecReload=/usr/sbin/sshd -t -f /etc/mcrelay/sshd_config
+ExecReload=/bin/kill -HUP $MAINPID
+# Tunnels that are up stay up when this restarts.
+KillMode=process
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

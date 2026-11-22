@@ -101,11 +101,50 @@ Accounts (form posts; errors come back as "error=<message>")
                                       in: kept, and passed on to Discord (feedback-webhooks.txt in the
                                       state folder: "bug=<webhook>", "idea=<webhook>", or one for both)
 
+Signing in with an OCAccount (MineNest; off unless XENITH_OC_CLIENT_ID and _SECRET are set)
+  POST /v1/oc/start                   -> session, key, url: the OCAccounts page to open in a browser
+  GET  /v1/oc/callback                where OCAccounts sends the browser back (code, state); trades
+                                      the code and signs in the XenithOS profile linked to the account
+  POST /v1/oc/poll                    session, key -> state (waiting, done, error), and when done:
+                                      name, token, avatar, joined, account (the OCAccount's name);
+                                      error: error. A finished sign-in is handed over once.
+
+MineNest from anywhere, a perk for supporters (off without the supporter relay; see Remote)
+  POST /v1/remote/poll                token -> 200 [{"id", "method", "path", "query", "ctype",
+                                      "changes", "body" (base64)}] (what browsers asked for), or 204
+                                      after 25 seconds with nothing; 403 error= for non-supporters
+  POST /v1/remote/reply               header X-Xenith-Token, JSON {"id", "status", "ctype", "body"}
+  /remote/...                         the supporter's MineNest dashboard in a browser, signed in with
+                                      the same OCAccount (a cookie for /remote, after OCAccounts)
+
+HostMC's supporter relay (off unless XENITH_RELAY_DOMAIN is set; see Relay)
+  POST /v1/relay/status               token  -> relay (on/off), step (ok, link, patreon, tier,
+                                      error), message, suggest, and with a name: name, state (on,
+                                      lapsed, off), until, address (with :port when the relay's
+                                      players_port isn't 25565), players_port, port, ssh_host,
+                                      ssh_port, ssh_user, hostkey; held (names kept for them);
+                                      proxy (on: the relay sends the server each player's address
+                                      in a PROXY protocol v2 header), proxy_able (1: it can)
+  POST /v1/relay/claim                token, name, key (HostMC's ssh-ed25519 public key) -> as status
+  POST /v1/relay/release              token  -> as status
+                                      Each of the three also takes proxy=1 or 0: whether the
+                                      supporter's server wants players' addresses (Paper, with
+                                      proxies.proxy-protocol on), kept with their name
+  POST /v1/relay/sync                 from the relay machine: t, hostkey, busy (ports with a
+                                      tunnel on them), proxy (2 when its router sends PROXY
+                                      protocol v2), signed (X-Relay-Sign)
+                                      -> t, domain, on|name|port|key, held|name and proxy|name
+                                      (servers that want players' addresses) rows, signed
+
 Admin (header X-Xenith-Key: <XENITH_ADMIN_KEY>)
   POST /v1/news (or /v1/inbox)        body is the news post
   POST /v1/inbox/clear
   POST /v1/motd                       body is the new message of the day
   GET  /v1/feedback                   time|kind|from|version|platform|text, newest first
+  GET  /v1/relay/list                 name|profile|state|port|until|step|checked|tunnel
+  POST /v1/relay/off, /v1/relay/on    body is a name: turns it off on the relay, or back on
+  POST /v1/relay/check                body is a name: asks OCAccounts about its supporter now
+                                      -> step, tier, state
 
 Command line
   xenith_cloud.py store-key new <file>   make the Store's signing key; prints its public half
@@ -114,6 +153,7 @@ Command line
                                       Store signatures (default: the keys in source/store_key.h)
   xenith_cloud.py send "text"         message the console inbox (through the running server)
   xenith_cloud.py motd "text"         set the message of the day
+  xenith_cloud.py relay list | off <name> | on <name> | check <name>
   xenith_cloud.py --selftest          built-in tests (no network, temp dir)
 
 Environment
@@ -138,6 +178,11 @@ Environment
                      address each download was requested from
   XENITH_LAN_ADDR    the private "a.b.c.d:port" consoles on this server's own network can reach
                      it at directly, skipping the relay (/v1/lan). Off when unset.
+  XENITH_OC_URL      default https://owencosta.diy: OCAccounts, for signing in with an OCAccount
+  XENITH_OC_CLIENT_ID, XENITH_OC_CLIENT_SECRET   this server as an OCAccounts client
+                     (owencosta_web.py client add ...), with the redirect URL below
+  XENITH_OC_REDIRECT default https://<XENITH_PUBLIC_HTTPS>/v1/oc/callback
+  XENITH_REMOTE_ANYONE  1: MineNest from anywhere for every profile, not only supporters (tests)
   XENITH_PUBLIC_HTTPS  the name (with :port when it isn't 443) PCs and Raspberry Pis can reach
                      this server at over HTTPS, such as a Cloudflare tunnel's hostname whose
                      service is XENITH_EDGE_PORT (/v1/lan). Off when unset.
@@ -148,7 +193,21 @@ Environment
                      way is refused (setup-tube.sh installs it)
   XENITH_YTDLP_PLUGINS  a yt-dlp plugin folder: the PO token provider, whose token server is
                      xenith-pot.service
+  HostMC's supporter relay (server/mcrelay; its setup prints the first three):
+  XENITH_RELAY_DOMAIN  names are <name>.<this>, e.g. mc.owencosta.diy; the relay is off when unset
+  XENITH_RELAY_SSH     host:port of the relay's SSH for tunnels, e.g. tunnel.mc.owencosta.diy:2222
+  XENITH_RELAY_SECRET  shared with the relay, which signs its syncs with it
+  XENITH_RELAY_USER    default hostmc: the relay's account for tunnels
+  XENITH_RELAY_PLAYERS_PORT  default 25565: the relay's port for players (another one is added to
+                     the address friends type, <name>.<domain>:<port>)
+  XENITH_RELAY_PORTS   default 30000-39999: supporters' ports on the relay's loopback
+  XENITH_OCACCOUNT_URL, XENITH_OCACCOUNT_KEY  where OCAccounts answers who's a supporter
+                     (/api/partner/xenithos/supporter), and the key it wants for that
+  XENITH_RELAY_PATREON  the Patreon page HostMC shows a QR code of
+  XENITH_RELAY_ACCOUNT_URL  default https://owencosta.diy/account
+  relay-blocked-words.txt in the state folder: words no name may contain, one a line
 """
+import base64
 import hashlib
 import hmac
 import io
@@ -168,7 +227,7 @@ import urllib.error
 import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 VERSION = "0.5.0"
 GAMES = {"volt"}
@@ -718,7 +777,7 @@ SEEN_SAVE_S = 10 * 60            # hellos write last_seen to disk at most this o
 MC_KEEP_S = 24 * 3600            # a HostMC server's address is shown this long after HostMC last said so
 MC_ADDR_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,94}[A-Za-z0-9])?(?::[0-9]{1,5})?$")
 OWN_APPS = {"xenithos": "XenithOS", "volt": "VOLT", "doom": "DOOM", "tube": "Tube", "photos": "Photos",
-            "music": "Music", "hostmc": "HostMC"}
+            "music": "Music", "hostmc": "HostMC", "minenest": "MineNest"}
 
 
 class Friends:
@@ -1057,10 +1116,10 @@ ACHIEVEMENTS = [
     ("tube-first", "tube", "Now playing", "Watch a video in Tube."),
     ("tube-end", "tube", "Every second", "Watch a Tube video all the way through."),
     ("tube-ten", "tube", "Channel surfer", "Watch 10 videos in Tube."),
-    ("hostmc-start", "hostmc", "Server's up", "Start a Minecraft server with HostMC."),
-    ("hostmc-online", "hostmc", "Open doors", "Make your HostMC server reachable from the internet."),
-    ("hostmc-join", "hostmc", "Company", "Have a player join your HostMC server."),
-    ("hostmc-backup", "hostmc", "Safe keeping", "Back up your Minecraft world in HostMC."),
+    ("hostmc-start", "hostmc", "Server's up", "Start a Minecraft server with MineNest."),
+    ("hostmc-online", "hostmc", "Open doors", "Make your MineNest server reachable from the internet."),
+    ("hostmc-join", "hostmc", "Company", "Have a player join your MineNest server."),
+    ("hostmc-backup", "hostmc", "Safe keeping", "Back up your Minecraft world in MineNest."),
 ]
 ACHIEVEMENT_IDS = {a[0] for a in ACHIEVEMENTS}
 UNLOCKS_KEEP = 50                # the newest ones everyone's earned, for "just earned"
@@ -1957,6 +2016,650 @@ def lan_addr_ok(addr):
         return False
 
 
+# ---------------------------------------------------------------------- supporter relay
+
+# HostMC's supporter relay. Someone who supports Owen on Patreon (OCAccounts knows, once they've
+# linked Patreon and their XenithOS profile there) gets one name, <name>.<XENITH_RELAY_DOMAIN>,
+# for their Minecraft server. The relay machine (server/mcrelay) asks /v1/relay/sync for the
+# names, each supporter's port on its loopback and the key their HostMC logs in with; HostMC keeps
+# an SSH tunnel to it that can open that one port, and the relay passes players to it by the name
+# their game asks for.
+
+RELAY_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,18}[a-z0-9]$")
+RELAY_DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
+RELAY_HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,252})$")
+RELAY_RESERVED = {
+    "www", "mail", "smtp", "imap", "pop", "ftp", "ns", "ns1", "ns2", "dns", "mx", "api", "admin",
+    "administrator", "root", "tunnel", "relay", "ssh", "status", "help", "support", "abuse",
+    "postmaster", "hostmaster", "webmaster", "noreply", "security", "localhost", "test", "staging",
+    "dev", "owen", "owencosta", "ocaccount", "ocaccounts", "account", "accounts", "login", "auth",
+    "oauth", "patreon", "xenith", "xenithos", "hostmc", "minenest", "cloud", "mc", "minecraft", "play", "server",
+    "official", "staff", "mod", "moderator", "mojang", "microsoft", "xbox",
+}
+RELAY_HOLD_LAPSED = 30 * 86400     # a membership that ends: the name waits this long for them
+RELAY_HOLD_LEFT = 7 * 86400        # a name changed or given up: theirs to take back for a week
+RELAY_CHECK_FRESH = 5 * 60         # OCAccounts' answers are reused for this long
+RELAY_RECHECK = 6 * 3600           # names in use are checked again this often
+RELAY_RETRY = 10 * 60              # and this long after OCAccounts didn't answer
+RELAY_SYNC_SKEW = 120              # a signed sync request must be this fresh (seconds)
+RELAY_CHANGES_PER_DAY = 3
+RELAY_ADJECTIVES = ("brave", "calm", "clever", "cosy", "swift", "happy", "lucky", "mighty", "quiet",
+                    "sunny", "bold", "bright", "misty", "frosty", "golden", "jolly", "nimble", "rapid",
+                    "silver", "wild", "cosmic", "gentle", "lunar", "mellow", "noble", "polar", "rusty",
+                    "sleepy", "snowy", "stormy", "witty", "zesty", "amber", "breezy", "cheery", "dusky")
+RELAY_ANIMALS = ("otter", "fox", "badger", "falcon", "panda", "koala", "lynx", "owl", "wolf", "heron",
+                 "bison", "gecko", "lemur", "moose", "raven", "tiger", "whale", "yak", "zebra", "beaver",
+                 "crane", "ferret", "hare", "ibis", "jaguar", "kiwi", "llama", "marten", "newt", "orca",
+                 "puffin", "quokka", "robin", "seal", "toucan", "walrus", "axolotl", "panther")
+RELAY_KEY_HEAD = b"\0\0\0\x0bssh-ed25519\0\0\0\x20"
+LEET = str.maketrans("013457", "oieast")
+
+
+def relay_key(text):
+    """The public key line a HostMC sends, rebuilt from its bytes so nothing else can reach the
+    relay's list of keys: "ssh-ed25519 <base64>", or "" when it isn't one."""
+    parts = (text or "").split()
+    if len(parts) < 2 or parts[0] != "ssh-ed25519" or len(parts[1]) != 68:
+        return ""
+    try:
+        blob = base64.b64decode(parts[1], validate=True)
+    except ValueError:
+        return ""
+    if len(blob) != 51 or not blob.startswith(RELAY_KEY_HEAD):
+        return ""
+    return "ssh-ed25519 " + base64.b64encode(blob).decode()
+
+
+def relay_blocked(state_dir):
+    """Words no name may contain: relay-blocked-words.txt in the state folder, one a line (Owen's
+    to fill in; it's read each time, so changes count at once)."""
+    try:
+        with open(os.path.join(state_dir, "relay-blocked-words.txt"), encoding="utf-8") as f:
+            words = [line.strip().lower() for line in f]
+    except OSError:
+        return []
+    return [w.replace("-", "") for w in words if w and not w.startswith("#")]
+
+
+def relay_name_problem(name, blocked=()):
+    """What's wrong with a name someone asked for, or None. Names are DNS labels: 3 to 20 small
+    letters, numbers and single hyphens, starting with a letter."""
+    if not 3 <= len(name) <= 20:
+        return "Names are 3 to 20 letters, numbers and hyphens."
+    if not RELAY_NAME_RE.match(name) or "--" in name:
+        return "Use letters, numbers and single hyphens, starting with a letter."
+    if name in RELAY_RESERVED:
+        return "That name is reserved. Try another one."
+    squashed = name.replace("-", "")
+    if any(w and (w in squashed or w in squashed.translate(LEET)) for w in blocked):
+        return "That name isn't allowed. Try another one."
+    return None
+
+
+def relay_suggest(taken):
+    """A free name like brave-otter-42, for HostMC to offer."""
+    for _ in range(40):
+        name = f"{secrets.choice(RELAY_ADJECTIVES)}-{secrets.choice(RELAY_ANIMALS)}-{secrets.randbelow(90) + 10}"
+        if name not in taken and name not in RELAY_RESERVED:
+            return name
+    return ""
+
+
+def relay_sign(secret, kind, body):
+    """The signature on a sync request (kind "sync") or on its answer ("list"): HMAC-SHA256 of
+    the body, with the secret XenithOS Cloud and the relay share. The secret never crosses the
+    wire, and an answer can't be passed off as a request or the other way round."""
+    if isinstance(body, str):
+        body = body.encode()
+    return hmac.new(secret.encode(), kind.encode() + b"\n" + body, hashlib.sha256).hexdigest()
+
+
+def ocaccount_supporter(url, key, gamertag, timeout=10):
+    """Asks OCAccounts whether a XenithOS profile belongs to a supporter:
+    GET <url>/api/partner/xenithos/supporter?profile=<gamertag> with X-Partner-Key, answering
+    {"linked": bool, "patreon": bool, "supporter": bool, "tier": "..."}. Returns (step, tier),
+    step being "ok", "link" (no OCAccount has this profile linked), "patreon" (no Patreon linked
+    to it), "tier" (not on the supporter tier or above) or "error" (no answer to go by)."""
+    if not url:
+        return "error", ""
+    req = urllib.request.Request(url.rstrip("/") + "/api/partner/xenithos/supporter?" + urlencode({"profile": gamertag}),
+                                 headers={"X-Partner-Key": key, "Accept": "application/json",
+                                          "User-Agent": "XenithOS-Cloud/" + VERSION})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read(8192).decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        return ("link", "") if e.code == 404 else ("error", "")
+    except (OSError, ValueError):
+        return "error", ""
+    if not isinstance(data, dict):
+        return "error", ""
+    if data.get("linked") is not True:
+        return "link", ""
+    if data.get("patreon") is not True:
+        return "patreon", ""
+    return ("ok" if data.get("supporter") is True else "tier"), clean(data.get("tier") or "", 40)
+
+
+class OCSignIn:
+    """Signing in to XenithOS Cloud with an OCAccount, for MineNest on any PC.
+
+    MineNest asks /v1/oc/start for a sign-in: a session and a key only it knows, and the
+    OCAccounts page to open in the browser ("Sign in with OCAccounts", client_id and
+    redirect_uri this server's). After the person agrees there, OCAccounts sends the browser back
+    to /v1/oc/callback with a code, which this server trades (with its client secret, which never
+    leaves it) for {"id", "name", "xenithos"}: the XenithOS profile linked to the account is the one
+    signed in, with a new session token, as a name and PIN would. MineNest polls with its key and
+    gets the token once. An account without a linked profile is told to link or make one on its
+    OCAccounts page. Sign-ins wait ten minutes at most."""
+
+    TTL = 600
+    MAX = 500
+
+    def __init__(self, state, base, client_id, client_secret, redirect):
+        self.state = state
+        self.base = (base or "https://owencosta.diy").rstrip("/")
+        self.client_id, self.client_secret, self.redirect = client_id, client_secret, redirect
+        self.lock = threading.Lock()
+        self.sessions = {}
+
+    def ready(self):
+        return bool(self.client_id and self.client_secret and self.redirect)
+
+    def _sweep(self, now):
+        for sid in [k for k, v in self.sessions.items() if now - v["t"] > self.TTL]:
+            del self.sessions[sid]
+
+    def start(self, browser=False):
+        now = time.time()
+        with self.lock:
+            self._sweep(now)
+            if len(self.sessions) >= self.MAX:
+                return None
+            sid, key = secrets.token_hex(16), secrets.token_hex(16)
+            self.sessions[sid] = {"t": now, "key_hash": token_hash(key), "state": "waiting", "browser": browser}
+        url = self.base + "/account/?" + urlencode({"client_id": self.client_id, "redirect_uri": self.redirect, "state": sid})
+        return {"session": sid, "key": key, "url": url}
+
+    def exchange(self, code):
+        """OCAccounts' answer for a code: (account dict, None) or (None, why)."""
+        form = urlencode({"client_id": self.client_id, "client_secret": self.client_secret, "code": code,
+                          "redirect_uri": self.redirect}).encode()
+        req = urllib.request.Request(self.base + "/api/oauth/token", data=form, method="POST",
+                                     headers={"Content-Type": "application/x-www-form-urlencoded",
+                                              "User-Agent": "XenithOS-Cloud/" + VERSION})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return json.loads(r.read().decode()), None
+        except urllib.error.HTTPError as e:
+            return None, f"OCAccounts didn't accept the sign-in ({e.code}). Try again."
+        except (OSError, ValueError) as e:
+            return None, f"OCAccounts didn't answer ({e.__class__.__name__}). Try again in a minute."
+
+    def callback(self, sid, code, error=""):
+        """Finishes a sign-in: (ok, the words for the browser, the profile when it was a browser's
+        own sign-in (MineNest from anywhere), else None)."""
+        with self.lock:
+            sess = self.sessions.get(sid or "")
+        if not sess or sess["state"] != "waiting":
+            return False, "This sign-in has run out. Start it again in MineNest.", None
+        if error or not code:
+            with self.lock:
+                sess.update(state="error", error="The sign-in was cancelled on OCAccounts.")
+            return False, "The sign-in was cancelled. You can close this tab.", None
+        oc, why = self.exchange(code)
+        result = {"state": "error", "error": why}
+        if oc:
+            xname = (oc.get("xenithos") or "").strip()
+            acc = self.state.account(xname) if xname else None
+            if not xname:
+                result["error"] = ("Your OCAccount isn't linked to a XenithOS profile yet. Link one, or make one, "
+                                   "on your account page at owencosta.diy, then sign in again.")
+            elif not acc:
+                result["error"] = f"The XenithOS profile {xname} linked to your OCAccount isn't here any more."
+            elif sess.get("browser"):
+                with self.lock:
+                    self.sessions.pop(sid, None)
+                return True, "", acc
+            else:
+                with self.state.lock:
+                    token = self.state._new_session(acc)
+                    self.state.save()
+                result = {"state": "done", "name": acc["name"], "token": token, "avatar": acc["avatar"],
+                          "joined": acc["joined"], "account": clean(oc.get("name", ""), 40)}
+        with self.lock:
+            sess.update(result)
+        if result["state"] == "done":
+            return True, f"Signed in as {result['name']}. You can close this tab and go back to MineNest.", None
+        return False, result["error"], None
+
+    def poll(self, sid, key):
+        with self.lock:
+            self._sweep(time.time())
+            sess = self.sessions.get(sid or "")
+            if not sess or not key or not hmac.compare_digest(sess["key_hash"], token_hash(key)):
+                return None
+            out = {k: v for k, v in sess.items() if k not in ("t", "key_hash", "browser")}
+            if sess["state"] != "waiting":
+                del self.sessions[sid]               # handed over once
+            return out
+
+
+class Remote:
+    """MineNest from anywhere: a supporter's MineNest keeps asking /v1/remote/poll (as its profile)
+    for what browsers want, and answers at /v1/remote/reply. A browser signed in at /remote/ with
+    the OCAccount linked to that profile gets the dashboard: each request is queued for that
+    MineNest and the answer handed back. Nothing on the supporter's router has to change.
+
+    Who may: supporters on Patreon, checked the way the relay checks (OCAccounts), unless
+    XENITH_REMOTE_ANYONE says everyone (tests). Off without the relay set up."""
+
+    POLL = 25            # how long a MineNest's ask waits for something to do
+    ONLINE = 70          # a MineNest that asked within this long counts as connected
+    ANSWER = 60          # how long a browser waits for its MineNest's answer
+    BROWSER_DAYS = 30
+    MAX_BODY = 64 << 20
+
+    def __init__(self, state, relay=None, anyone=False):
+        self.state, self.relay, self.anyone = state, relay, anyone
+        self.cond = threading.Condition()
+        self.links = {}          # profile (lower) -> {"t": last ask, "queue": [request]}
+        self.answers = {}        # request id -> answer dict, once it's in
+        self.browsers = {}       # hashed cookie -> (profile, until)
+
+    def allowed(self, acc):
+        """(True, "") or (False, why) for a profile."""
+        if self.anyone:
+            return True, ""
+        if not self.relay or not self.relay.ready():
+            return False, "MineNest from anywhere isn't open yet."
+        step, _tier = self.relay.supporter(acc["name"].lower(), acc["name"])
+        if step == "ok":
+            return True, ""
+        return False, ("Using MineNest from anywhere is a perk for supporters on Patreon. "
+                       + self.relay.message(step))
+
+    def poll(self, acc, wait=None):
+        who = acc["name"].lower()
+        end = time.time() + (self.POLL if wait is None else wait)
+        with self.cond:
+            link = self.links.setdefault(who, {"t": 0, "queue": []})
+            while True:
+                link["t"] = time.time()
+                if link["queue"]:
+                    out, link["queue"] = link["queue"], []
+                    return out
+                left = end - time.time()
+                if left <= 0:
+                    return []
+                self.cond.wait(min(left, 5))
+
+    def online(self, who):
+        with self.cond:
+            link = self.links.get(who)
+            return bool(link) and time.time() - link["t"] < self.ONLINE
+
+    def reply(self, acc, rid, answer):
+        who = acc["name"].lower()
+        with self.cond:
+            if self.answers.get(rid, {}).get("who") != who:
+                return False
+            self.answers[rid] = dict(answer, who=who, done=True)
+            self.cond.notify_all()
+            return True
+
+    def forward(self, who, request, wait=None):
+        """Queues a browser's request for who's MineNest and waits for the answer (None: none came)."""
+        rid = secrets.token_hex(12)
+        request = dict(request, id=rid)
+        end = time.time() + (self.ANSWER if wait is None else wait)
+        with self.cond:
+            self.links.setdefault(who, {"t": 0, "queue": []})["queue"].append(request)
+            self.answers[rid] = {"who": who, "done": False}
+            self.cond.notify_all()
+            while not self.answers[rid]["done"]:
+                left = end - time.time()
+                if left <= 0:
+                    self.answers.pop(rid, None)
+                    link = self.links.get(who)
+                    if link:
+                        link["queue"] = [q for q in link["queue"] if q["id"] != rid]
+                    return None
+                self.cond.wait(min(left, 5))
+            return self.answers.pop(rid)
+
+    def new_browser(self, acc):
+        token = secrets.token_hex(24)
+        with self.cond:
+            now = time.time()
+            for k in [k for k, (_, until) in self.browsers.items() if until < now]:
+                del self.browsers[k]
+            self.browsers[token_hash(token)] = (acc["name"].lower(), now + self.BROWSER_DAYS * 86400)
+        return token
+
+    def browser(self, token):
+        if not token or len(token) > 128:
+            return None
+        with self.cond:
+            who, until = self.browsers.get(token_hash(token), (None, 0))
+        return who if who and until > time.time() else None
+
+    def sign_out(self, token):
+        with self.cond:
+            self.browsers.pop(token_hash(token or ""), None)
+
+
+REMOTE_CSP = ("default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; "
+              "frame-ancestors 'none'; form-action 'self' https://owencosta.diy")
+
+OC_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>MineNest</title><body style="font:16px system-ui,sans-serif;background:#1d1e21;color:#e6e4df;
+display:flex;align-items:center;justify-content:center;height:90vh;margin:0"><div style="max-width:440px;padding:20px">
+<h2 style="color:%s;margin:0 0 8px">%s</h2><p>%s</p></div>"""
+
+
+class Relay:
+    """The supporter relay's names, kept in state.json under "relay".
+
+    names: name -> {owner, state, until, since}. A name's state is "on" (the relay passes players
+    to it), "lapsed" (its supporter's membership ended: kept for them until "until", and on again
+    if they come back), "left" (changed or given up: theirs alone to take back until "until") or
+    "off" (turned off with `xenith relay off`). Someone has one name that isn't "left" at most.
+    people: profile (lower case) -> {port, key, checked, step, tier, proxy}: their port on the
+    relay's loopback, kept while they have any name, the key their HostMC logs in with, and
+    whether their server wants players' addresses (HostMC says, with Paper; the relay then sends
+    them in a PROXY protocol v2 header, once it has said it can: "proxy" in the data, from its
+    syncs)."""
+
+    def __init__(self, state, domain="", ssh="", secret="", user="hostmc", ports="30000-39999",
+                 ocaccount_url="", ocaccount_key="", patreon_url="", account_url="", players_port=25565):
+        self.state, self.lock = state, state.lock
+        self.domain = domain.strip().lower().strip(".")
+        self.players_port = int_or(players_port, 0)           # the relay's port for players
+        self.at = "" if self.players_port == 25565 else f":{self.players_port}"   # what friends add to the name
+        host, sep, port = ssh.strip().rpartition(":")
+        self.ssh_host, self.ssh_port = (host, int_or(port, 0)) if sep else (ssh.strip(), 22)
+        self.secret, self.user = secret, user or "hostmc"
+        lo, _, hi = ports.partition("-")
+        self.port_lo = int_or(lo, 0)
+        self.port_hi = int_or(hi, self.port_lo) if hi else self.port_lo
+        self.ocaccount_url, self.ocaccount_key = ocaccount_url, ocaccount_key
+        self.patreon_url = patreon_url
+        self.account_url = account_url or "https://owencosta.diy/account"
+        self.checks = {}                           # profile -> (good until, step, tier)
+        self.tried = {}                            # profile -> when OCAccounts last didn't answer
+        self.changes = RateLimit(RELAY_CHANGES_PER_DAY, 86400)
+        self.asks = RateLimit(60, 3600)
+        self.last_sync = 0
+        self.busy = set()                          # ports with a tunnel on them, at the last sync
+        with self.lock:
+            r = state.data.setdefault("relay", {})
+            r.setdefault("names", {})
+            r.setdefault("people", {})
+
+    def problems(self):
+        """What's wrong with the settings (XENITH_RELAY_*), for the log; the relay stays off."""
+        out = []
+        if not RELAY_DOMAIN_RE.match(self.domain):
+            out.append(f"XENITH_RELAY_DOMAIN must be a domain such as mc.example.com, not {self.domain!r}")
+        if not RELAY_HOST_RE.match(self.ssh_host) or not 0 < self.ssh_port < 65536:
+            out.append("XENITH_RELAY_SSH must be the relay's SSH address for tunnels, host:port")
+        if len(self.secret) < 32:
+            out.append("XENITH_RELAY_SECRET must be the relay's secret (its setup prints one)")
+        if not 1024 < self.port_lo <= self.port_hi < 65536:
+            out.append("XENITH_RELAY_PORTS must be a range such as 30000-39999")
+        if not 0 < self.players_port < 65536:
+            out.append("XENITH_RELAY_PLAYERS_PORT must be the relay's port for players, like 25565")
+        return out
+
+    @property
+    def data(self):
+        return self.state.data["relay"]
+
+    def ready(self):
+        """Open to supporters: set up here, and the relay has said hello (with its host key)."""
+        return bool(self.domain and self.secret and self.data.get("hostkey"))
+
+    def proxy_able(self):
+        """The relay's router sends PROXY protocol v2 (its syncs say so)."""
+        return int_or(self.data.get("proxy"), 0) >= 2
+
+    def set_proxy(self, who, on):
+        """Whether their server wants players' addresses (HostMC says: Paper, with proxy-protocol
+        on). Kept with the port, so it lasts while they have a name."""
+        with self.lock:
+            p = self.data["people"].get(who)
+            if p is not None and bool(p.get("proxy")) != bool(on):
+                p["proxy"] = bool(on)
+                self.state.save()
+
+    def _current(self, who):
+        for name, n in self.data["names"].items():
+            if n["owner"] == who and n["state"] != "left":
+                return name, n
+        return None, None
+
+    def message(self, step, state=None, until=0):
+        site = self.account_url.split("://", 1)[-1].rstrip("/")
+        if state == "off":
+            return "This name has been turned off on the relay."
+        if state == "lapsed":
+            t = time.gmtime(until)
+            return (f"Your Patreon membership ended, so the relay stopped. Your name is kept for you "
+                    f"until {t.tm_mday} {time.strftime('%B', t)} {t.tm_year}.")
+        return {"ok": "", "link": f"Link this XenithOS profile to your OCAccount at {site} first.",
+                "patreon": f"Link Patreon to your OCAccount at {site}.",
+                "tier": "Your Patreon membership isn't on the supporter tier.",
+                "error": "Your membership couldn't be checked just now. Try again in a few minutes."}[step]
+
+    # -------------------------------------------------------------- who's a supporter
+    def supporter(self, who, gamertag, now=None, cached=True):
+        """(step, tier) for a profile (see ocaccount_supporter), from an answer kept a few
+        minutes or a new one. A definite answer also turns their name on or lapses it."""
+        now = time.time() if now is None else now
+        kept = self.checks.get(who)
+        if cached and kept and now < kept[0]:
+            return kept[1], kept[2]
+        step, tier = ocaccount_supporter(self.ocaccount_url, self.ocaccount_key, gamertag)
+        self.checks[who] = (now + (30 if step == "error" else RELAY_CHECK_FRESH), step, tier)
+        if step == "error":
+            self.tried[who] = now
+        else:
+            self.settle(who, step, tier, now)
+        return step, tier
+
+    def settle(self, who, step, tier, now):
+        with self.lock:
+            p = self.data["people"].get(who)
+            if not p:
+                return
+            p["checked"], p["step"], p["tier"] = int(now), step, tier
+            _, n = self._current(who)
+            if n and step == "ok" and n["state"] == "lapsed":
+                n["state"], n["until"] = "on", 0
+            elif n and step != "ok" and n["state"] == "on":
+                n["state"], n["until"] = "lapsed", int(now + RELAY_HOLD_LAPSED)
+            self.state.save()
+
+    # -------------------------------------------------------------- names
+    def claim(self, who, name, key, now=None):
+        """Gives a supporter a name, or takes their key again for the one they have. The
+        supporter check is the caller's. Returns (http code, message)."""
+        now = time.time() if now is None else now
+        problem = relay_name_problem(name, relay_blocked(os.path.dirname(self.state.path)))
+        if problem:
+            return 400, problem
+        key = relay_key(key)
+        if not key:
+            return 400, "HostMC's key isn't one the relay takes."
+        with self.lock:
+            names, people = self.data["names"], self.data["people"]
+            cur, cn = self._current(who)
+            if cn and cn["state"] == "off":
+                return 403, self.message("ok", "off")
+            n = names.get(name)
+            if n and n["owner"] != who:
+                return 409, "That name is taken. Try another one."
+            if any(q.get("key") == key for w, q in people.items() if w != who):
+                return 409, "HostMC's key is in use by someone else. Make HostMC a new one."
+            if cur != name and cur is not None and not self.changes.allow(who):
+                return 429, "That's a few new names today. Try again tomorrow."
+            p = people.get(who)
+            if not p:
+                used = {q["port"] for q in people.values()} | self.busy
+                port = next((x for x in range(self.port_lo, self.port_hi + 1) if x not in used), 0)
+                if not port:
+                    return 503, "The relay is full right now."
+                p = people[who] = {"port": port, "checked": int(now), "step": "ok", "tier": ""}
+            p["key"] = key
+            if cur != name:
+                if cn:                             # the old name waits a week for them
+                    cn["state"], cn["until"] = "left", int(now + RELAY_HOLD_LEFT)
+                names[name] = {"owner": who, "state": "on", "until": 0, "since": int(now)}
+            elif cn["state"] == "lapsed":
+                cn["state"], cn["until"] = "on", 0
+            self.state.save()
+            return 200, ""
+
+    def release(self, who, now=None):
+        now = time.time() if now is None else now
+        with self.lock:
+            _, cn = self._current(who)
+            if not cn:
+                return 404, "You don't have a name on the relay."
+            if cn["state"] == "off":
+                return 403, self.message("ok", "off")
+            cn["state"], cn["until"] = "left", int(now + RELAY_HOLD_LEFT)
+            self.state.save()
+            return 200, ""
+
+    def recheck(self, name):
+        """`xenith relay check <name>`: asks OCAccounts about its supporter now, which turns the
+        name on or lapses it. None for a name nobody has."""
+        with self.lock:
+            n = self.data["names"].get(name)
+            acc = self.state.account(n["owner"]) if n else None
+        if not acc:
+            return None
+        step, tier = self.supporter(acc["name"].lower(), acc["name"], cached=False)
+        with self.lock:
+            return {"step": step, "tier": tier, "state": self.data["names"].get(name, {}).get("state", "")}
+
+    def turn(self, name, on):
+        """`xenith relay off|on <name>`. Returns False for a name nobody has."""
+        with self.lock:
+            n = self.data["names"].get(name)
+            if not n or n["state"] == "left":
+                return False
+            if not on:
+                n["state"], n["until"] = "off", 0
+            elif n["state"] == "off":
+                n["state"] = "on"                  # the next check lapses it if it should
+                p = self.data["people"].get(n["owner"])
+                if p:
+                    p["checked"] = 0
+            self.state.save()
+            return True
+
+    def status(self, acc, now=None):
+        """What HostMC is told: key=value fields for kv()."""
+        now = time.time() if now is None else now
+        who = acc["name"].lower()
+        step, tier = self.supporter(who, acc["name"], now)
+        with self.lock:
+            name, n = self._current(who)
+            p = self.data["people"].get(who) or {}
+            out = {"relay": "on", "domain": self.domain, "step": step, "tier": tier,
+                   "patreon": self.patreon_url, "account": self.account_url}
+            if n:
+                out.update({"name": name, "state": n["state"], "until": n.get("until", 0),
+                            "address": f"{name}.{self.domain}{self.at}", "players_port": self.players_port,
+                            "port": p.get("port", 0),
+                            "ssh_host": self.ssh_host, "ssh_port": self.ssh_port, "ssh_user": self.user,
+                            "hostkey": self.data.get("hostkey", "")})
+            held = sorted(x for x, m in self.data["names"].items() if m["owner"] == who and m["state"] == "left")
+            if held:
+                out["held"] = ",".join(held)
+            out["suggest"] = relay_suggest(self.data["names"])
+            out["proxy"] = "on" if p.get("proxy") and self.proxy_able() else "off"
+            out["proxy_able"] = 1 if self.proxy_able() else 0
+        out["message"] = self.message(step, n["state"] if n else None, n.get("until", 0) if n else 0)
+        return out
+
+    def rows(self):
+        """`xenith relay list`: name|profile|state|port|until|step|checked|tunnel (up when the
+        relay saw one on that port at its last sync)."""
+        with self.lock:
+            out = []
+            for name, n in sorted(self.data["names"].items()):
+                p = self.data["people"].get(n["owner"], {})
+                port = p.get("port", 0)
+                out.append(f"{name}|{n['owner']}|{n['state']}|{port}|{n.get('until', 0)}|{p.get('step', '')}|"
+                           f"{p.get('checked', 0)}|{'up' if port in self.busy and n['state'] != 'left' else ''}\n")
+            return "".join(out)
+
+    # -------------------------------------------------------------- the relay machine
+    def signed(self, body, signature):
+        return bool(self.secret) and hmac.compare_digest(relay_sign(self.secret, "sync", body).encode(),
+                                                         (signature or "").strip().encode())
+
+    def synced(self, hostkey, busy="", proxy="", now=None):
+        """A signed sync came in: the relay's SSH host key, which HostMC pins, the ports with a
+        tunnel on them, and whether its router sends PROXY headers. A port with one left on from
+        a name that's no longer on isn't given to anyone else while it lasts."""
+        self.last_sync = time.time() if now is None else now
+        self.busy = {p for p in (int_or(x, 0) for x in busy.split(",")[:5000]) if self.port_lo <= p <= self.port_hi}
+        hostkey = relay_key(hostkey)
+        proxy = max(0, min(int_or(proxy, 0), 99))
+        with self.lock:
+            if (hostkey and hostkey != self.data.get("hostkey")) or proxy != int_or(self.data.get("proxy"), 0):
+                if hostkey:
+                    self.data["hostkey"] = hostkey
+                self.data["proxy"] = proxy
+                self.state.save()
+
+    def listing(self, t):
+        """The answer to a sync: t (the request's, so an old answer can't be passed off as
+        new), the domain, "on|name|port|key" for names in use and "held|name" for the rest, then
+        "proxy|name" for names in use whose server wants players' addresses (a relay from before
+        these leaves the rows it doesn't know alone)."""
+        with self.lock:
+            people = self.data["people"]
+            lines, proxied = [f"t={t}\n", f"domain={self.domain}\n"], []
+            for name, n in sorted(self.data["names"].items()):
+                p = people.get(n["owner"])
+                if n["state"] == "on" and p and p.get("key"):
+                    lines.append(f"on|{name}|{p['port']}|{p['key']}\n")
+                    if p.get("proxy"):
+                        proxied.append(f"proxy|{name}\n")
+                else:
+                    lines.append(f"held|{name}\n")
+            return "".join(lines + proxied)
+
+    # -------------------------------------------------------------- now and then
+    def tick(self, now=None):
+        """Every minute or so: frees names whose time is up, and asks OCAccounts again about
+        names in use (a few at a time)."""
+        now = time.time() if now is None else now
+        with self.lock:
+            names = self.data["names"]
+            gone = [x for x, n in names.items() if n["state"] in ("lapsed", "left") and n["until"] <= now]
+            for x in gone:
+                del names[x]
+            owners = {n["owner"] for n in names.values()}
+            for who in [w for w in self.data["people"] if w not in owners]:
+                del self.data["people"][who]
+            if gone:
+                self.state.save()
+            due = sorted((p.get("checked", 0), who) for who, p in self.data["people"].items()
+                         if now - p.get("checked", 0) >= RELAY_RECHECK and now - self.tried.get(who, 0) >= RELAY_RETRY
+                         and self._current(who)[1] and self._current(who)[1]["state"] in ("on", "lapsed"))
+        for _, who in due[:20]:
+            acc = self.state.account(who)
+            if acc:
+                self.supporter(who, acc["name"], now, cached=False)
+
+
 # ---------------------------------------------------------------------- http
 
 
@@ -1965,7 +2668,7 @@ def kv(d):
 
 
 def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=None, public="",
-                 downloads="downloads", lan="", server_id=""):
+                 downloads="downloads", lan="", server_id="", relay=None, oc=None, remote=None):
     last_score = {}
     last_score_lock = threading.Lock()
     creates = RateLimit(CREATE_PER_HOUR, 3600)
@@ -2030,6 +2733,100 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
             return self.reply(200, kv({"name": acc["name"], "token": token, "avatar": acc["avatar"],
                                        "joined": acc["joined"]}))
 
+        # -------------------------------------------------------------- MineNest from anywhere
+
+        def remote_page(self, code, title, words, link=None):
+            body = OC_PAGE % ("#d9a441", title, words.replace("&", "&amp;").replace("<", "&lt;"))
+            if link:
+                body += f'<p style="text-align:center"><a style="color:#7aa6d6" href="{link[0]}">{link[1]}</a></p>'
+            return self.reply(code, body, "text/html; charset=utf-8", "no-store")
+
+        def remote_cookie(self):
+            for part in (self.headers.get("Cookie") or "").split(";"):
+                k, _, v = part.strip().partition("=")
+                if k == "xremote":
+                    return v
+            return ""
+
+        def remote_browser(self):
+            """A browser at /remote/...: its MineNest's answer, once signed in and allowed."""
+            url = urlparse(self.path)
+            sub = url.path[len("/remote"):] or "/"
+            is_api = sub.startswith("/api/")
+            if not remote or not oc or not oc.ready():
+                return self.remote_page(404, "Not open yet", "Using MineNest from anywhere isn't open yet.")
+            if sub == "/signout":
+                remote.sign_out(self.remote_cookie())
+                return self.reply(303, "", headers={"Location": "/remote/", "Set-Cookie": "xremote=; Path=/remote; Max-Age=0"})
+            who = remote.browser(self.remote_cookie())
+            if not who:
+                if is_api or self.command != "GET":
+                    return self.reply(401, json.dumps({"error": "Sign in again."}), "application/json")
+                got = oc.start(browser=True)
+                if not got:
+                    return self.remote_page(503, "Busy", "Too many sign-ins at once. Try again in a few minutes.")
+                return self.reply(303, "", headers={"Location": got["url"]})
+            acc = state.account(who)
+            if not acc:
+                return self.remote_page(404, "Not signed in", "That XenithOS profile isn't here any more.", ("/remote/signout", "Sign out"))
+            ok, why = remote.allowed(acc)
+            if not ok:
+                if is_api:
+                    return self.reply(403, json.dumps({"error": why}), "application/json")
+                link = (relay.patreon_url, "Become a supporter on Patreon") if relay and relay.patreon_url else ("/remote/signout", "Sign out")
+                return self.remote_page(403, "A supporter perk", why, link)
+            if not remote.online(who):
+                words = (f"Signed in as {acc['name']}, but your MineNest isn't connected. On the computer it runs on, open "
+                         "MineNest's Settings and turn on 'Let me use MineNest through the website'.")
+                if is_api:
+                    return self.reply(503, json.dumps({"error": words}), "application/json")
+                return self.remote_page(503, "MineNest isn't connected", words, ("/remote/signout", "Sign out"))
+            n = int(self.headers.get("Content-Length") or 0)
+            if n < 0 or n > Remote.MAX_BODY:
+                return self.reply(413, json.dumps({"error": "That's too big to send through the website."}), "application/json")
+            data = self.rfile.read(n) if n else b""
+            answer = remote.forward(who, {"method": self.command, "path": sub, "query": url.query,
+                                          "ctype": self.headers.get("Content-Type", ""),
+                                          "changes": self.headers.get("X-MineNest") == "1",
+                                          "body": base64.b64encode(data).decode()})
+            if answer is None:
+                return self.reply(504, json.dumps({"error": "Your MineNest didn't answer in time."}), "application/json")
+            try:
+                body = base64.b64decode(answer.get("body") or "")
+            except ValueError:
+                body = b""
+            status = int(answer.get("status") or 502)
+            ctype = str(answer.get("ctype") or "application/octet-stream")[:100]
+            headers = {"X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer"}
+            if ctype.startswith("text/html"):
+                headers["Content-Security-Policy"] = REMOTE_CSP
+            if status in (301, 302, 303):
+                status = 200                            # MineNest's own redirects mean nothing here
+            return self.reply(status, body, ctype, "no-store", headers)
+
+        def remote_reply(self):
+            acc = state.by_token(self.headers.get("X-Xenith-Token", ""))
+            if not remote or not acc:
+                return self.error(401, "Sign in first.")
+            n = int(self.headers.get("Content-Length") or 0)
+            if n < 0 or n > Remote.MAX_BODY * 2:
+                return self.error(413, "Too large.")
+            try:
+                answer = json.loads(self.rfile.read(n).decode("utf-8"))
+            except ValueError:
+                return self.error(400, "That wasn't JSON.")
+            if not isinstance(answer, dict) or not remote.reply(acc, str(answer.get("id", "")), answer):
+                return self.error(404, "No browser is waiting for that.")
+            return self.reply(200, "ok=1\n")
+
+        def do_PUT(self):
+            if self.path.startswith("/remote/"):
+                return self.remote_browser()
+            return self.error(405, "Not here.")
+
+        do_PATCH = do_PUT
+        do_DELETE = do_PUT
+
         # -------------------------------------------------------------- GET
         def do_GET(self):
             url = urlparse(self.path)
@@ -2038,6 +2835,24 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
 
             if parts == ["v1", "ping"]:
                 return self.reply(200, "pong\n")
+
+            if url.path == "/remote":
+                return self.reply(301, "", headers={"Location": "/remote/"})
+            if url.path.startswith("/remote/"):
+                return self.remote_browser()
+
+            if parts == ["v1", "oc", "callback"]:
+                if not oc or not oc.ready():
+                    return self.error(404, "Signing in with an OCAccount isn't on here.")
+                ok, words, acc = oc.callback(q.get("state", [""])[0], q.get("code", [""])[0], q.get("error", [""])[0])
+                if ok and acc and remote:            # a browser for MineNest from anywhere
+                    token = remote.new_browser(acc)
+                    cookie = (f"xremote={token}; Path=/remote; HttpOnly; SameSite=Lax; Max-Age={Remote.BROWSER_DAYS * 86400}"
+                              + ("; Secure" if self.secure or self.https else ""))
+                    return self.reply(303, "", headers={"Location": "/remote/", "Set-Cookie": cookie})
+                page = OC_PAGE % ("#6fb04a" if ok else "#d9a441", "Signed in" if ok else "Not signed in",
+                                  words.replace("&", "&amp;").replace("<", "&lt;"))
+                return self.reply(200, page, "text/html; charset=ascii", "no-store")
 
             if parts == ["v1", "lan"]:
                 return self.reply(200, kv({"id": server_id, **({"lan": lan} if lan else {}),
@@ -2084,6 +2899,14 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                     return self.error(401, "Admin key required.")
                 return self.reply(200, "".join(f"{f['t']}|{f['kind']}|{f['from']}|{f['version']}|{f['platform']}|{f['text']}\n"
                                                for f in reversed(state.data.get("feedback", []))))
+
+            if parts == ["v1", "relay", "list"]:
+                if not self.is_admin():
+                    return self.error(401, "Admin key required.")
+                if not relay:
+                    return self.error(404, "The supporter relay isn't set up here.")
+                head = f"# relay {'on' if relay.ready() else 'off'}, last sync {int(relay.last_sync)}\n"
+                return self.reply(200, head + relay.rows(), cache="no-store")
 
             if len(parts) == 4 and parts[:3] == ["v1", "tube", "thumb"] and parts[3].endswith(".jpg"):
                 vid = parts[3][:-4]
@@ -2238,12 +3061,44 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
             parts = [p for p in urlparse(self.path).path.split("/") if p]
             if parts == ["v1", "saves", "put"]:         # a file, bigger than a form
                 return self.saves_put()
+            if self.path.startswith("/remote/"):         # a browser using its MineNest
+                return self.remote_browser()
+            if parts == ["v1", "remote", "reply"]:
+                return self.remote_reply()
             body = self.body(CRASH_MAX_BODY if parts == ["v1", "crash"] else MAX_BODY)
             if body is None:
                 return self.error(413, "Too large.")
             form = {k: v[0] for k, v in parse_qs(body, keep_blank_values=True).items()}
             ip = self.client_address[0]
             limit_key = rate_key(ip)
+
+            if parts == ["v1", "oc", "start"]:
+                if not oc or not oc.ready():
+                    return self.error(404, "Signing in with an OCAccount isn't on here yet.")
+                if not logins.allow(limit_key):
+                    return self.error(429, "Too many sign-in attempts. Wait a few minutes.")
+                got = oc.start()
+                if not got:
+                    return self.error(503, "Too many sign-ins at once. Try again in a few minutes.")
+                return self.reply(200, kv(got), cache="no-store")
+
+            if parts == ["v1", "remote", "poll"]:
+                acc = state.by_token(form.get("token", ""))
+                if not remote or not acc:
+                    return self.error(401 if remote else 404, "Sign in first." if remote else "Not open here.")
+                ok, why = remote.allowed(acc)
+                if not ok:
+                    return self.error(403, why)
+                got = remote.poll(acc, 0 if form.get("hello") == "1" else None)   # hello: answer at once
+                if not got:
+                    return self.reply(204, "")
+                return self.reply(200, json.dumps(got), "application/json", "no-store")
+
+            if parts == ["v1", "oc", "poll"]:
+                got = oc.poll(form.get("session", ""), form.get("key", "")) if oc else None
+                if got is None:
+                    return self.error(404, "That sign-in isn't here (it may have run out). Start it again.")
+                return self.reply(200, kv(got), cache="no-store")
 
             if parts == ["v1", "accounts", "create"]:
                 name, pin, avatar = form.get("name", "").strip(), form.get("pin", ""), form.get("avatar", "")
@@ -2357,6 +3212,57 @@ def make_handler(state, store, admin_key, web_dir="web", console_key="", tube=No
                     return self.error(503, str(e))
                 return self.reply(200, kv({"session": sid, "title": title, "duration": duration, "fps": TUBE_FPS,
                                            "rate": TUBE_RATE, "width": TUBE_W, "height": TUBE_H}))
+
+            if parts == ["v1", "relay", "sync"]:
+                if not relay or not relay.domain or not relay.secret:
+                    return self.error(404, "Not found.")
+                if not relay.signed(body, self.headers.get("X-Relay-Sign", "")):
+                    return self.error(401, "That sync isn't signed with this server's relay secret.")
+                t = int_or(form.get("t"), 0)
+                if abs(time.time() - t) > RELAY_SYNC_SKEW:
+                    return self.error(401, "The relay's clock is out. Set it right (timedatectl).")
+                relay.synced(form.get("hostkey", ""), form.get("busy", ""), form.get("proxy", ""))
+                text = relay.listing(t)
+                return self.reply(200, text, cache="no-store",
+                                  headers={"X-Relay-Sign": relay_sign(relay.secret, "list", text)})
+
+            if parts[:2] == ["v1", "relay"] and len(parts) == 3 and parts[2] in ("status", "claim", "release"):
+                if not relay or not relay.ready():
+                    return self.reply(200, kv({"relay": "off", "message": "The supporter relay isn't open yet."}),
+                                      cache="no-store")
+                acc = state.by_token(form.get("token", ""))
+                if not acc:
+                    return self.error(401, "Your sign-in expired. Sign in again.")
+                who = acc["name"].lower()
+                if not relay.asks.allow(who):
+                    return self.error(429, "That's a lot of asking. Wait a few minutes.")
+                code, msg = 200, ""
+                if parts[2] == "claim":
+                    step, _ = relay.supporter(who, acc["name"])
+                    if step != "ok":
+                        return self.error(503 if step == "error" else 403, relay.message(step))
+                    code, msg = relay.claim(who, form.get("name", "").strip().lower(), form.get("key", ""))
+                elif parts[2] == "release":
+                    code, msg = relay.release(who)
+                if code != 200:
+                    return self.error(code, msg)
+                if form.get("proxy") in ("0", "1"):   # what their server wants, from this HostMC
+                    relay.set_proxy(who, form["proxy"] == "1")
+                return self.reply(200, kv(relay.status(acc)), cache="no-store")
+
+            if parts in (["v1", "relay", "off"], ["v1", "relay", "on"], ["v1", "relay", "check"]):
+                if not self.is_admin():
+                    return self.error(401, "Admin key required.")
+                if not relay:
+                    return self.error(404, "The supporter relay isn't set up here.")
+                if parts[2] == "check":
+                    found = relay.recheck(body.strip().lower())
+                    if found is None:
+                        return self.error(404, "No name like that.")
+                    return self.reply(200, kv(found))
+                if not relay.turn(body.strip().lower(), parts[2] == "on"):
+                    return self.error(404, "No name like that is in use.")
+                return self.reply(200, "ok\n")
 
             if parts[:2] == ["v1", "accounts"] and len(parts) == 3 and parts[2] in ("me", "avatar", "logout"):
                 acc = state.by_token(form.get("token", ""))
@@ -2613,14 +3519,40 @@ def serve():
             state.data["server_id"] = secrets.token_hex(8)
             state.save()
         server_id = state.data["server_id"]
+    relay = None
+    if os.environ.get("XENITH_RELAY_DOMAIN"):
+        relay = Relay(state, os.environ.get("XENITH_RELAY_DOMAIN", ""), os.environ.get("XENITH_RELAY_SSH", ""),
+                      os.environ.get("XENITH_RELAY_SECRET", ""), os.environ.get("XENITH_RELAY_USER", "hostmc"),
+                      os.environ.get("XENITH_RELAY_PORTS", "30000-39999"), os.environ.get("XENITH_OCACCOUNT_URL", ""),
+                      os.environ.get("XENITH_OCACCOUNT_KEY", ""), os.environ.get("XENITH_RELAY_PATREON", ""),
+                      os.environ.get("XENITH_RELAY_ACCOUNT_URL", ""), os.environ.get("XENITH_RELAY_PLAYERS_PORT", "25565"))
+        for problem in relay.problems():
+            log(problem)
+        if relay.problems():
+            relay = None
+        elif not relay.ocaccount_url:
+            log("XENITH_OCACCOUNT_URL isn't set: nobody can be checked as a supporter, so no names are given out")
 
     def reaper():
         while True:
             time.sleep(30)
             tube.reap()
+            if relay:
+                try:
+                    relay.tick()
+                except Exception as e:            # keep the reaper going whatever happens
+                    log(f"relay: {e!r}")
     threading.Thread(target=reaper, daemon=True).start()
 
-    handler = make_handler(state, store, admin_key, web_dir, console_key, tube, public, downloads, lan, server_id)
+    oc_redirect = os.environ.get("XENITH_OC_REDIRECT", "") or (f"https://{https}/v1/oc/callback" if https else "")
+    oc = OCSignIn(state, os.environ.get("XENITH_OC_URL", ""), os.environ.get("XENITH_OC_CLIENT_ID", ""),
+                  os.environ.get("XENITH_OC_CLIENT_SECRET", ""), oc_redirect)
+    if not oc.ready():
+        log("Signing in with an OCAccount is off: set XENITH_OC_CLIENT_ID and XENITH_OC_CLIENT_SECRET "
+            "(and XENITH_PUBLIC_HTTPS or XENITH_OC_REDIRECT)")
+    remote = Remote(state, relay, os.environ.get("XENITH_REMOTE_ANYONE") == "1")
+    handler = make_handler(state, store, admin_key, web_dir, console_key, tube, public, downloads, lan, server_id,
+                           relay, oc, remote)
     httpd = ThreadingHTTPServer(("0.0.0.0", port), handler)
     handler.https = https
     httpd.daemon_threads = True
@@ -2639,7 +3571,8 @@ def serve():
                  "on, Deno when needed" if tube.deno else "on") if tube.available() else "off"
     print(f"XenithOS Cloud {VERSION} on :{port}{f' (relay on :{proxy_port})' if proxy_port else ''} "
           f"(admin routes {'on' if admin_key else 'off'}, Tube {tube_mode}"
-          f"{', consoles on its network use ' + lan if lan else ''})", flush=True)
+          f"{', consoles on its network use ' + lan if lan else ''}"
+          f"{', supporter relay for *.' + relay.domain if relay else ''})", flush=True)
     httpd.serve_forever()
 
 
@@ -2837,6 +3770,167 @@ def selftest_saves(base, kvparse, check, state):
           and listing(tb)[0].get("used") == "0" and os.listdir(folder) == [])
     sent = [put(ta, "volt", "best.txt", b"1", force=1)[0] for _ in range(SAVE_PUTS_PER_MIN)]
     check("saves: only so many uploads a minute", sent[0] == 200 and sent[-1] == 429)
+
+
+def selftest_oc(kvparse, check, state, store, web_dir):
+    """Signing in with an OCAccount (MineNest), against a stand-in for OCAccounts."""
+    codes = {"good": {"id": "a1", "name": "OwenOC", "xenithos": "Owen"},
+             "unlinked": {"id": "a2", "name": "Nolink", "xenithos": ""}}
+    seen = []
+
+    class FakeOC(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            form = {k: v[0] for k, v in parse_qs(self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()).items()}
+            seen.append(form)
+            ok = (self.path == "/api/oauth/token" and form.get("client_id") == "mn" and form.get("client_secret") == "s3cret"
+                  and form.get("redirect_uri") == "https://cloud.example/v1/oc/callback" and form.get("code") in codes)
+            out = json.dumps(codes.pop(form["code"]) if ok else {"error": "invalid_grant"}).encode()
+            self.send_response(200 if ok else 400)
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+
+    fo = ThreadingHTTPServer(("127.0.0.1", 0), FakeOC)
+    threading.Thread(target=fo.serve_forever, daemon=True).start()
+    oc = OCSignIn(state, f"http://127.0.0.1:{fo.server_address[1]}", "mn", "s3cret", "https://cloud.example/v1/oc/callback")
+    hs = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state, store, "k3y", web_dir, oc=oc))
+    threading.Thread(target=hs.serve_forever, daemon=True).start()
+
+    def r(method, path, body=None):
+        q = urllib.request.Request(f"http://127.0.0.1:{hs.server_address[1]}{path}", method=method,
+                                   data=body.encode() if body is not None else None)
+        try:
+            with urllib.request.urlopen(q) as resp:
+                return resp.status, resp.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    off = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state, store, "k3y", web_dir))
+    threading.Thread(target=off.serve_forever, daemon=True).start()
+    q = urllib.request.Request(f"http://127.0.0.1:{off.server_address[1]}/v1/oc/start", method="POST", data=b"")
+    try:
+        urllib.request.urlopen(q)
+        check("oc: off without a client", False)
+    except urllib.error.HTTPError as e:
+        check("oc: off without a client", e.code == 404)
+    off.shutdown()
+
+    code, body = r("POST", "/v1/oc/start", "")
+    st = kvparse(body)
+    check("oc: start gives a session, key and the OCAccounts page", code == 200 and st.get("session") and st.get("key")
+          and "/account/?client_id=mn&redirect_uri=https%3A%2F%2Fcloud.example%2Fv1%2Foc%2Fcallback&state=" + st["session"] in st.get("url", ""))
+    check("oc: waiting before the browser comes back",
+          kvparse(r("POST", "/v1/oc/poll", f"session={st['session']}&key={st['key']}")[1]).get("state") == "waiting")
+    check("oc: the wrong key gets nothing", r("POST", "/v1/oc/poll", f"session={st['session']}&key=nope")[0] == 404)
+    code, page = r("GET", f"/v1/oc/callback?code=good&state={st['session']}")
+    check("oc: the callback signs in", code == 200 and b"Signed in as Owen" in page and seen[-1]["client_secret"] == "s3cret")
+    got = kvparse(r("POST", "/v1/oc/poll", f"session={st['session']}&key={st['key']}")[1])
+    check("oc: poll hands over the linked profile's sign-in", got.get("state") == "done" and got.get("name") == "Owen"
+          and got.get("account") == "OwenOC" and state.by_token(got.get("token", "")) is state.account("Owen"))
+    check("oc: handed over once", r("POST", "/v1/oc/poll", f"session={st['session']}&key={st['key']}")[0] == 404)
+    check("oc: a used state can't finish again", b"run out" in r("GET", f"/v1/oc/callback?code=good&state={st['session']}")[1])
+
+    st2 = kvparse(r("POST", "/v1/oc/start", "")[1])
+    r("GET", f"/v1/oc/callback?code=unlinked&state={st2['session']}")
+    got = kvparse(r("POST", "/v1/oc/poll", f"session={st2['session']}&key={st2['key']}")[1])
+    check("oc: an account without a profile is told to link one", got.get("state") == "error" and "isn't linked" in got.get("error", ""))
+    st3 = kvparse(r("POST", "/v1/oc/start", "")[1])
+    r("GET", f"/v1/oc/callback?code=bogus&state={st3['session']}")
+    got = kvparse(r("POST", "/v1/oc/poll", f"session={st3['session']}&key={st3['key']}")[1])
+    check("oc: a refused code is an error", got.get("state") == "error" and "didn't accept" in got.get("error", ""))
+    st4 = kvparse(r("POST", "/v1/oc/start", "")[1])
+    r("GET", f"/v1/oc/callback?error=access_denied&state={st4['session']}")
+    check("oc: cancelled on OCAccounts", "cancelled" in kvparse(r("POST", "/v1/oc/poll", f"session={st4['session']}&key={st4['key']}")[1]).get("error", ""))
+    hs.shutdown()
+
+    # ---- MineNest from anywhere: a browser signs in with its OCAccount, its MineNest answers.
+    remote = Remote(state, None, anyone=True)
+    rs = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state, store, "k3y", web_dir, oc=oc, remote=remote))
+    threading.Thread(target=rs.serve_forever, daemon=True).start()
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **k):
+            return None
+    opener = urllib.request.build_opener(NoRedirect)
+
+    def b(method, path, body=None, cookie="", headers=None):
+        q = urllib.request.Request(f"http://127.0.0.1:{rs.server_address[1]}{path}", method=method,
+                                   data=body.encode() if body is not None else None, headers=dict(headers or {}, Cookie=cookie))
+        try:
+            with opener.open(q) as resp:
+                return resp.status, resp.read(), resp.headers
+        except urllib.error.HTTPError as e:
+            return e.code, e.read(), e.headers
+
+    owen_token = state._new_session(state.account("Owen"))
+    code, _, hd = b("GET", "/remote/")
+    loc = hd.get("Location", "")
+    check("remote: a browser without a sign-in goes to OCAccounts", code == 303 and "/account/?client_id=mn" in loc)
+    sid = parse_qs(urlparse(loc).query)["state"][0]
+    codes["goodb"] = {"id": "a1", "name": "OwenOC", "xenithos": "Owen"}
+    code, _, hd = b("GET", f"/v1/oc/callback?code=goodb&state={sid}")
+    cookie = (hd.get("Set-Cookie") or "").split(";")[0]
+    check("remote: OCAccounts' answer gives the browser its cookie", code == 303 and hd.get("Location") == "/remote/"
+          and cookie.startswith("xremote=") and "HttpOnly" in hd.get("Set-Cookie", ""))
+    code, page, _ = b("GET", "/remote/", cookie=cookie)
+    check("remote: says when the MineNest isn't connected", code == 503 and b"isn't connected" in page)
+    check("remote: the API says so too", b("GET", "/remote/api/servers", cookie=cookie)[0] == 503)
+    check("remote: no cookie, no API", b("GET", "/remote/api/servers")[0] == 401)
+
+    # The MineNest: it asks, answers what's asked, and asks again.
+    seen_req = []
+
+    def minenest():
+        for _ in range(4):
+            q = urllib.request.Request(f"http://127.0.0.1:{rs.server_address[1]}/v1/remote/poll", method="POST",
+                                       data=f"token={owen_token}".encode())
+            with urllib.request.urlopen(q, timeout=40) as resp:
+                if resp.status == 204:
+                    continue
+                for rq in json.loads(resp.read()):
+                    seen_req.append(rq)
+                    out = json.dumps({"id": rq["id"], "status": 200, "ctype": "application/json",
+                                      "body": base64.b64encode(json.dumps({"echo": rq["path"], "q": rq["query"],
+                                                                           "changes": rq["changes"]}).encode()).decode()})
+                    rep = urllib.request.Request(f"http://127.0.0.1:{rs.server_address[1]}/v1/remote/reply", method="POST",
+                                                 data=out.encode(), headers={"X-Xenith-Token": owen_token,
+                                                                             "Content-Type": "application/json"})
+                    urllib.request.urlopen(rep).read()
+    t = threading.Thread(target=minenest, daemon=True)
+    remote.POLL = 1
+    t.start()
+    time.sleep(0.5)
+    code, out, hd = b("GET", "/remote/api/servers?x=1", cookie=cookie)
+    check("remote: the browser's request reaches its MineNest and comes back", code == 200
+          and json.loads(out) == {"echo": "/api/servers", "q": "x=1", "changes": False})
+    code, out, _ = b("POST", "/remote/api/servers/a/start", "{}", cookie=cookie, headers={"X-MineNest": "1"})
+    check("remote: changes carry X-MineNest through", code == 200 and json.loads(out)["changes"] is True
+          and base64.b64decode(seen_req[-1]["body"]) == b"{}")
+    check("remote: a reply for another profile's request is refused",
+          not remote.reply(state.account("Owen"), "nope", {"status": 200}))
+    remote.ANSWER = 1
+    remote.links["owen"]["t"] = time.time()
+    t.join(10)
+    remote.links["owen"]["t"] = time.time()
+    check("remote: no answer in time is a 504", b("GET", "/remote/api/servers", cookie=cookie)[0] == 504)
+    check("remote: signing out drops the cookie", b("GET", "/remote/signout", cookie=cookie)[0] == 303
+          and b("GET", "/remote/api/servers", cookie=cookie)[0] == 401)
+    rs.shutdown()
+
+    picky = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state, store, "k3y", web_dir, oc=oc, remote=Remote(state, None)))
+    threading.Thread(target=picky.serve_forever, daemon=True).start()
+    q = urllib.request.Request(f"http://127.0.0.1:{picky.server_address[1]}/v1/remote/poll", method="POST",
+                               data=f"token={owen_token}".encode())
+    try:
+        urllib.request.urlopen(q)
+        check("remote: only for supporters (closed without the relay)", False)
+    except urllib.error.HTTPError as e:
+        check("remote: only for supporters (closed without the relay)", e.code == 403 and b"isn't open" in e.read())
+    picky.shutdown()
+    fo.shutdown()
 
 
 def selftest_achievements(req, kvparse, check, state):
@@ -3369,6 +4463,7 @@ else:
     selftest_friends(req, kvparse, check, state, httpd.RequestHandlerClass.friends)
     selftest_saves(base, kvparse, check, state)
     selftest_achievements(req, kvparse, check, state)
+    selftest_oc(kvparse, check, state, store, web_dir)
 
     # Tube, with stand-in yt-dlp and ffmpeg
     calls_file = os.path.join(tmp, "calls.txt")
@@ -3535,9 +4630,223 @@ else:
     check("relay: the direct port ignores PROXY lines", req("GET", "/v1/ping") == (200, b"pong\n"))
     relayed.shutdown()
 
+    # HostMC's supporter relay, with a stand-in OCAccounts that knows a few profiles
+    members = {"sup1": {"linked": True, "patreon": True, "supporter": True, "tier": "Supporter"},
+               "sup2": {"linked": True, "patreon": True, "supporter": True, "tier": "Big supporter"},
+               "sup3": {"linked": True, "patreon": True, "supporter": True, "tier": "Supporter"},
+               "sup4": {"linked": True, "patreon": True, "supporter": True, "tier": "Supporter"},
+               "nopatreon": {"linked": True, "patreon": False, "supporter": False},
+               "lowtier": {"linked": True, "patreon": True, "supporter": False, "tier": "Fan"}}
+    oc = {"down": False, "asked": 0}
+
+    class OCAccounts(BaseHTTPRequestHandler):
+        def log_message(self, fmt, *args):
+            pass
+
+        def do_GET(self):
+            oc["asked"] += 1
+            u = urlparse(self.path)
+            who = parse_qs(u.query).get("profile", [""])[0].lower()
+            if oc["down"]:
+                code, out = 500, b"{}"
+            elif u.path != "/api/partner/xenithos/supporter" or self.headers.get("X-Partner-Key") != "partn3r":
+                code, out = 401, b"{}"
+            elif who not in members:
+                code, out = 404, b'{"linked": false}'
+            else:
+                code, out = 200, json.dumps(members[who]).encode()
+            self.send_response(code)
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+
+    ocs = ThreadingHTTPServer(("127.0.0.1", 0), OCAccounts)
+    threading.Thread(target=ocs.serve_forever, daemon=True).start()
+    secret = secrets.token_hex(32)
+    hostkey = "ssh-ed25519 " + base64.b64encode(RELAY_KEY_HEAD + os.urandom(32)).decode()
+
+    def new_key():
+        return "ssh-ed25519 " + base64.b64encode(RELAY_KEY_HEAD + os.urandom(32)).decode()
+
+    check("supporter relay: off where it isn't set up", kvparse(req("POST", "/v1/relay/status", "token=x")[1]).get("relay") == "off"
+          and req("POST", "/v1/relay/sync", "t=1")[0] == 404)
+    check("supporter relay: settings checked", len(Relay(state, "not a domain", "", "short", ports="80-90").problems()) == 4)
+    relay = Relay(state, "mc.example.com", "tunnel.mc.example.com:2222", secret, "hostmc", "30000-30002",
+                  f"http://127.0.0.1:{ocs.server_address[1]}", "partn3r", "https://www.patreon.com/example")
+    check("supporter relay: settings ok", relay.problems() == [] and relay.ssh_port == 2222)
+    rs = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state, store, "k3y", web_dir, relay=relay))
+    threading.Thread(target=rs.serve_forever, daemon=True).start()
+
+    def rreq(method, path, body=None, headers=None):
+        r = urllib.request.Request(f"http://127.0.0.1:{rs.server_address[1]}{path}", method=method,
+                                   data=body.encode() if body is not None else None, headers=headers or {})
+        try:
+            with urllib.request.urlopen(r) as resp:
+                return resp.status, resp.read(), resp.headers
+        except urllib.error.HTTPError as e:
+            return e.code, e.read(), e.headers
+
+    proxy_v = [""]                                 # what the stand-in relay's syncs say about PROXY headers
+
+    def sync(t=None, key=secret, busy=""):
+        t = int(time.time()) if t is None else t
+        b = urlencode({"t": t, "hostkey": hostkey + " root@relay", "busy": busy, "proxy": proxy_v[0]})
+        return rreq("POST", "/v1/relay/sync", b, {"X-Relay-Sign": relay_sign(key, "sync", b)})
+
+    def listing():
+        code, b, h = sync()
+        ok = code == 200 and hmac.compare_digest(relay_sign(secret, "list", b), h.get("X-Relay-Sign", ""))
+        return b.decode().splitlines()[2:] if ok else None
+
+    tokens = {}
+    for who in ("Sup1", "Sup2", "Sup3", "Sup4", "Nolink", "Nopatreon", "Lowtier"):
+        tokens[who.lower()] = state.create(who, "1234", "1202001000")[0][1]
+
+    def ask(who, route="status", **form):
+        code, b, _ = rreq("POST", f"/v1/relay/{route}", urlencode({"token": tokens[who], **form}))
+        return code, kvparse(b)
+
+    check("supporter relay: closed until the relay has said hello", ask("sup1")[1].get("relay") == "off")
+    check("supporter relay: unsigned sync refused", rreq("POST", "/v1/relay/sync", "t=1")[0] == 401)
+    check("supporter relay: sync with another secret refused", sync(key="x" * 64)[0] == 401)
+    check("supporter relay: stale sync refused", sync(t=int(time.time()) - 600)[0] == 401)
+    t0 = int(time.time())
+    code, b, h = sync(t0)
+    check("supporter relay: sync answered, signed, with the request's time",
+          code == 200 and b.decode().startswith(f"t={t0}\ndomain=mc.example.com\n")
+          and hmac.compare_digest(relay_sign(secret, "list", b), h.get("X-Relay-Sign", "")))
+    check("supporter relay: the relay's host key kept, as a key alone", relay.data.get("hostkey") == hostkey and relay.ready())
+    check("supporter relay: needs a profile", rreq("POST", "/v1/relay/status", "token=nope")[0] == 401)
+    code, st = ask("nolink")
+    check("supporter relay: profile not linked to an OCAccount", code == 200 and st.get("step") == "link"
+          and "owencosta.diy/account" in st.get("message", "") and "name" not in st)
+    check("supporter relay: no name without being a supporter", ask("nolink", "claim", name="sneaky", key=new_key())[0] == 403)
+    check("supporter relay: Patreon not linked", ask("nopatreon")[1].get("step") == "patreon")
+    check("supporter relay: not on the tier", ask("lowtier")[1].get("step") == "tier"
+          and ask("lowtier", "claim", name="sneaky", key=new_key())[0] == 403)
+    code, st = ask("sup1")
+    check("supporter relay: a supporter, offered a free name", code == 200 and st.get("step") == "ok" and st.get("tier") == "Supporter"
+          and relay_name_problem(st.get("suggest", "")) is None and "name" not in st
+          and st.get("patreon") == "https://www.patreon.com/example")
+    with open(os.path.join(tmp, "state", "relay-blocked-words.txt"), "w") as f:
+        f.write("# words\nbadword\n")
+    key1 = new_key()
+    for bad in ("ab", "1abc", "a--b", "-abc", "abc-", "www", "a_b", "x" * 21, "my-badword", "my-b4dw0rd", "owen"):
+        check(f"supporter relay: name refused: {bad}", ask("sup1", "claim", name=bad, key=key1)[0] == 400)
+    for bad in ("", "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ", "ssh-ed25519 AAAA",
+                "ssh-ed25519 " + base64.b64encode(os.urandom(51)).decode()):
+        check(f"supporter relay: key refused: {bad[:20]}", ask("sup1", "claim", name="brave-otter", key=bad)[0] == 400)
+    code, st = ask("sup1", "claim", name="Brave-Otter", key=key1 + " me@pc\nrestrict,permitlisten=\"*\" " + new_key())
+    check("supporter relay: a name given, with what HostMC needs", code == 200 and st.get("name") == "brave-otter"
+          and st.get("state") == "on" and st.get("address") == "brave-otter.mc.example.com" and st.get("port") == "30000"
+          and st.get("ssh_host") == "tunnel.mc.example.com" and st.get("ssh_port") == "2222"
+          and st.get("ssh_user") == "hostmc" and st.get("hostkey") == hostkey and st.get("players_port") == "25565")
+    relay.players_port, relay.at = 25566, ":25566"
+    st = ask("sup1")[1]
+    check("supporter relay: a players' port other than 25565 goes in the address",
+          st.get("address") == "brave-otter.mc.example.com:25566" and st.get("players_port") == "25566"
+          and Relay(state, "mc.example.com", "t.example.com:22", "s" * 40, players_port="0").problems()
+          == ["XENITH_RELAY_PLAYERS_PORT must be the relay's port for players, like 25565"])
+    relay.players_port, relay.at = 25565, ""
+    check("supporter relay: the key kept as a key alone", relay.data["people"]["sup1"]["key"] == key1)
+    check("supporter relay: the relay told", listing() == [f"on|brave-otter|30000|{key1}"])
+    st = ask("sup1", proxy="1")[1]
+    check("supporter relay: a server that wants players' addresses: not before the relay says it can send them",
+          st.get("proxy") == "off" and st.get("proxy_able") == "0" and relay.data["people"]["sup1"].get("proxy") is True)
+    proxy_v[0] = "2"
+    lines = listing()
+    st = ask("sup1")[1]
+    check("supporter relay: the relay can: the server listed for its address, and HostMC told",
+          lines == [f"on|brave-otter|30000|{key1}", "proxy|brave-otter"] and st.get("proxy") == "on"
+          and st.get("proxy_able") == "1")
+    st = ask("sup1", proxy="0")[1]
+    check("supporter relay: players' addresses turned off again", st.get("proxy") == "off" and st.get("proxy_able") == "1"
+          and listing() == [f"on|brave-otter|30000|{key1}"])
+    key2 = new_key()
+    check("supporter relay: a name someone has is taken", ask("sup2", "claim", name="brave-otter", key=key2)[0] == 409)
+    check("supporter relay: someone else's key refused", ask("sup2", "claim", name="other-name", key=key1)[0] == 409)
+    code, st = ask("sup2", "claim", name="calm-heron", key=key2)
+    check("supporter relay: each supporter their own port", code == 200 and st.get("port") == "30001")
+    key1 = new_key()
+    check("supporter relay: same name again takes a new key", ask("sup1", "claim", name="brave-otter", key=key1)[0] == 200
+          and relay.data["people"]["sup1"]["key"] == key1)
+    code, st = ask("sup1", "claim", name="swift-fox", key=key1)
+    check("supporter relay: a new name, the old one held for them", code == 200 and st.get("name") == "swift-fox"
+          and st.get("port") == "30000" and st.get("held") == "brave-otter"
+          and listing() == ["held|brave-otter", f"on|calm-heron|30001|{key2}", f"on|swift-fox|30000|{key1}"])
+    check("supporter relay: a held name is no one else's", ask("sup3", "claim", name="brave-otter", key=new_key())[0] == 409)
+    check("supporter relay: theirs to take back", ask("sup1", "claim", name="brave-otter", key=key1)[1].get("name") == "brave-otter")
+    check("supporter relay: a third new name today", ask("sup1", "claim", name="third-name", key=key1)[0] == 200)
+    check("supporter relay: not a fourth", ask("sup1", "claim", name="fourth-name", key=key1)[0] == 429)
+    check("supporter relay: one name each", sum(n["owner"] == "sup1" and n["state"] != "left"
+                                      for n in relay.data["names"].values()) == 1)
+
+    later = time.time() + RELAY_RECHECK + 1
+    members["sup2"]["supporter"] = False
+    relay.checks.clear()
+    relay.tick(later)
+    code, st = ask("sup2")
+    check("supporter relay: membership ended: the relay stops, the name is kept", relay.data["names"]["calm-heron"]["state"] == "lapsed"
+          and "held|calm-heron" in listing() and st.get("state") == "lapsed" and "kept for you until" in st.get("message", ""))
+    members["sup2"]["supporter"] = True
+    relay.checks.clear()
+    check("supporter relay: back on when they come back", ask("sup2")[1].get("state") == "on" and f"on|calm-heron|30001|{key2}" in listing())
+    oc["down"] = True
+    relay.checks.clear()
+    asked = oc["asked"]
+    relay.tick(later + RELAY_RECHECK)
+    relay.tick(later + RELAY_RECHECK + 60)
+    check("supporter relay: OCAccounts down: nothing changes, and it isn't asked every minute",
+          relay.data["names"]["third-name"]["state"] == "on" and oc["asked"] - asked == 2)
+    check("supporter relay: OCAccounts down: said plainly", ask("sup1")[1].get("step") == "error"
+          and ask("sup1", "claim", name="third-name", key=key1)[0] == 503)
+    oc["down"] = False
+    members["sup2"]["supporter"] = False
+    relay.checks.clear()
+    relay.tick(later + 3 * RELAY_RECHECK)
+    relay.tick(later + 3 * RELAY_RECHECK + RELAY_HOLD_LAPSED)
+    check("supporter relay: names freed when their time is up", sorted(relay.data["names"]) == ["third-name"]
+          and sorted(relay.data["people"]) == ["sup1"])
+    sync(busy="30000,30001,99")                    # sup2's old tunnel is still up on 30001
+    check("supporter relay: a port with a tunnel left on it goes to no one else",
+          ask("sup3", "claim", name="brave-otter", key=new_key())[1].get("port") == "30002" and relay.busy == {30000, 30001})
+    sync(busy="30000")
+    members["sup2"]["supporter"] = True
+    relay.checks.clear()
+    check("supporter relay: a freed name and port can be had again",
+          ask("sup2", "claim", name="calm-heron", key=key2)[1].get("port") == "30001")
+    check("supporter relay: full", ask("sup4", "claim", name="last-one", key=new_key())[0] == 503)
+    code, st = ask("sup3", "release")
+    check("supporter relay: a name given up", code == 200 and "name" not in st and st.get("held") == "brave-otter"
+          and "held|brave-otter" in listing())
+    check("supporter relay: list needs the admin key", rreq("GET", "/v1/relay/list")[0] == 401)
+    sync(busy="30000")
+    code, b, _ = rreq("GET", "/v1/relay/list", headers={"X-Xenith-Key": "k3y"})
+    check("supporter relay: list, with whose tunnel is up", code == 200 and "\nthird-name|sup1|on|30000|0|ok|" in b.decode()
+          and b.decode().splitlines()[-1].endswith("|up") and "\ncalm-heron|sup2|on|30001|0|ok|" in b.decode())
+    check("supporter relay: turned off", rreq("POST", "/v1/relay/off", "third-name", {"X-Xenith-Key": "k3y"})[0] == 200
+          and "held|third-name" in listing() and ask("sup1")[1].get("state") == "off")
+    check("supporter relay: turned off: no way round it", ask("sup1", "claim", name="other-name", key=key1)[0] == 403
+          and ask("sup1", "release")[0] == 403)
+    check("supporter relay: on again", rreq("POST", "/v1/relay/on", "third-name", {"X-Xenith-Key": "k3y"})[0] == 200
+          and f"on|third-name|30000|{key1}" in listing())
+    check("supporter relay: off needs a name in use", rreq("POST", "/v1/relay/off", "nobody", {"X-Xenith-Key": "k3y"})[0] == 404)
+    members["sup1"]["supporter"] = False
+    code, b, _ = rreq("POST", "/v1/relay/check", "third-name", {"X-Xenith-Key": "k3y"})
+    check("supporter relay: checked now, on the admin's word", code == 200 and kvparse(b) == {"step": "tier", "tier": "Supporter",
+                                                                                            "state": "lapsed"}
+          and rreq("POST", "/v1/relay/check", "third-name")[0] == 401)
+    members["sup1"]["supporter"] = True
+    check("supporter relay: and back", kvparse(rreq("POST", "/v1/relay/check", "third-name", {"X-Xenith-Key": "k3y"})[1])
+          .get("state") == "on")
+    rs.shutdown()
+    ocs.shutdown()
+
     reloaded = State(os.path.join(tmp, "state"))
     check("state persists", reloaded.data["motd"] == "Game night 9PM"
-          and reloaded.account("tuber")["avatar"] == "29d97979ab4421")
+          and reloaded.account("tuber")["avatar"] == "29d97979ab4421"
+          and reloaded.data["relay"]["names"]["third-name"]["owner"] == "sup1"
+          and reloaded.data["relay"].get("proxy") == 2)
 
     httpd.shutdown()
     shutil.rmtree(tmp)
@@ -3554,22 +4863,33 @@ if __name__ == "__main__":
         sys.exit(store_key_command(args[1:]))
     if args == ["--selftest"]:
         sys.exit(selftest())
-    if len(args) == 2 and args[0] in ("send", "motd"):
+    if (len(args) == 2 and args[0] in ("send", "motd")) or args == ["relay", "list"] or \
+            (len(args) == 3 and args[:2] in (["relay", "off"], ["relay", "on"], ["relay", "check"])):
         # Talk to the running server so its in-memory state stays the source of truth.
-        import urllib.error
-        import urllib.request
         key = os.environ.get("XENITH_ADMIN_KEY", "")
         if not key:
             sys.exit("XENITH_ADMIN_KEY is not set (on the VPS use the `xenith` wrapper)")
         port = os.environ.get("XENITH_PORT", "8795")
-        path = "/v1/inbox" if args[0] == "send" else "/v1/motd"
-        r = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=args[1].encode(),
-                                   method="POST", headers={"X-Xenith-Key": key})
+        if args[0] == "relay":
+            path, data = f"/v1/relay/{args[1]}", (args[2].encode() if len(args) == 3 else None)
+        else:
+            path, data = ("/v1/inbox" if args[0] == "send" else "/v1/motd"), args[1].encode()
+        r = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data,
+                                   method="POST" if data is not None else "GET", headers={"X-Xenith-Key": key})
         try:
             with urllib.request.urlopen(r, timeout=5) as resp:
-                print("sent" if args[0] == "send" else "motd set", resp.read().decode().strip())
+                text = resp.read().decode().strip()
+        except urllib.error.HTTPError as e:
+            sys.exit(e.read().decode().strip().replace("error=", "", 1))
         except (urllib.error.URLError, OSError) as e:
             sys.exit(f"server not reachable: {e}")
+        if args[:2] == ["relay", "list"]:
+            print(text or "no names yet")
+        elif args[:2] == ["relay", "check"]:
+            print(text)
+        else:
+            print({"send": "sent", "motd": "motd set", "relay": f"{args[2]} turned {args[1]}"}[args[0]],
+                  text if args[0] != "relay" else "")
         sys.exit(0)
     if args:
         print(__doc__)

@@ -52,6 +52,19 @@ if step 1; then
     if [ -f "$old" ] && grep -q '^Exec=firefox-esr %u$' "$old" && command -v brave-browser >/dev/null; then rm -f "$old"; fi
 fi
 
+# 2 (XenithOS Desktop 2.0.4): Mullvad VPN gets a launcher on the desktop, next to Brave's. A
+# brand-new account gets it from desktop-start with the rest; this is for the ones that had their
+# launchers already. (HostMC's icon comes from console-apps, with HostMC on the home screen.)
+if step 2; then
+    echo "$(date '+%F %T') step 2: XenithOS Desktop 2.0.4"
+    DESK=$(xdg-user-dir DESKTOP 2>/dev/null)
+    [ -n "$DESK" ] && [ "$DESK" != "$HOME" ] || DESK="$HOME/Desktop"
+    src=/usr/share/xenithos-desktop/launchers/mullvad-vpn.desktop
+    if [ -f "$src" ] && [ -x "/opt/Mullvad VPN/mullvad-vpn" ] && [ ! -e "$DESK/mullvad-vpn.desktop" ]; then
+        mkdir -p "$DESK" && cp "$src" "$DESK/"        # desktop-start marks it safe to start
+    fi
+fi
+
 [ "$last" = new ] && last=0
-[ "$last" -ge 1 ] || echo 1 > "$DONE_FILE"
+[ "$last" -ge 2 ] || echo 2 > "$DONE_FILE"
 exit 0

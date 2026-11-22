@@ -207,7 +207,8 @@
   <svg id="logo" aria-label="XenithOS"></svg>
   <p>XenithOS is a homebrew console system. It runs on an Xbox 360 in place of the Microsoft dashboard, and on
     PCs and Raspberry Pis as a console you can switch to a normal Linux desktop. It has its own home screen,
-    profiles with avatars, a store, YouTube, DOOM and a light-trail game.</p>
+    profiles with avatars and friends, a store, YouTube, DOOM, a light-trail game, and Minecraft servers on
+    PCs with MineNest.</p>
   <p class="sub">Every copy uses XenithOS Cloud, the free service this page runs on: profiles, friends, cloud
     saves, achievements, the Store, news, leaderboards and Tube (YouTube) live here, for everyone. It's written in C, on libxenon for the Xbox and
     SDL2 everywhere else.</p>
@@ -225,7 +226,7 @@
   <div class="wrap">
     <h2>What it looks like</h2>
     <p class="lead">These come from the XenithOS simulator, which runs the exact code that goes on the console and saves the frames as images.</p>
-    <div class="shot"><img id="shot" src="static/shot-home.png?v=5" alt="The XenithOS home screen" width="1216" height="680"></div>
+    <div class="shot"><img id="shot" src="static/shot-home.png?v=6" alt="The XenithOS home screen" width="1216" height="680"></div>
     <p class="caption" id="caption"></p>
     <div class="tabs" role="tablist" id="tabs"></div>
   </div>
@@ -279,10 +280,11 @@
         <tr><td>Sound in games, app start times</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">0.5.1 keeps the picture up between programs and lines the sound chip up after a game</td></tr>
         <tr><td>Profiles, Cloud, avatars</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">needs the Ethernet cable on the Xbox; no Wi-Fi driver</td></tr>
         <tr><td>Friends, cloud saves, achievements</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">tested in the simulator as two consoles on one XenithOS Cloud; a save going up from the Xbox hasn't been tried on the real console</td></tr>
+        <tr><td>Signed Store, crash reports</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">since 0.7.0 every Store list is signed by XenithOS Cloud and consoles check it; the Xbox's check and its crash screen haven't run on a real console yet</td></tr>
         <tr><td>VOLT, DOOM, Tube, Photos</td><td class="yes" data-k="Builds">yes</td><td class="not" data-k="On the Xbox">not yet</td><td class="note">DOOM comes with Freedoom and has sound effects; no music yet</td></tr>
-        <tr><td>PCs and Raspberry Pis</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">0.5.2 runs apps inside XenithOS's window: no black screen between them</td></tr>
+        <tr><td>PCs and Raspberry Pis</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">apps run inside XenithOS's window with no black screen between them, and since 0.7.0 they reach XenithOS Cloud over HTTPS</td></tr>
         <tr><td>Minecraft and the guide</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">PCs only; they open over XenithOS on its own X server and the guide comes up over them, tested in a virtual display</td></tr>
-        <tr><td>HostMC</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">PCs only; it ran real Minecraft 26.3 and Paper servers in testing, but nobody has joined one from a real copy of Minecraft yet</td></tr>
+        <tr><td>MineNest (was HostMC)</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">PCs only; a program of its own now, which XenithOS installs at a version it has checked. Tested with stand-in servers; nobody has joined one from a real copy of Minecraft yet</td></tr>
         <tr><td>XenithOS Desktop (the whole OS for PCs)</td><td class="yes" data-k="Builds">yes</td><td class="note" data-k="On the Xbox">-</td><td class="note">installed on a real PC, and installs, starts and updates itself in VirtualBox with UEFI, Secure Boot and BIOS</td></tr>
         <tr><td>XenithOS Cloud and this site</td><td class="yes" data-k="Builds">yes</td><td class="live" data-k="On the Xbox">live</td><td class="note">you're on it</td></tr>
       </tbody>
@@ -340,9 +342,9 @@
       <li><b>Desktop mode</b> is in XenithOS's power menu: the full Linux desktop, for a browser and everything else.</li>
       <li><b>Return to XenithOS</b> in the desktop's menu goes back to console mode.</li>
       <li><b>Updates</b> come from the Store: pick <b>XenithOS update</b>, and it builds the new version on your machine and restarts into it.</li>
-      <li><b>The Store's Apps section</b> (LB and RB switch sections) has XenithOS's own apps, VOLT, DOOM, HostMC, Tube and Photos, and Minecraft from Flathub. DOOM comes with both Freedoom games. Installing an app puts it on the home screen, and X in the Store removes it again. Minecraft installs from Flathub through XenithOS, starts from its home screen and gets the whole screen.</li>
+      <li><b>The Store's Apps section</b> (LB and RB switch sections) has XenithOS's own apps, VOLT, DOOM, MineNest, Tube and Photos, and Minecraft from Flathub. DOOM comes with both Freedoom games. Installing an app puts it on the home screen, and X in the Store removes it again. Minecraft installs from Flathub through XenithOS, starts from its home screen and gets the whole screen.</li>
       <li><b>The guide</b>: press the Xbox button, or hold Esc, in a game. Return home leaves the game running (choose it again to go back), Switch game starts another, and the controller can work as a mouse for launchers or as a keyboard and mouse for Minecraft.</li>
-      <li><b>HostMC</b> hosts a Minecraft: Java Edition server from your XenithOS machine. Friends on your network join with its address, and its Internet page lets them join over the internet without opening ports, through playit.gg or through a VPS of your own.</li>
+      <li><b>MineNest</b> (it was HostMC) hosts a Minecraft: Java Edition server from your XenithOS machine. Friends on your network join with its address, and its Internet page lets them join over the internet without opening ports, through playit.gg, through a VPS of your own, or, for supporters on Patreon, through XenithOS's relay with a name of their own. With Paper, Bedrock Edition players can join too.</li>
     
     </ol>
     <h3>In the Store on PCs</h3>
@@ -359,10 +361,10 @@
     <p class="lead">XenithOS as a PC's whole operating system, in one ISO with everything in it, built on Ubuntu 24.04 LTS. The PC starts in a desktop with XenithOS's own look, and XenithOS Console is one click away. Brave, Mullvad VPN and a full set of security tools come with it, and it updates itself from Settings. For 64-bit PCs with 4 GB of memory and a 16 GB drive or more.</p>
     <h3>Download</h3>
     <div class="actions">
-      <a class="btn primary" href="https://dl.owencosta.diy/xenithos-desktop-2.0.1-amd64.iso">Download XenithOS Desktop 2.0.1 (2.4 GB)</a>
+      <span class="btn soon" aria-disabled="true">Download back soon</span>
       <a class="btn" href="https://github.com/OwenCosta/XenithOS/blob/main/desktop/README.md">How it works</a>
     </div>
-    <div class="sha">xenithos-desktop-2.0.1-amd64.iso sha256 e90ecd05a315e214da19557a779ede1bc8a0a306e192088dd4412eb4f6a30332</div>
+    <p class="muted">The download is being moved and is back shortly, as XenithOS Desktop 2.0.5. Until then, <a href="#pc">the install command</a> adds XenithOS Console to a PC that already runs Linux.</p>
     <div class="shot" style="margin-top:22px"><img src="static/shot-desktop.png" alt="XenithOS Desktop: the XenithOS logo as the wallpaper, Return to XenithOS Console and the other icons on the left, and the panel along the bottom" width="1280" height="800" loading="lazy"></div>
     <h3>Set it up</h3>
     <ol class="steps">
@@ -370,7 +372,7 @@
       <li>Start the PC from the stick (its boot menu key is usually F12, F11 or Esc) and choose <b>Install XenithOS Desktop</b>. <b>Start XenithOS Desktop</b> tries it first without changing anything.</li>
       <li>Make your account, then pick the drive. When it's done, choose Restart and wait: the PC restarts by itself into XenithOS Desktop.</li>
       <li><b>Return to XenithOS Console</b> on the desktop (or Super+Esc) opens XenithOS full screen. Its power menu, <b>Switch to desktop mode</b>, comes back.</li>
-      <li>The <b>Apps</b> menu has the security tools in their own group, sorted by what they're for. The console apps you install are there too, under Games and Media, and open full screen. <b>Settings &gt; Console apps</b> adds HostMC, DOOM and VOLT to XenithOS Console, and its <b>Your own apps</b> list puts the PC's other apps on the console's home screen.</li>
+      <li>The <b>Apps</b> menu has the security tools in their own group, sorted by what they're for. The console apps you install are there too, under Games and Media, and open full screen. <b>Settings &gt; Console apps</b> adds MineNest, DOOM and VOLT to XenithOS Console, and its <b>Your own apps</b> list puts the PC's other apps on the console's home screen.</li>
       <li>Updates are in <b>Settings &gt; Updates</b>: one button for XenithOS Desktop, XenithOS Console, the apps and the system. No writing the stick again.</li>
     </ol>
     <div class="warning">The installer erases the whole drive it installs on, with any other OS, files and games on it. Copy anything you want to keep first. It works with Secure Boot on.</div>
@@ -382,6 +384,10 @@
   <div class="wrap">
     <h2>Build log</h2>
     <ul class="log">
+      <li><b>0.7.2</b><time datetime="2026-11-17">Nov 17, 2026</time>
+        <p>HostMC is now MineNest, a program of its own for hosting Minecraft servers (<a href="https://github.com/OwenCosta/minenest">github.com/OwenCosta/minenest</a>). On XenithOS it looks and works as HostMC did, and your server, its settings and its place on the home screen carry over. XenithOS installs MineNest at a version it has checked against its own list, never as root, and new versions come with XenithOS's updates.</p></li>
+      <li><b>0.7.1</b><time datetime="2026-11-17">Nov 17, 2026</time>
+        <p>HostMC is a desktop app of its own on XenithOS Desktop: its own window, with the mouse and the keyboard, rows you can click and a box to type in. Supporters on Patreon can take their server onto the internet through XenithOS's own relay, with a name of their own under mc.owencosta.diy, from HostMC's Internet page, and with Paper the server sees each player's real address through it. With Paper, Bedrock Edition players can join too, through Geyser and Floodgate, which HostMC downloads and checks when you turn them on. Friends see a server's relay address.</p></li>
       <li><b>0.7.0</b><time datetime="2026-11-17">Nov 17, 2026</time>
         <p>Friends: ask someone by their gamertag, see who's on and what they're playing, and join a friend's HostMC server, from a new Friends tile. With cloud saves, DOOM's saves and XenithOS's settings follow your profile to your other machines, and fifteen achievements across VOLT, DOOM, Tube and HostMC are kept on XenithOS Cloud, here on the site too. The Store's lists now come signed by XenithOS Cloud and are checked before anything downloads, and X picks several to download one after another. PCs and Raspberry Pis talk to XenithOS Cloud over HTTPS. When XenithOS or an app crashes, it offers to send a report so it can be fixed, or sends it by itself if Settings says so.</p></li>
       <li><b>0.6.9</b><time datetime="2026-11-17">Nov 17, 2026</time>
@@ -505,16 +511,17 @@ $("nav").addEventListener("click", (e) => {
 /* Screens */
 const SHOTS = [
   ["home", "Home", "Your profile at the top, seven tiles, and the apps you've installed. A notification slides in when there's XenithOS news, a friend comes online, or someone asks to be friends."],
-  ["store", "Store", "Apps, game data and updates from XenithOS Cloud, with thumbnails. Downloads are checked against their SHA-256 before they're saved."],
+  ["store", "Store", "Apps, game data and updates from XenithOS Cloud, with thumbnails. Its lists come signed by XenithOS Cloud, every download is checked against its SHA-256 before it's saved, and X picks several to download one after another."],
   ["guide", "Guide", "On a PC, the Xbox button (or Esc held down) brings up the guide over any game: back to the home screen while it keeps running, another game, or the controller as a mouse or a keyboard."],
   ["profile", "Profile", "Profiles are saved to XenithOS Cloud and follow you to any Xbox, PC or Pi. Make one with a gamertag and a passcode."],
   ["avatar", "Avatar", "Thirteen parts in three tabs: face, hair and outfit, with every colour as a swatch. Y picks something random."],
   ["cloud", "Cloud", "Your friends who are on and what they're playing, XenithOS news, and the VOLT leaderboard with everyone's avatar."],
+  ["friends", "Friends", "Ask someone by their gamertag. Once they say yes, you see each other online, what you're playing, and each other's MineNest servers to join."],
   ["volt", "VOLT", "Grab sparks, don't hit the walls. Your best score goes on your profile."],
 ];
 function showShot(i) {
   const [id, name, text] = SHOTS[i];
-  $("shot").src = `static/shot-${id}.png?v=5`;
+  $("shot").src = `static/shot-${id}.png?v=6`;
   $("shot").alt = `XenithOS ${name} screen`;
   $("caption").textContent = text;
   [...$("tabs").children].forEach((b, j) => b.setAttribute("aria-selected", i === j ? "true" : "false"));
@@ -549,7 +556,7 @@ function ago(s) {
 }
 
 /* Achievements: [id, app, name, how it's earned, how many players have it] from v1/achievements */
-const APPS = { volt: "VOLT", doom: "DOOM", tube: "Tube", hostmc: "HostMC" };
+const APPS = { volt: "VOLT", doom: "DOOM", tube: "Tube", hostmc: "MineNest", minenest: "MineNest" };
 let catalogue = [];
 function trophy(fill) {
   const ns = "http://www.w3.org/2000/svg", svg = document.createElementNS(ns, "svg"), p = document.createElementNS(ns, "path");

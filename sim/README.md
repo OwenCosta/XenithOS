@@ -47,12 +47,13 @@ More switches:
   itself (AddressSanitizer does); `linux/test-crash.sh` crashes real programs on purpose.
 - `XSIM_BIN=xdoom XSIM_WAD=path/to/freedoom1.wad` runs DOOM (`sim/scripts/doom.txt`), and `XSIM_BIN=xtube`
   runs Tube against a XenithOS Cloud with yt-dlp and ffmpeg (`sim/scripts/tube.txt`, use `XSIM_THREAD=1`).
-- `XSIM_BIN=xhostmc XSIM_KIND=pc XSIM_THREAD=1 XSIM_HOSTMC=1` runs HostMC with a stand-in for the Minecraft
-  server (`sim/hostmc/java`, which talks like one: starting up, players joining, answers to commands) and
-  what it would have downloaded already in `hostmc/` (`sim/hostmc/data`), so nothing is downloaded
-  (`sim/scripts/hostmc.txt`). It runs in real time, since the stand-in does. Without `XSIM_HOSTMC`, HostMC
-  downloads Java and a real server and runs it. A server a script leaves running is stopped afterwards.
-  The stand-in answers server list pings on its port (127.0.0.1 only), and `sim/hostmc/ping.py` sends one.
+- `XSIM_BIN=xminenest XSIM_KIND=pc XSIM_THREAD=1 XSIM_MINENEST=1 MINENEST_BIN=path/to/minenest` runs the
+  MineNest app with MineNest's own program (built from github.com/OwenCosta/minenest) in a folder of its own,
+  a stand-in for the Minecraft server as its java (`sim/minenest/java`, which talks like one: starting up,
+  players joining, answers to commands) and nothing downloaded (`MINENEST_FAKE_INSTALL`); one server is made
+  first (`sim/scripts/minenest.txt`). It runs in real time, since MineNest and the stand-in do. MineNest's
+  program stops afterwards, with any server a script left running. The stand-in answers server list pings on
+  its port (on `server-ip`, or 127.0.0.1).
 - `XSIM_BIN=xmusic XSIM_MUSIC=<folder>` runs Music with that folder as the stick's `music` folder
   (`sim/scripts/music.txt`). `sim/music/make-music.sh <folder>` makes a library to try it with, all synthesized
   here (MP3, FLAC, Ogg and WAV at different rates, tags, covers inside the songs and beside them, accented
@@ -71,18 +72,22 @@ More switches:
   signed` or `... refused`.
 - `XSIM_NET_TIME=1` lets virtual time pass while waiting on the network, as real time does on a console, so a
   screen that draws during a download (the Store's downloads queue) gets its frames and reads its buttons then.
+- `XSIM_NET_UP=1` starts with the network up, as a PC's simply is. Otherwise it's down until something asks
+  for it, as on the Xbox, so an app that never needs it (VOLT before uploading a score) says Offline.
+- `XSIM_DESKTOP=1` runs the program as a desktop app, as XenithOS Desktop's Apps menu opens it
+  (`plat_desktop()`): the script drives a mouse and the keyboard's own keys too (below), and
+  `XSIM_CLIPBOARD` is what's been copied when it starts (what the program copies is said on stderr, as
+  `sim: copied: ...`). Use `XSIM_W=1280 XSIM_H=720`, the picture's real size, so clicks land where they
+  would on a PC.
 - `sim/store/test-store.sh` runs the Store's signatures and its downloads queue end to end through the
   `store_signed.txt`, `store_refused.txt`, `store_install_first.txt`, `store_queue.txt` and `store_queue_pc.txt`
   scripts, against a local XenithOS Cloud with a Store and a key of its own and `sim/store/between.py`
   between the two (it swaps a file and its SHA-256 on the way, takes signatures off, hides the bundle, or sends
   a download slowly enough to stop), and checks each step; screenshots go to `sim/out/store-signing`.
-- `sim/hostmc/test-vps.sh` runs HostMC's own-VPS route through the `hostmc_vps*.txt` scripts, with a private
-  sshd (run as you, on spare ports) standing in for the VPS, and checks each step; screenshots go to
-  `sim/out/hostmc-vps`.
 - `sim/social/test-friends.sh` runs friends between two consoles: a XenithOS Cloud of its own (on port 18795,
   `XSIM_CLOUD_PORT` for another), two profiles, and simulator runs with one or the other (`friends_*.txt`):
   asking by gamertag, the request at start-up and saying yes, a friend playing Minecraft on a PC while their
-  HostMC server can be reached, the home screen, Cloud and Friends showing it, and "Show friends what I'm
+  MineNest server can be reached, the home screen, Cloud and Friends showing it, and "Show friends what I'm
   playing" turned off. Each step is checked through XenithOS Cloud's API; screenshots go to
   `sim/out/friends-*`. `sim/social/cloud.py` makes the profiles and does the API calls.
 - `sim/social/test-saves.sh` runs cloud saves between an Xbox and a PC signed in to one profile, each with a
@@ -93,7 +98,7 @@ More switches:
   so its saves are stand-ins with a save's name in the first 24 bytes.
 - `sim/social/test-achievements.sh` runs achievements: ones an offline Xbox earned going up when XenithOS
   starts, Tube's against stand-ins for yt-dlp and ffmpeg (`tube_achieve.txt`; the test server's requests to
-  anywhere else go to a closed port), HostMC's with its stand-in server (`hostmc.txt`), and XenithOS showing
+  anywhere else go to a closed port), MineNest's with its stand-in server (`minenest.txt`, with `MINENEST_BIN`), and XenithOS showing
   them (`ach_screens.txt`). Screenshots go to `sim/out/ach-*`.
 
 ## Scripts
@@ -111,6 +116,19 @@ One command per line; each controller poll is one frame.
 
 Buttons: `up down left right a b x y lb rb lt rt start back guide ls rs`.
 
+With `XSIM_DESKTOP=1`, for desktop apps (each takes a frame, then one with nothing pressed):
+
+| Command | |
+|---|---|
+| `mouse X Y` | the pointer moves to X, Y in the picture |
+| `click X Y`, `rclick X Y` | it moves there and the left or right button is clicked |
+| `wheel N` | the wheel turns N clicks (positive is away from you, up the page) |
+| `key NAME`, `key ctrl+NAME` | a key of the keyboard's own (`plat_key_event`): a letter or digit, `tab`, `enter`, `esc`, `backspace`, `delete`, `home`, `end`, `pageup`, `pagedown`, the arrows, `f1` to `f12` |
+| `type TEXT`, `type "TEXT"` | typed into the text field that's open (`\|` is Enter); quotes keep spaces at the ends |
+
+`key` is only the keyboard's own key: what a key also does as the controller (Enter is A, Esc is B, the
+arrows are the D-pad) is a `press`.
+
 ## All the scripts at once
 
 `sim/test-scripts.sh` runs every script with the switches its header gives it and `XSIM_TILED=1`, as CI does,
@@ -126,7 +144,7 @@ that doesn't finish. `sim/test-scripts.sh boot tour` runs only those.
   the report `feedback.txt` sends, and the home-network route `store_route.txt` takes.
 - `doom.txt` needs a WAD (`XSIM_WAD=path/to/freedoom1.wad`), and Tube's script asks YouTube only where the
   machine has yt-dlp and ffmpeg (without them it shows Tube turned off). Scripts whose header names one of
-  the `sim/hostmc/test-*.sh` tests are left to that test. A new script runs with no switches until it's
+  the `sim/minenest/test-*.sh` tests are left to that test. A new script runs with no switches until it's
   given some in `sim/test-scripts.sh`.
 - Screenshots and each run's log go to `sim/out/test-<name>/`. `XSIM_LIMIT` is how long a run may take
   (900 s).

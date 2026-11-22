@@ -1,11 +1,12 @@
 #!/bin/bash
 # Runs as the desktop starts (XFCE's autostart).
 # - The first time, it puts XenithOS's launchers on the desktop: Return to XenithOS Console,
-#   Brave, Files, Terminal and Settings (and on the USB stick, the installer).
+#   Brave, Files, Terminal, Settings and Mullvad VPN (and on the USB stick, the installer).
+#   Launchers added by a later version reach older accounts through user-migrate.
 # - Every time, it tells XFCE those launchers are safe to start: XFCE otherwise asks before
 #   starting any launcher on the desktop it hasn't been told about.
 # - Every time, it brings the Apps menu's entries for XenithOS Console's apps in step with
-#   XenithOS Console's home screen.
+#   XenithOS Console's home screen, and MineNest's icon on the desktop (console-apps menu).
 # - It applies the person's choices from Settings that XFCE doesn't keep itself, sets the sound
 #   to a level that can be heard the first time, and says when updates are ready.
 LIB=/usr/lib/xenithos-desktop
@@ -26,7 +27,11 @@ if [ ! -f "$STAMP" ]; then
     for f in "$LAUNCHERS"/*.desktop; do
         [ -f "$f" ] || continue
         # A launcher for an app that isn't installed would only be a dead icon.
-        prog=$(sed -n 's/^Exec=\([^ ]*\).*/\1/p' "$f" | head -n 1)
+        prog=$(sed -n 's/^Exec=//p' "$f" | head -n 1)
+        case "$prog" in
+            \"*) prog=${prog#\"}; prog=${prog%%\"*} ;;     # a quoted path: "/opt/Mullvad VPN/mullvad-vpn"
+            *) prog=${prog%% *} ;;
+        esac
         command -v "$prog" >/dev/null 2>&1 || [ -x "$prog" ] || continue
         cp "$f" "$DESK/"
     done

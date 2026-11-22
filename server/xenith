@@ -3,6 +3,8 @@
 #   xenith send "XenithOS 0.5 is out" a news post: everyone sees it on the Cloud screen
 #   xenith motd "Welcome"             banner at the top of the Cloud screen
 #   xenith status                     service state and the last log lines
+#   xenith relay list                 HostMC supporter relay names: whose, on or not, tunnel up
+#   xenith relay off|on|check NAME    turn a name off or back on, or ask OCAccounts about it now
 #   xenith tube-update                newest yt-dlp, Deno and PO token provider for Tube
 set -e
 if [ "$1" = "status" ]; then

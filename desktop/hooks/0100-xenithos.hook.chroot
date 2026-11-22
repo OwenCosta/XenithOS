@@ -44,6 +44,24 @@ for p in $PROGRAMS; do
     fi
 done
 
+# MineNest's own program (github.com/OwenCosta/minenest), which runs the MineNest app's servers,
+# fetched as linux/install.sh and update.sh fetch it on a PC. A PC installed from this ISO already
+# has this XenithOS Console, so no update would bring it. get-minenest.sh keeps a download only if
+# its SHA-256 is the one pinned in linux/minenest.sha256, and it doesn't run as root, so it fetches
+# into a folder of nobody's first. No MineNest, no ISO.
+if [ -f "$SRC/linux/get-minenest.sh" ]; then
+    mn=$(mktemp -d)
+    chown nobody: "$mn"
+    runuser -u nobody -- bash "$SRC/linux/get-minenest.sh" "$mn"
+    if [ ! -x "$mn/bin/minenest" ]; then
+        echo "MineNest's program couldn't be fetched for the ISO" >&2
+        exit 1
+    fi
+    install -D -m 755 "$mn/bin/minenest" /usr/lib/xenithos/bin/minenest
+    install -m 644 "$mn/bin/minenest.managed" /usr/lib/xenithos/bin/minenest.managed
+    rm -rf "$mn"
+fi
+
 # Each program is started once, with no screen and no sound, and has to be still running five
 # seconds later, when timeout ends it (that's the 137). One that stops by itself as it starts
 # would do the same on every PC. Ubuntu's compiler adds checks (_FORTIFY_SOURCE) that end a

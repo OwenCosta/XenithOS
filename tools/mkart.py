@@ -2,7 +2,7 @@
 """Draw XenithOS Store thumbnails (flat style) and write them as PNG and XIMG.
 
     python3 tools/mkart.py            -> art/thumbs/<id>.png and art/thumbs/<id>.ximg
-    python3 tools/mkart.py hostmc     -> only the ones named
+    python3 tools/mkart.py minenest   -> only the ones named
     python3 tools/mkart.py logo       -> only the logo's files (see LOGO_X below)
 
 Besides XenithOS's own apps, it draws a card for every app in server/flathub.example.json and
@@ -339,11 +339,18 @@ def music():
     return img.resize((W, H), Image.LANCZOS)
 
 
-def hostmc():
+# MineNest's pixel icon (github.com/OwenCosta/minenest): a grass block in a nest, 16 by 16.
+MINENEST_PIXELS = [(1, 9, 14, 5, '7a5230'), (0, 10, 1, 3, '7a5230'), (15, 10, 1, 3, '7a5230'), (2, 9, 2, 1, '9c6b3f'), (7, 10, 3, 1, '9c6b3f'), (12, 9, 2, 1, '9c6b3f'), (3, 12, 2, 1, '5c3c22'), (10, 12, 2, 1, '5c3c22'), (4, 2, 8, 8, '8b5a33'), (4, 2, 8, 3, '6fb04a'), (4, 5, 2, 1, '6fb04a'), (8, 5, 1, 1, '6fb04a'), (10, 5, 2, 1, '6fb04a'), (5, 3, 1, 1, '8fd068'), (9, 2, 1, 1, '8fd068'), (6, 7, 1, 1, '6b4426'), (9, 8, 1, 1, '6b4426')]
+
+
+def minenest():
     img = Image.new("RGB", (W, H), BG_DARK)
     d = ImageDraw.Draw(img)
-    d.text((22, 34), "HostMC", font=font("Black", 64), fill=TEXT)
-    d.text((26, 128), "Your Minecraft server", font=font("Medium", 20), fill=SUB)
+    s, ox, oy = 5, 22, 32                           # 16 pixels of 5: 80 square
+    for x, y, w, h, c in MINENEST_PIXELS:
+        d.rectangle([ox + x * s, oy + y * s, ox + (x + w) * s - 1, oy + (y + h) * s - 1], fill="#" + c)
+    d.text((112, 50), "MineNest", font=font("Black", 38), fill=TEXT)
+    d.text((26, 128), "Minecraft servers and mods", font=font("Medium", 20), fill=SUB)
     return img
 
 
@@ -431,7 +438,7 @@ def main():
         "tube": tube(),
         "photos": photos(),
         "music": music(),
-        "hostmc": hostmc(),
+        "minenest": minenest(),
         "freedoom1": freedoom(1, (19, 32, 26), (143, 181, 154)),
         "freedoom2": freedoom(2, (35, 20, 20), (214, 160, 143)),
         "xenith": xenith(),

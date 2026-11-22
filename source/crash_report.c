@@ -236,8 +236,8 @@ static void forget(const struct crash *c)
 /* "XenithOS", or the app's name as the home screen shows it. */
 static void display_name(const char *program, char *out, int n)
 {
-    static const char *const ids[] = {"xenithos", "volt", "doom", "tube", "photos", "hostmc"};
-    static const char *const names[] = {"XenithOS", "VOLT", "DOOM", "Tube", "Photos", "HostMC"};
+    static const char *const ids[] = {"xenithos", "volt", "doom", "tube", "photos", "hostmc", "minenest"};
+    static const char *const names[] = {"XenithOS", "VOLT", "DOOM", "Tube", "Photos", "HostMC", "MineNest"};
     int i;
     for (i = 0; i < napps; i++)
         if (!strcasecmp(apps[i].id, program) && apps[i].name[0]) {

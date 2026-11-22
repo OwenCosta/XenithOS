@@ -1,5 +1,5 @@
 # XenithOS's checks: the PC version built as Ubuntu 24.04 and Debian 12 build it, the simulator with
-# every script in sim/scripts, XenithOS Cloud's self-tests, HostMC's tests and the Xbox 360 build.
+# every script in sim/scripts, XenithOS Cloud's self-tests, MineNest's tests and the Xbox 360 build.
 # Each step runs the same commands as on a PC (README.md, "Checks").
 #
 # On every push to a branch and every pull request, and twice a week, which keeps the Xbox
@@ -59,7 +59,7 @@ jobs:
           echo "SDL $(sdl2-config --version)"
           fortify=$(echo | gcc -O2 -dM -E - | sed -n 's/^#define _FORTIFY_SOURCE //p')
           echo "_FORTIFY_SOURCE at -O2: ${fortify:-off}"
-          # Ubuntu's gcc builds with _FORTIFY_SOURCE=3, which is what stopped HostMC on real PCs
+          # Ubuntu's gcc builds with _FORTIFY_SOURCE=3, which is what stopped HostMC (now MineNest) on real PCs
           # (a realpath buffer smaller than PATH_MAX). If that changes, this build stops proving it.
           if grep -qx 'ID=ubuntu' /etc/os-release && [ "$fortify" != 3 ]; then
             echo "::error::Ubuntu 24.04's gcc should build with _FORTIFY_SOURCE=3"
@@ -122,55 +122,47 @@ jobs:
           fi
           python3 server/mcrelay/mcrelay.py --selftest
 
-  hostmc:
-    name: HostMC, ${{ matrix.test }}
+  minenest:
+    name: MineNest, ${{ matrix.test }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        test: [linux/test-hostmc.sh, sim/hostmc/test-vps.sh, sim/hostmc/test-relay.sh]
+        test: [linux/test-minenest.sh, sim minenest.txt]
     env:
       TEST: ${{ matrix.test }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Is it on this branch?
-        id: here
-        run: |
-          if [ -f "$TEST" ]; then echo "run=1" >> "$GITHUB_OUTPUT"
-          else echo "::notice::$TEST isn't on this branch yet: it comes with hostmc-relay"; fi
       - name: Packages
-        if: steps.here.outputs.run
         run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-            libsdl2-dev libx11-dev zlib1g-dev xvfb xdotool x11-apps imagemagick openssh-server > /dev/null
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends             libsdl2-dev libx11-dev zlib1g-dev xvfb xdotool x11-apps imagemagick golang-go > /dev/null
+      - name: MineNest's own program (github.com/OwenCosta/minenest, main)
+        run: |
+          # Ubuntu's Go fetches the Go version MineNest's go.mod asks for by itself (GOTOOLCHAIN).
+          git clone --depth 1 https://github.com/OwenCosta/minenest.git "$RUNNER_TEMP/minenest"
+          (cd "$RUNNER_TEMP/minenest" && go build -o "$RUNNER_TEMP/bin/minenest" ./cmd/minenest)
+          echo "MINENEST_BIN=$RUNNER_TEMP/bin/minenest" >> "$GITHUB_ENV"
       - name: Build
-        if: steps.here.outputs.run
         run: |
           case "$TEST" in
-            linux/*) make -C linux -j"$(nproc)" xenithos hostmc ;;   # with Ubuntu's _FORTIFY_SOURCE=3
-            *) make -C sim -j"$(nproc)" xhostmc ;;
+            linux/*) make -C linux -j"$(nproc)" xenithos minenest ;;   # with Ubuntu's _FORTIFY_SOURCE=3
+            *) make -C sim -j"$(nproc)" xminenest ;;
           esac
-      - name: User namespaces
-        if: steps.here.outputs.run && matrix.test == 'sim/hostmc/test-relay.sh'
-        run: |
-          # test-relay.sh gives HostMC a hosts file of its own in a user namespace (unshare -rm).
-          # Ubuntu 24.04's AppArmor lets a program make one but takes its privileges away inside,
-          # so the mount fails; GitHub's image keeps that on. This machine is thrown away after.
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: ${{ matrix.test }}
-        if: steps.here.outputs.run
-        run: ./"$TEST"
+        run: |
+          case "$TEST" in
+            linux/*) ./"$TEST" ;;
+            *) XSIM_BIN=xminenest XSIM_KIND=pc XSIM_THREAD=1 XSIM_MINENEST=1 XSIM_TYPE="say Hello from MineNest|"                  sim/run.sh sim/scripts/minenest.txt minenest ;;
+          esac
       - name: Screenshots and logs
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: hostmc-${{ strategy.job-index }}
+          name: minenest-${{ strategy.job-index }}
           path: |
-            /tmp/xos-hostmc/
-            /tmp/hostmc-vps-test/
-            /tmp/hostmc-relay-test/
+            /tmp/xos-minenest/
             sim/out/
           retention-days: 7
           if-no-files-found: ignore

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""A stand-in for `java -Xmx... -jar server.jar nogui`, so HostMC can be tried in the simulator
-(sim/run.sh with XSIM_HOSTMC=1) with nothing downloaded and no Java.
+"""A stand-in for `java -Xmx... -jar server.jar nogui`, so MineNest can be tried in the simulator
+(sim/run.sh with XSIM_MINENEST=1) and linux/test-minenest.sh with nothing downloaded and no Java:
+MineNest runs it as its java (MINENEST_JAVA).
 
 It says what a Minecraft server says, in the same log format: starting up, Done, two players
 joining (Steve, then Alex, who leaves after a while), a line of chat, and answers to the commands
@@ -8,13 +9,25 @@ HostMC sends through its standard input (list, say, save-all, op, whitelist, sto
 It keeps ops.json and whitelist.json like the server does, makes a small world folder, refuses
 to start without eula=true in eula.txt, and saves and stops on "stop" or SIGTERM.
 
-It answers a server list ping on its port (127.0.0.1 only), as Minecraft does, so a route to the
-server (HostMC's own-VPS tunnel) can be checked; anyone trying to join is turned away politely.
+It answers a server list ping on its port (on server-ip, or 127.0.0.1 when that's empty), as
+Minecraft does, so a route to the server (HostMC's own-VPS tunnel) can be checked; anyone trying to
+join is turned away politely.
+
+Started as Paper (installed.txt says type=paper), it loads Geyser and Floodgate from plugins/ as
+Paper would (their log lines, Geyser's plugins/Geyser-Spigot/config.yml made the first time), and
+then takes Floodgate's "fwhitelist add NAME" (the player goes in whitelist.json as .NAME).
+
+Like Paper with proxies.proxy-protocol on in config/paper-global.yml (which HostMC turns on for
+players' real addresses through its supporter relay), it then wants a PROXY protocol header, v2 or
+v1, at the start of every connection, takes the player's address from it, and closes a connection
+without one. Who each connection was from goes in connections.log ("status 203.0.113.7",
+"join ...", "no PROXY header from ..."), for tests.
 
 HOSTMC_FAKE_PLAYERS="Steve,Alex" changes who joins ("" for nobody).
 """
 import json
 import os
+import re
 import signal
 import socket
 import sys
@@ -25,6 +38,7 @@ lock = threading.Lock()
 stopping = threading.Event()
 online = []
 start = time.time()
+plugins = []                                       # the plugins it loaded (as Paper)
 
 
 def log(level, msg, thread="Server thread"):
@@ -116,6 +130,11 @@ def command(cmd):
             names_file("whitelist.json", (lambda e: e + [entry(name)]) if rest[0] == "add"
                        else (lambda e: [x for x in e if x["name"] != name]))
             say(("Added %s to the whitelist" if rest[0] == "add" else "Removed %s from the whitelist") % name)
+    elif verb == "fwhitelist" and "floodgate" in plugins and len(rest) > 1 and rest[0] == "add":
+        name = " ".join(rest[1:]).strip('"').replace(" ", "_")
+        names_file("whitelist.json", lambda e: e + [{"uuid": "00000000-0000-0000-0009-%012d" % (abs(hash(name)) % 10 ** 12),
+                                                    "name": "." + name}])
+        log("INFO", "[floodgate] Added .%s to the whitelist" % name)
     elif verb in ("kick", "ban") and rest:
         name = rest[0]
         if verb == "ban":
@@ -172,12 +191,72 @@ def mc_string(s):
     return varint(len(b)) + b
 
 
+PROXY_V2 = b"\r\n\r\n\x00\r\nQUIT\n"
+
+
+def proxy_protocol():
+    """proxies.proxy-protocol in config/paper-global.yml, as Paper reads it."""
+    try:
+        with open(os.path.join("config", "paper-global.yml"), encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return False
+    m = re.search(r"^proxies:[ \r]*\n((?:[ \t].*\n|[ \t]*\n|#.*\n)*)", text + "\n", re.M)
+    return bool(m and re.search(r"^  proxy-protocol:[ \t]*true[ \t\r]*$", m.group(1), re.M))
+
+
+def read_exact(conn, n):
+    data = b""
+    while len(data) < n:
+        chunk = conn.recv(n - len(data))
+        if not chunk:
+            raise EOFError
+        data += chunk
+    return data
+
+
+def read_proxy(conn):
+    """The player's (address, port) from the PROXY header the connection starts with, or None."""
+    head = read_exact(conn, 16)
+    if head[:12] == PROXY_V2:
+        body = read_exact(conn, int.from_bytes(head[14:16], "big"))
+        if head[12] != 0x21:
+            return None                            # LOCAL: no player to name
+        if head[13] == 0x11 and len(body) >= 12:
+            return socket.inet_ntop(socket.AF_INET, body[0:4]), int.from_bytes(body[8:10], "big")
+        if head[13] == 0x21 and len(body) >= 36:
+            return socket.inet_ntop(socket.AF_INET6, body[0:16]), int.from_bytes(body[32:34], "big")
+        return None
+    if head.startswith(b"PROXY "):                 # version 1: one line of text
+        line = head
+        while not line.endswith(b"\r\n") and len(line) < 108:
+            line += read_exact(conn, 1)
+        parts = line.decode("ascii", "replace").split()
+        if len(parts) == 6:
+            return parts[2], int(parts[4])
+    return None
+
+
+def note(what, who):
+    with lock:
+        with open("connections.log", "a", encoding="utf-8") as f:
+            f.write("%s %s\n" % (what, who[0]))
+
+
 def answer(conn):
     """One connection: a server list ping answered, or someone trying to join turned away."""
     try:
         conn.settimeout(5)
+        who = conn.getpeername()[:2]
+        if proxy_protocol():
+            got = read_proxy(conn)
+            if not got:
+                note("no PROXY header from", who)
+                return
+            who = got
         handshake = read_packet(conn)          # id, protocol, address, port, next state
         if handshake[-1] == 1:
+            note("status", who)
             read_packet(conn)                  # the status request
             p = props()
             status = {"version": {"name": "26.3", "protocol": 777},
@@ -187,7 +266,9 @@ def answer(conn):
             ping = read_packet(conn)           # the ping, sent back as the pong
             conn.sendall(varint(len(ping)) + ping)
         else:
+            note("join", who)
             reason = {"text": "This is HostMC's stand-in server: there's no world to join."}
+            log("INFO", "/%s:%d lost connection: %s" % (who[0], who[1], reason["text"]), "Server thread")
             conn.sendall(packet(0, mc_string(json.dumps(reason))))
     except (OSError, EOFError, IndexError, ValueError):
         pass
@@ -195,11 +276,11 @@ def answer(conn):
         conn.close()
 
 
-def listen(port):
+def listen(port, host):
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
-        srv.bind(("127.0.0.1", port))
+        srv.bind((host, port))
     except OSError:
         log("WARN", "The stand-in can't listen on port %d, so it won't answer pings" % port)
         return
@@ -242,8 +323,28 @@ def main():
     log("INFO", "Loading properties")
     log("INFO", "Default game type: " + p.get("gamemode", "survival").upper())
     log("INFO", "Generating keypair")
-    log("INFO", "Starting Minecraft server on *:" + port)
-    threading.Thread(target=listen, args=(int(port) if port.isdigit() else 25565,), daemon=True).start()
+    log("INFO", "Starting Minecraft server on %s:%s" % (p.get("server-ip") or "*", port))
+    if proxy_protocol():
+        log("WARN", "Using HAProxy, please ensure the server port is adequately firewalled.")
+    try:
+        with open("installed.txt", encoding="utf-8") as f:
+            is_paper = "type=paper" in f.read()
+    except OSError:
+        is_paper = False
+    for jar, name in (("Geyser-Spigot.jar", "Geyser-Spigot"), ("floodgate-spigot.jar", "floodgate")):
+        if is_paper and os.path.exists(os.path.join("plugins", jar)):
+            plugins.append(name)
+            log("INFO", "[%s] Loading server plugin %s" % (name, name))
+    if "Geyser-Spigot" in plugins:
+        os.makedirs(os.path.join("plugins", "Geyser-Spigot"), exist_ok=True)
+        config = os.path.join("plugins", "Geyser-Spigot", "config.yml")
+        if not os.path.exists(config):
+            with open(config, "w", encoding="utf-8") as f:
+                f.write("bedrock:\n  address: 0.0.0.0\n  port: 19132\n  transport: nethernet\njava:\n  auth-type: online\n")
+        log("INFO", "[Geyser-Spigot] Started Geyser on UDP port 19132" + (", Floodgate signs Bedrock players in"
+                                                                          if "floodgate" in plugins else ""))
+    threading.Thread(target=listen, args=(int(port) if port.isdigit() else 25565, p.get("server-ip") or "127.0.0.1"),
+                     daemon=True).start()
     log("INFO", "Using epoll channel type", "Server thread")
     level = p.get("level-name", "world") or "world"
     os.makedirs(os.path.join(level, "region"), exist_ok=True)

@@ -57,7 +57,7 @@ json.dump(flathub, open(os.path.join(d, "flathub.json"), "w"))
 EOF
 
 # XenithOS's own apps on a PC, as sim/run.sh makes them for XSIM_KIND=pc.
-for app in volt doom tube photos hostmc; do
+for app in volt doom tube photos minenest; do
     : > "$T/lib/$app"
     [ -f "$repo/apps/$app/app.txt" ] && cp "$repo/apps/$app/app.txt" "$T/lib/$app.txt"
     [ -f "$repo/art/thumbs/$app.ximg" ] && cp "$repo/art/thumbs/$app.ximg" "$T/lib/$app.ximg"
@@ -107,7 +107,7 @@ run() {
     env=(XSIM_SCRIPT="$repo/sim/scripts/$script" XSIM_OUT="$T/shots/$name" ASAN_OPTIONS=detect_leaks=0)
     if [ "$kind" = pc ]; then
         env+=(XSIM_KIND=pc XSIM_LIB="$T/lib")
-        for app in volt tube photos hostmc; do       # on the home screen already; DOOM isn't
+        for app in volt tube photos minenest; do       # on the home screen already; DOOM isn't
             cp "$T/lib/$app" "$W/uda:/apps/$app.elf32"
             cp "$T/lib/$app.txt" "$W/uda:/apps/$app.txt" 2>/dev/null
             cp "$T/lib/$app.ximg" "$W/uda:/apps/$app.ximg" 2>/dev/null
