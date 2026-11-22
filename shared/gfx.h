@@ -48,9 +48,16 @@ void gfx_str_c(int font, int cx, int y, uint32_t c, const char *s);
 void gfx_str_r(int font, int right_x, int y, uint32_t c, const char *s);
 int  gfx_wrap(int font, int x, int y, int w, int gap, uint32_t c, const char *s, int max_lines);
 int  gfx_wrap_a(int font, int x, int y, int w, int gap, uint32_t c, int a, const char *s, int max_lines);
+int  gfx_wrap_lines(int font, int w, const char *s, int max_lines);   /* gfx_wrap()'s lines, not drawn */
 int  gfx_line_h(int font);
 int  gfx_cap_h(int font);
 int  gfx_str_vc(int font, int x, int cy, uint32_t c, const char *s);     /* caps centred on cy */
+
+/* Bigger text (Settings > Accessibility): the smaller fonts a size up (font_data.h's
+ * font_sizes[1]). Layouts that measure their words with the functions above follow it. */
+void gfx_text_size(int large);
+int  gfx_text_large(void);
+int  gfx_line_grow(int font);   /* how much taller its line is than without bigger text (0 then) */
 
 /* The 5x7 pixel font, kept for the XenithOS wordmark. */
 int  gfx_text(int x, int y, int s, uint32_t c, const char *str);

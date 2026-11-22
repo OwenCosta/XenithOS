@@ -39,10 +39,16 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
   just earned by anyone, and the website everyone's.
 - Avatar editor: thirteen parts in three tabs (face, hair, outfit), colour swatches, random looks
 - Settings: volume, interface sounds, start-up chime, showing friends what you play, cloud saves on this
-  machine, crash reports, network, system info (with start-up times and sound stats), controller test, about
+  machine, crash reports, theme, accessibility, Bluetooth controllers (PCs and Pis: pair one with the
+  controller alone), network, system info (with start-up times and sound stats), controller test, about
 - Crash reports: when XenithOS or one of its apps crashes, where it stopped is saved, and when XenithOS is back
   it asks to send a crash report to the people who make it (or sends it by itself, if Settings says to). No
   gamertag goes with one unless you add it, and nothing from your home folder.
+- Themes: six colour themes for XenithOS and its apps (XenithOS's red, Ocean, Forest, Ember, Violet, Teal) and
+  six wallpapers for the home screen, all flat and dark and drawn in code, picked in Settings > Theme
+- Accessibility, for XenithOS and every app: bigger text, high contrast, and the controller's buttons moved to
+  other jobs (any button can do another one's, the hints show the button that does each job) or the sticks
+  swapped. The D-pad always moves around, so a layout can't lock you out.
 
 **Apps** (`apps/`)
 - VOLT: a light-trail game. Scores go to your profile on the leaderboard.
@@ -53,6 +59,9 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
   even the Xbox can play. Needs a XenithOS profile.
 - Photos: your pictures (JPEG, PNG, BMP, GIF) from a `photos` folder on the USB stick, or `~/Pictures` on a
   PC, as a grid of thumbnails. Full screen with zoom, turning and slideshows.
+- Music: your own songs (MP3, OGG, FLAC, WAV) from a `music` folder on the USB stick, or `~/Music` on a PC, by
+  album (with covers from a cover.jpg or inside the songs), artist or song. Shuffle, repeat, and it keeps
+  playing while you look around. See the table below.
 - MineNest (PCs and Pis): Minecraft servers for you and your friends. It used to be HostMC; it's its own
   project now, [MineNest](https://github.com/OwenCosta/minenest), and the app is its screen on XenithOS.
   Paper, Purpur, Fabric, NeoForge, Forge or Minecraft's own, any version; mods, plugins and modpacks from
@@ -72,6 +81,18 @@ app starts, PC and Pi support, Tube, the new avatar editor) has so far been test
 | LB / RB | previous / next weapon |
 | Start | menu |
 | Hold Back | quit to XenithOS |
+
+| Music control | |
+|---|---|
+| A | open an album or artist, play a song |
+| LB / RB | Albums, Artists, Songs (in Now Playing: previous / next song) |
+| X | pause or play, from anywhere (in Now Playing: shuffle) |
+| Y | Now Playing (in Now Playing: repeat off, all, one) |
+| Left / Right | in Now Playing: back or on 10 seconds |
+| B | back |
+
+Music reads each song's tags (ID3, Vorbis comments, WAV's INFO) once and keeps them in
+`xenith/music-library.txt`, so it starts quickly next time. Folders can go four deep (`music/Artist/Album/`).
 
 ## On an Xbox 360
 
@@ -246,7 +267,8 @@ cd XenithOS
 The PC and Pi version: `make -C linux` (needs `libsdl2-dev` and `zlib1g-dev`).
 
 Fonts and thumbnails are generated and committed. To rebuild them: `python3 tools/mkfont.py` and
-`python3 tools/mkart.py` (needs Pillow and the Inter font: `apt install python3-pil fonts-inter`).
+`python3 tools/mkart.py` (needs Pillow and the Inter font: `apt install python3-pil fonts-inter`). The fonts
+come in two sets, the second for Settings > Accessibility > Bigger text.
 
 ## The simulator
 
@@ -280,7 +302,9 @@ and kept in GitHub's cache; a new commit there, or a week without any run, build
 ## Layout
 
 ```
-source/                  the system: main.c (boot, home), screen_*.c, avatar_editor.c, apps.c, cloud_api.c
+source/                  the system: main.c (boot, home), screen_*.c, avatar_editor.c, apps.c, cloud_api.c,
+                         wallpaper.c (the home screen's wallpapers)
+shared/theme.c           the colour themes; theme.h has the colours every screen draws with
 shared/platform.h        everything XenithOS needs from the machine
 shared/platform_xenon.c  ...on a real Xbox 360
 linux/                   ...on PCs and Raspberry Pis (SDL2), plus the installer and session scripts
@@ -294,10 +318,11 @@ shared/crash.h           crash reports: crash files (linux/crash_linux.c on PCs,
 shared/net_*.c           HTTP client: lwIP on the Xbox (linux/net_posix.c and sim/net_sim.c elsewhere)
 source/store_sig.c       checks the Store's signatures (the key: store_key.h; ed25519: shared/monocypher*.c)
 apps/volt, doom, tube,   the apps
-  photos, minenest       (minenest is for PCs only: it has no Xbox Makefile)
+  photos, music, minenest (minenest is for PCs only: it has no Xbox Makefile)
 linux/apps_linux.c       apps from Flathub (Flatpak) and Steam's library, on PCs
 linux/kiosk.c            console mode's window manager: apps' windows over XenithOS on its own X server
 shared/picture.c         JPEG, PNG, BMP and GIF through stb_image
+shared/dr_mp3.h, dr_flac.h, stb_vorbis.h   Music's MP3, FLAC and Ogg Vorbis decoders
 server/                  XenithOS Cloud, its systemd unit, the admin helper, the website
 tools/                   font and thumbnail generators
 ```
@@ -305,7 +330,10 @@ tools/                   font and thumbnail generators
 ## Writing an app
 
 Copy `apps/volt`, rename the folder, and edit `source/`. Use `platform.h`, `gfx.h`, `ui.h` and `theme.h` so it
-looks and sounds like the rest of the system, and call `plat_launch(XENITH_SHELL_PATH)` to go back. `build.sh`
+looks and sounds like the rest of the system, and call `plat_launch(XENITH_SHELL_PATH)` to go back. Draw with
+theme.h's colours and lay text out with `gfx_line_h()` and `gfx_str_w()` rather than fixed sizes, so the colour
+themes, high contrast and bigger text work in it too; `ui_poll()` hands over the buttons as Accessibility has
+moved them. `build.sh`
 picks up every folder in `apps/` that has a Makefile; add `app.txt` (name, version) and `art/thumbs/<name>.ximg`
 for its tile, a target in `linux/Makefile` for PCs, and its name to the lists in `linux/install.sh` and
 `linux/update.sh`. An app for PCs only (like MineNest) leaves the Makefile out.
@@ -323,6 +351,11 @@ XenithOS is licensed under the **GNU GPL v3.0**, see [LICENSE](LICENSE).
   `i_sound.c` doesn't use SDL_mixer, and `i_video.c` reports reads for the loading screen.
 - `shared/stb_image.h` is [stb_image](https://github.com/nothings/stb) 2.32 by Sean Barrett (public domain or
   MIT, see the end of the file).
+- Music's decoders, unchanged: `shared/dr_mp3.h` (0.7.5) and `shared/dr_flac.h` (0.13.5) from
+  [dr_libs](https://github.com/mackron/dr_libs) by David Reid (public domain or MIT No Attribution; dr_mp3 is
+  based on minimp3), and `shared/stb_vorbis.h`, which is `stb_vorbis.c` 1.24 from [stb](https://github.com/nothings/stb)
+  by Sean Barrett (public domain or MIT; renamed so the builds don't compile it on its own). All three as of
+  November 2026, see the end of each file.
 - `shared/monocypher.c`, `monocypher-ed25519.c` and their headers are [Monocypher](https://monocypher.org)
   4.0.2 by Loup Vaillant, unchanged (BSD 2-Clause or CC0 1.0, [third_party/monocypher/LICENCE.md](third_party/monocypher/LICENCE.md)).
 - Apps from Flathub and Steam aren't part of XenithOS: Flatpak downloads them from Flathub on your machine,

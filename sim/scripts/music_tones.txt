@@ -1,0 +1,11 @@
+# MUSIC's sound, checked: the Tones album (sim/music/make-tones.sh: a WAV, a FLAC, an MP3 and an
+# Ogg, each a steady tone at its own rate) played from its page. sim/music/test-tones.sh runs it
+# and checks audio.wav: every tone at its pitch, in order, three seconds each, with no gap or click.
+#   XSIM_BIN=xmusic XSIM_MUSIC=<tones folder> sim/run.sh sim/scripts/music_tones.txt music_tones
+wait 20
+press a
+wait 20
+press a
+wait 760
+shot tones_end
+quit

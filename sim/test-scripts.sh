@@ -176,6 +176,33 @@ if [ -x "${MINENEST_BIN:-}" ]; then
 else
     skip minenest "MineNest needs its own program: MINENEST_BIN=path/to/minenest (github.com/OwenCosta/minenest)"
 fi
+# Themes and accessibility need nothing. Bluetooth is a PC's, against the stand-in bluetoothctl
+# (sim/bluetooth), in real time since the stand-in is.
+run theme ""
+run access ""
+run bluetooth "" XSIM_KIND=pc XSIM_THREAD=1
+run bluetooth_off "" XSIM_KIND=pc XSIM_THREAD=1 XSIM_BT=none
+# Music: a library made here, and its sound checked by sim/music/test-tones.sh. Both make their
+# songs with ffmpeg (with lame and vorbis); without it they're skipped.
+if wanted music || wanted music_tones; then
+    if command -v ffmpeg > /dev/null && "$here/music/make-music.sh" "$T/music" > "$T/make-music.log" 2>&1; then
+        run music "" XSIM_BIN=xmusic XSIM_MUSIC="$T/music"
+        done_names="${done_names}music_tones "
+        if wanted music_tones; then
+            echo "== music_tones"
+            ran=$((ran + 1))
+            mkdir -p "$here/out/test-music_tones"
+            if XSIM_USB="$usb" "$here/music/test-tones.sh" > "$here/out/test-music_tones/sim.log" 2>&1; then
+                echo "  ok    music_tones ($(grep '^heard:' "$here/out/test-music_tones/sim.log"))"
+            else
+                fail "music_tones: $(tail -n 4 "$here/out/test-music_tones/sim.log" | tr '\n' ' ')"
+            fi
+        fi
+    else
+        skip music "needs ffmpeg with lame and vorbis, for sim/music/make-music.sh"
+        skip music_tones "needs ffmpeg with lame and vorbis, for sim/music/test-tones.sh"
+    fi
+fi
 
 online=0
 for s in online feedback gallery store_pc store_steam store_route tube store_local; do wanted "$s" && online=1; done

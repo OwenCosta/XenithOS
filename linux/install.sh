@@ -85,6 +85,8 @@ apt-get install -y $PKGS
 # DOOM's free game data (Freedoom: Phase 1 and 2, in /usr/share/games/doom). Not every
 # system has the package; DOOM can get it from the Store instead.
 apt-get install -y freedoom || say "No freedoom package here; DOOM can get Freedoom from the Store"
+# Pairing Bluetooth controllers in Settings: BlueZ, and rfkill to switch Bluetooth on.
+apt-get install -y bluez rfkill || say "Couldn't install BlueZ; XenithOS works without it, but can't pair Bluetooth controllers"
 # Apps from Flathub and Steam (the Store's Apps and Steam sections): Flatpak; cage, a small
 # compositor that shows one app full screen in console mode; Xwayland for apps that still
 # need X11; a D-Bus for the user's apps; and a sound server the apps and XenithOS can share,
@@ -121,12 +123,12 @@ make -C "$SRC/linux" -j"$(nproc)"
 say "Installing"
 install -d /usr/lib/xenithos /usr/share/xenithos/apps "$STATE"
 install -m 755 "$SRC/linux/xenithos" "$SRC/linux/volt" "$SRC/linux/doom" "$SRC/linux/tube" "$SRC/linux/photos" \
-    "$SRC/linux/minenest" /usr/lib/xenithos/
+    "$SRC/linux/minenest" "$SRC/linux/music" /usr/lib/xenithos/
 # HostMC became MineNest: its program goes (its data stays, for MineNest to bring in).
 rm -f /usr/lib/xenithos/hostmc /usr/lib/xenithos/hostmc.txt /usr/lib/xenithos/hostmc.ximg /usr/share/xenithos/apps/hostmc.*
 # Each app's name, version and picture next to its program, for the Store to install it with
 # (update.sh keeps them current).
-for app in volt doom tube photos minenest; do
+for app in volt doom tube photos minenest music; do
     if [ -f "$SRC/apps/$app/app.txt" ]; then install -m 644 "$SRC/apps/$app/app.txt" "/usr/lib/xenithos/$app.txt"; fi
     if [ -f "$SRC/art/thumbs/$app.ximg" ]; then install -m 644 "$SRC/art/thumbs/$app.ximg" "/usr/lib/xenithos/$app.ximg"; fi
 done
@@ -140,7 +142,7 @@ sudo -u "$USER_NAME" bash "$SRC/linux/get-minenest.sh" /usr/lib/xenithos     || 
 if [ -x /usr/lib/xenithos/bin/minenest ]; then ln -sfn /usr/lib/xenithos/bin/minenest /usr/local/bin/minenest; fi
 install -m 755 "$SRC/linux/xenithos-session" "$SRC/linux/xenithos-console" /usr/bin/
 install -m 644 "$SRC/linux/xenithos-console.desktop" "$SRC/linux/xenithos.desktop" /usr/share/applications/
-for app in volt doom tube photos minenest; do
+for app in volt doom tube photos minenest music; do
     if [ -f "$SRC/art/thumbs/$app.ximg" ]; then install -m 644 "$SRC/art/thumbs/$app.ximg" /usr/share/xenithos/apps/; fi
     if [ -f "$SRC/apps/$app/app.txt" ]; then install -m 644 "$SRC/apps/$app/app.txt" "/usr/share/xenithos/apps/$app.txt"; fi
 done
@@ -152,7 +154,7 @@ say "Setting up $USER_NAME"
 sudo -u "$USER_NAME" mkdir -p "$DATA/uda:/apps" "$DATA/uda:/xenith" "$HOME_DIR/.config/xenithos"
 rm -f "$DATA/uda:/apps/hostmc.elf32" "$DATA/uda:/apps/hostmc.txt" "$DATA/uda:/apps/hostmc.ximg"
 if [ -f "$DATA/optional-apps/hostmc.txt" ]; then mv -f "$DATA/optional-apps/hostmc.txt" "$DATA/optional-apps/minenest.txt"; fi
-for app in volt doom tube photos minenest; do
+for app in volt doom tube photos minenest music; do
     # One removed in the Store stays off the home screen: the Store kept its name and picture.
     if [ -f "$DATA/optional-apps/$app.txt" ]; then continue; fi
     sudo -u "$USER_NAME" ln -sfn "/usr/lib/xenithos/$app" "$DATA/uda:/apps/$app.elf32"
@@ -165,9 +167,11 @@ done
 if [ -f /usr/share/xenithos/config.txt ] && [ ! -f "$DATA/uda:/xenith/config.txt" ]; then
     sudo -u "$USER_NAME" cp /usr/share/xenithos/config.txt "$DATA/uda:/xenith/config.txt"
 fi
-for g in video render input audio; do
+for g in video render input audio bluetooth; do
     if getent group "$g" >/dev/null; then usermod -aG "$g" "$USER_NAME"; fi
 done
+# Bluetooth's service, for pairing controllers in Settings (a machine without Bluetooth just has it idle)
+systemctl enable --now bluetooth >/dev/null 2>&1 || true
 # Flathub for the user's apps (the Store also adds it before the first install).
 if command -v flatpak >/dev/null; then
     sudo -u "$USER_NAME" -H flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo \

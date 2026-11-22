@@ -208,7 +208,9 @@ struct action { int icon; const char *label; const char *sub; };
 
 static int action_list(int x, int y, int w, const struct action *a, int n, int sel, float hl)
 {
-    int i, rowh = n > 3 ? 62 : n > 2 ? 76 : 84;
+    /* With bigger text, four rows are taller (they still end above the hints) and their two lines
+     * go by the fonts' sizes. */
+    int i, big4 = gfx_text_large() && n > 3, rowh = n > 3 ? (big4 ? 70 : 62) : n > 2 ? 76 : 84;
     for (i = 0; i < n; i++) {
         int ry = y + i * rowh, s = i == sel;
         uint32_t bg = s ? C_SEL : C_SURFACE;
@@ -219,8 +221,14 @@ static int action_list(int x, int y, int w, const struct action *a, int n, int s
             gfx_stroke_rrect((float)x, (float)ry, (float)w, rowh - 10.0f, 10, 1, C_LINE, 255);
         }
         icon_draw(a[i].icon, x + 40.0f, ry + (rowh - 10) / 2.0f, rowh > 70 ? 34 : 30, s ? 0xFFFFFF : C_SUB, bg);
-        gfx_str(FONT_BODY_SB, x + 76, ry + (rowh - 10) / 2 - (rowh > 70 ? 25 : 23), C_TEXT, a[i].label);
-        gfx_str(FONT_SMALL, x + 76, ry + (rowh - 10) / 2 + (rowh > 70 ? 5 : 2), C_SUB, a[i].sub);
+        if (big4) {
+            int lh = gfx_line_h(FONT_BODY_SB) - 6, ty = ry + (rowh - 10 - lh - gfx_line_h(FONT_SMALL)) / 2;
+            gfx_str(FONT_BODY_SB, x + 76, ty, C_TEXT, a[i].label);
+            gfx_str_fit(FONT_SMALL, x + 76, ty + lh, C_SUB, a[i].sub, w - 92);
+        } else {
+            gfx_str(FONT_BODY_SB, x + 76, ry + (rowh - 10) / 2 - (rowh > 70 ? 25 : 23), C_TEXT, a[i].label);
+            gfx_str(FONT_SMALL, x + 76, ry + (rowh - 10) / 2 + (rowh > 70 ? 5 : 2), C_SUB, a[i].sub);
+        }
     }
     return n * rowh;
 }

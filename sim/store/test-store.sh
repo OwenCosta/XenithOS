@@ -35,7 +35,7 @@ mkdir -p "$T/store" "$T/state" "$T/web" "$T/downloads" "$T/keys" "$T/shots" "$T/
 python3 -I - "$repo" "$T/store" <<'EOF' || exit 2
 import json, os, shutil, sys
 repo, d = sys.argv[1], sys.argv[2]
-sizes = {"volt": 200000, "doom": 300000, "tube": 3000000, "photos": 250000, "freedoom1": 600000,
+sizes = {"volt": 200000, "doom": 300000, "tube": 3000000, "photos": 250000, "music": 280000, "freedoom1": 600000,
          "freedoom2": 700000, "xenith": 400000, "xenithos-pc": 500000}
 items = json.load(open(os.path.join(repo, "server", "store.example.json")))
 flathub = [

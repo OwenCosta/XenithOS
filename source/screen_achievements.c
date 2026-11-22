@@ -84,10 +84,12 @@ int achievements_earned(void)
 
 /* ---------------------------------------------------------------- screen */
 
-/* One app's achievements in a card: each with a trophy, lit once it's earned. */
+/* One app's achievements in a card: each with a trophy, lit once it's earned. With bigger text a
+ * row is its name and how it stands, on one line: two lines of the bigger sizes don't leave room
+ * for four rows in a card, so what each one asks for is left out there. */
 static void draw_app(int x, int y, int w, int h, const char *app)
 {
-    int i, pad = 22, rowh = 42, ry, got = 0, all = 0;
+    int i, pad = 22, rowh = 42, ry, got = 0, all = 0, big = gfx_text_large();
     char line[64], ago[40];
     ui_panel(x, y, w, h);
     for (i = 0; i < nach; i++)
@@ -102,7 +104,7 @@ static void draw_app(int x, int y, int w, int h, const char *app)
         if (strcmp(a->app, app)) continue;
         gfx_circle(x + pad + 15.0f, ry + 17.0f, 15, ring, 255);
         icon_draw(ICON_TROPHY, x + pad + 15.0f, ry + 17.0f, 19, a->earned ? 0xFFFFFF : C_DIM, ring);
-        gfx_str_fit(FONT_BODY_SB, x + pad + 44, ry - 2, a->earned ? C_TEXT : C_SUB, a->name, w - 2 * pad - 200);
+        if (!big) gfx_str_fit(FONT_BODY_SB, x + pad + 44, ry - 2, a->earned ? C_TEXT : C_SUB, a->name, w - 2 * pad - 200);
         if (a->earned) {
             cloud_ago(a->ago, ago, sizeof ago);
             ago[0] = (char)tolower((unsigned char)ago[0]);
@@ -110,8 +112,14 @@ static void draw_app(int x, int y, int w, int h, const char *app)
         } else {
             snprintf(line, sizeof line, a->players == 1 ? "1 player has it" : "%d players have it", a->players);
         }
-        gfx_str_r(FONT_SMALL, x + w - pad, ry, a->earned ? C_SUB : C_DIM, line);
-        gfx_str_fit(FONT_SMALL, x + pad + 44, ry + 19, a->earned ? C_SUB : C_DIM, a->what, w - 2 * pad - 44);
+        if (big) {
+            gfx_str_fit(FONT_BODY_SB, x + pad + 44, ry + 1, a->earned ? C_TEXT : C_SUB, a->name,
+                        w - 2 * pad - 60 - gfx_str_w(FONT_SMALL, line));
+            gfx_str_r(FONT_SMALL, x + w - pad, ry + 3, a->earned ? C_SUB : C_DIM, line);
+        } else {
+            gfx_str_r(FONT_SMALL, x + w - pad, ry, a->earned ? C_SUB : C_DIM, line);
+            gfx_str_fit(FONT_SMALL, x + pad + 44, ry + 19, a->earned ? C_SUB : C_DIM, a->what, w - 2 * pad - 44);
+        }
         ry += rowh;
     }
 }

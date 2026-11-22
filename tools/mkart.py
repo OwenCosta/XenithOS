@@ -323,6 +323,22 @@ def photos():
     return img
 
 
+def music():
+    k = 4                                           # drawn 4x and scaled down, for round edges
+    img = Image.new("RGB", (W * k, H * k), BG_DARK)
+    d = ImageDraw.Draw(img)
+    # A flat record: dark grooves, the red label, the hole.
+    cx, cy, r = 58 * k, 68 * k, 34 * k
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(38, 43, 51))
+    for g in (27, 21):
+        d.ellipse([cx - g * k, cy - g * k, cx + g * k, cy + g * k], outline=(27, 31, 38), width=2 * k)
+    d.ellipse([cx - 12 * k, cy - 12 * k, cx + 12 * k, cy + 12 * k], fill=RED)
+    d.ellipse([cx - 3 * k, cy - 3 * k, cx + 3 * k, cy + 3 * k], fill=BG_DARK)
+    d.text((108 * k, 34 * k), "MUSIC", font=font("Black", 50 * k), fill=TEXT)
+    d.text((26 * k, 128 * k), "Your songs on the TV", font=font("Medium", 20 * k), fill=SUB)
+    return img.resize((W, H), Image.LANCZOS)
+
+
 # MineNest's pixel icon (github.com/OwenCosta/minenest): a grass block in a nest, 16 by 16.
 MINENEST_PIXELS = [(1, 9, 14, 5, '7a5230'), (0, 10, 1, 3, '7a5230'), (15, 10, 1, 3, '7a5230'), (2, 9, 2, 1, '9c6b3f'), (7, 10, 3, 1, '9c6b3f'), (12, 9, 2, 1, '9c6b3f'), (3, 12, 2, 1, '5c3c22'), (10, 12, 2, 1, '5c3c22'), (4, 2, 8, 8, '8b5a33'), (4, 2, 8, 3, '6fb04a'), (4, 5, 2, 1, '6fb04a'), (8, 5, 1, 1, '6fb04a'), (10, 5, 2, 1, '6fb04a'), (5, 3, 1, 1, '8fd068'), (9, 2, 1, 1, '8fd068'), (6, 7, 1, 1, '6b4426'), (9, 8, 1, 1, '6b4426')]
 
@@ -421,6 +437,7 @@ def main():
         "doom": doom(),
         "tube": tube(),
         "photos": photos(),
+        "music": music(),
         "minenest": minenest(),
         "freedoom1": freedoom(1, (19, 32, 26), (143, 181, 154)),
         "freedoom2": freedoom(2, (35, 20, 20), (214, 160, 143)),

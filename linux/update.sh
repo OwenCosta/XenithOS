@@ -17,10 +17,10 @@ if [ ! -w "$DEST" ]; then
 fi
 
 echo "Building $(grep -o 'XENITH_VERSION "[0-9.]*"' "$SRC/shared/theme.h") in $SRC"
-make -C "$SRC/linux" -j"$(nproc)" xenithos volt doom tube photos minenest
+make -C "$SRC/linux" -j"$(nproc)" xenithos volt doom tube photos minenest music
 
 echo "Installing into $DEST"
-for b in xenithos volt doom tube photos minenest; do
+for b in xenithos volt doom tube photos minenest music; do
     install -m 755 "$SRC/linux/$b" "$DEST/.$b.new"
     mv -f "$DEST/.$b.new" "$DEST/$b"
 done
@@ -32,7 +32,7 @@ done
 rm -f "$DEST/hostmc" "$DEST/hostmc.txt" "$DEST/hostmc.ximg"
 
 # Each app's name, version and picture next to its program, for the Store to install it with.
-for app in volt doom tube photos minenest; do
+for app in volt doom tube photos minenest music; do
     if [ -f "$SRC/apps/$app/app.txt" ]; then install -m 644 "$SRC/apps/$app/app.txt" "$DEST/$app.txt"; fi
     if [ -f "$SRC/art/thumbs/$app.ximg" ]; then install -m 644 "$SRC/art/thumbs/$app.ximg" "$DEST/$app.ximg"; fi
 done
@@ -45,7 +45,7 @@ if [ -e "$DATA/uda:/apps/hostmc.elf32" ] || [ -L "$DATA/uda:/apps/hostmc.elf32" 
     rm -f "$DATA/uda:/apps/hostmc.elf32" "$DATA/uda:/apps/hostmc.txt" "$DATA/uda:/apps/hostmc.ximg"
     ln -sfn "$DEST/minenest" "$DATA/uda:/apps/minenest.elf32"
 fi
-for app in volt doom tube photos minenest; do
+for app in volt doom tube photos minenest music; do
     [ -e "$DATA/uda:/apps/$app.elf32" ] || [ -L "$DATA/uda:/apps/$app.elf32" ] || continue
     if [ -f "$DEST/$app.txt" ]; then cp "$DEST/$app.txt" "$DATA/uda:/apps/$app.txt"; fi
     if [ -f "$DEST/$app.ximg" ]; then cp "$DEST/$app.ximg" "$DATA/uda:/apps/$app.ximg"; fi

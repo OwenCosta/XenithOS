@@ -777,7 +777,7 @@ SEEN_SAVE_S = 10 * 60            # hellos write last_seen to disk at most this o
 MC_KEEP_S = 24 * 3600            # a HostMC server's address is shown this long after HostMC last said so
 MC_ADDR_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,94}[A-Za-z0-9])?(?::[0-9]{1,5})?$")
 OWN_APPS = {"xenithos": "XenithOS", "volt": "VOLT", "doom": "DOOM", "tube": "Tube", "photos": "Photos",
-            "hostmc": "HostMC", "minenest": "MineNest"}
+            "music": "Music", "hostmc": "HostMC", "minenest": "MineNest"}
 
 
 class Friends:

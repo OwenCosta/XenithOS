@@ -1,11 +1,12 @@
-# XenithOS simulator: the real shell code, built for Linux with sim/platform_sim.c.
+# XenithOS simulator: the real shell code, built for Linux with sim/platform_sim.c. Bluetooth is the
+# PC's own code (linux/bluetooth_linux.c), run against a stand-in bluetoothctl (sim/bluetooth).
 # Build: make -C sim        Run: sim/run.sh <script> <out-dir>   (see sim/README.md)
 
 CC      ?= gcc
 SHARED  := $(filter-out ../shared/platform_xenon.c ../shared/net_xenon.c, $(wildcard ../shared/*.c))
 # The network is the PC's own client (../linux/http_posix.c, HTTPS included) behind net_sim.c.
 NET     := net_sim.c ../linux/http_posix.c
-SRC     := $(wildcard ../source/*.c) $(SHARED) platform_sim.c $(NET)
+SRC     := $(wildcard ../source/*.c) $(SHARED) platform_sim.c $(NET) ../linux/bluetooth_linux.c
 HDRS    := $(wildcard ../shared/*.h ../source/*.h) ../linux/http_posix.h
 CFLAGS  := -O1 -g -std=gnu11 -Wall -Wno-format-truncation -fsanitize=address,undefined -fno-omit-frame-pointer \
            -I../shared -I../source -I../linux -DXENITH_SIM
@@ -22,8 +23,14 @@ DOOMFLAGS := -O1 -g -std=gnu11 -w -fsanitize=address -fno-omit-frame-pointer -I.
 TUBE    := $(wildcard ../apps/tube/source/*.c) $(SHARED) platform_sim.c $(NET)
 PHOTOS  := ../apps/photos/source/photos.c $(SHARED) platform_sim.c $(NET)
 MINENEST := $(wildcard ../apps/minenest/source/*.c) $(SHARED) platform_sim.c $(NET)
+MUSIC   := $(wildcard ../apps/music/source/*.c) $(SHARED) platform_sim.c $(NET)
 
-all: xsim xvolt xdoom xtube xphotos xminenest
+all: xsim xvolt xdoom xtube xphotos xminenest xmusic
+
+# Music: its decoders (dr_mp3, dr_flac, stb_vorbis) and stb_image for covers do their own careful
+# casting, so like Photos it's checked for memory errors only. MUSIC_FLAGS adds more (-I...).
+xmusic: $(MUSIC) $(HDRS) $(wildcard ../apps/music/source/*.h)
+	$(CC) $(filter-out -fsanitize=address$(comma)undefined,$(CFLAGS)) -fsanitize=address -I../apps/music/source $(MUSIC_FLAGS) $(MUSIC) -o $@ $(LDLIBS)
 
 # stb_image is checked for memory errors only (it does its own careful casting).
 xtube: $(TUBE) $(HDRS)
@@ -50,4 +57,4 @@ xdoom: $(DOOM) $(HDRS)
 	$(CC) $(DOOMFLAGS) $(DOOM) -o $@ $(LDLIBS)
 
 clean:
-	rm -f xsim xvolt xdoom xtube xphotos xminenest
+	rm -f xsim xvolt xdoom xtube xphotos xminenest xmusic

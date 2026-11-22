@@ -31,6 +31,11 @@ mkdir -p "$work/uda:/xenith"
     [ -n "$XSIM_KEY" ] && echo "key=$XSIM_KEY"
 } > "$work/uda:/xenith/config.txt"
 [ -n "$XSIM_PROFILE" ] && cp "$XSIM_PROFILE" "$work/uda:/xenith/profile.txt"
+# XSIM_SETTINGS: settings.txt to start with, its lines separated by spaces
+# ("theme=ocean wallpaper=peaks")
+if [ -n "$XSIM_SETTINGS" ]; then
+    for kv in $XSIM_SETTINGS; do echo "$kv"; done > "$work/uda:/xenith/settings.txt"
+fi
 # XSIM_ROUTE: a route.txt to start with (the home-network route, shared/config.c)
 [ -n "$XSIM_ROUTE" ] && cp "$XSIM_ROUTE" "$work/uda:/xenith/route.txt"
 # XSIM_APPS: that many more (empty) apps, for rows that have to scroll
@@ -64,6 +69,11 @@ if [ -n "$XSIM_PHOTOS" ]; then
     mkdir -p "$work/uda:/photos"
     cp -r "$XSIM_PHOTOS"/. "$work/uda:/photos/"
 fi
+# XSIM_MUSIC: a folder of music for Music (copied to uda:/music)
+if [ -n "$XSIM_MUSIC" ]; then
+    mkdir -p "$work/uda:/music"
+    cp -r "$XSIM_MUSIC"/. "$work/uda:/music/"
+fi
 # XSIM_WAD: one or more WADs (space-separated) for DOOM
 if [ -n "$XSIM_WAD" ]; then
     mkdir -p "$work/uda:/doom"
@@ -86,9 +96,12 @@ fi
 # XSIM_KIND=pc: XenithOS's own apps as a PC has them, built in a folder standing in for
 # /usr/lib/xenithos with their names and pictures, for the Store to list and install.
 # XSIM_UNINSTALLED="doom volt": ones that are built but not on the home screen.
+# XSIM_LOCAL_MORE="music": more of them (left out unless asked, so the Store's lists in the
+# scripts stay as they were written)
 if [ "$XSIM_KIND" = pc ]; then
     mkdir -p "$work/lib"
-    for app in volt doom tube photos minenest; do
+    # shellcheck disable=SC2086
+    for app in volt doom tube photos minenest ${XSIM_LOCAL_MORE:-}; do
         : > "$work/lib/$app"
         [ -f "$here/../apps/$app/app.txt" ] && cp "$here/../apps/$app/app.txt" "$work/lib/$app.txt"
         [ -f "$here/../art/thumbs/$app.ximg" ] && cp "$here/../art/thumbs/$app.ximg" "$work/lib/$app.ximg"
@@ -97,6 +110,11 @@ if [ "$XSIM_KIND" = pc ]; then
     # shellcheck disable=SC2086
     for app in ${XSIM_UNINSTALLED:-}; do rm -f "$work/uda:/apps/$app".*; done
 fi
+
+# Bluetooth (XSIM_KIND=pc) always talks to the stand-in, never to this PC's own: two controllers
+# to pair, one already paired, a TV. XSIM_BT=none or blocked: no adapter, or one switched off.
+# XSIM_BLUETOOTHCTL: another program in its place (a path that isn't there: BlueZ missing).
+export XENITHOS_BLUETOOTHCTL="${XSIM_BLUETOOTHCTL:-$here/bluetooth/bluetoothctl}"
 
 bin="${XSIM_BIN:-xsim}"
 make -s -C "$here" "$bin"

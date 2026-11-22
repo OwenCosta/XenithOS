@@ -15,7 +15,7 @@ CFLAGS_ALL  := $(OPT) -std=gnu11 -Wall -Wno-format-truncation -funwind-tables -I
 LIBS        := $(SDL_LIBS) -lX11 -lz -lm -lpthread -ldl -Wl,--build-id
 
 SHARED      := $(filter-out ../shared/platform_xenon.c ../shared/net_xenon.c, $(wildcard ../shared/*.c))
-PLATFORM    := platform_sdl.c apps_linux.c kiosk.c net_posix.c http_posix.c crash_linux.c
+PLATFORM    := platform_sdl.c apps_linux.c kiosk.c net_posix.c http_posix.c crash_linux.c bluetooth_linux.c
 HEADERS     := $(wildcard ../shared/*.h ../source/*.h) platform_linux.h http_posix.h
 
 SHELL_SRC   := $(wildcard ../source/*.c) $(SHARED) $(PLATFORM)
@@ -27,8 +27,13 @@ DOOM_CFLAGS := $(OPT) -std=gnu11 -w -funwind-tables -I../apps/doom/doomgeneric -
 TUBE_SRC    := $(wildcard ../apps/tube/source/*.c) $(SHARED) $(PLATFORM)
 PHOTOS_SRC  := ../apps/photos/source/photos.c $(SHARED) $(PLATFORM)
 MINENEST_SRC := $(wildcard ../apps/minenest/source/*.c) $(SHARED) $(PLATFORM)
+MUSIC_SRC   := $(wildcard ../apps/music/source/*.c) $(SHARED) $(PLATFORM)
 
-all: xenithos volt doom tube photos minenest
+all: xenithos volt doom tube photos minenest music
+
+# Music decodes with dr_mp3, dr_flac and stb_vorbis (shared/), in apps/music/source/decode.c.
+music: $(MUSIC_SRC) $(HEADERS) $(wildcard ../apps/music/source/*.h)
+	$(CC) $(CFLAGS_ALL) -I../apps/music/source $(MUSIC_SRC) -o $@ $(LIBS)
 
 tube: $(TUBE_SRC) $(HEADERS)
 	$(CC) $(CFLAGS_ALL) -I../apps/tube/source $(TUBE_SRC) -o $@ $(LIBS)
@@ -51,6 +56,6 @@ doom: $(DOOM_SRC) $(HEADERS)
 	$(CC) $(DOOM_CFLAGS) $(DOOM_SRC) -o $@ $(LIBS)
 
 clean:
-	rm -f xenithos volt doom tube photos minenest
+	rm -f xenithos volt doom tube photos minenest music
 
 .PHONY: all clean

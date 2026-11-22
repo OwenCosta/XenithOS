@@ -13,23 +13,28 @@
 #include "startlog.h"
 #include "theme.h"
 #include "ui.h"
+#include "wallpaper.h"
 
-/* The switches first (S_VOLUME to S_CRASH), then the rows that open something. */
-enum { S_VOLUME, S_UI_SOUNDS, S_BOOT, S_CONNECT, S_SHARING, S_CLOUD_SAVES, S_CRASH, S_NETWORK, S_SYSTEM,
-       S_CONTROLLER, S_ABOUT, S_SIGN_OUT, S_COUNT };
+/* The switches first (S_VOLUME to S_CRASH), then the rows that open something. Network stays
+ * where it was, the first of those. */
+enum { S_VOLUME, S_UI_SOUNDS, S_BOOT, S_CONNECT, S_SHARING, S_CLOUD_SAVES, S_CRASH, S_NETWORK, S_THEME, S_ACCESS,
+       S_BLUETOOTH, S_SYSTEM, S_CONTROLLER, S_ABOUT, S_SIGN_OUT, S_COUNT };
 
 static const char *const label[S_COUNT] = {
     "Volume", "Interface sounds", "Start-up chime", "Connect at start-up", "Show friends what I'm playing",
-    "Cloud saves on this machine", "Send crash reports", "Network", "System info", "Controller test",
-    "About XenithOS", "Sign out",
+    "Cloud saves on this machine", "Send crash reports", "Network", "Theme", "Accessibility",
+    "Bluetooth controllers", "System info", "Controller test", "About XenithOS", "Sign out",
 };
 
-/* The rows shown: the ones about a profile only when someone's signed in. */
+/* The rows shown: the ones about a profile only when someone's signed in, Bluetooth only on PCs
+ * and Pis. */
 static int visible_rows(int *rows)
 {
     int i, n = 0;
     for (i = 0; i < S_COUNT; i++)
-        if (prof.signed_in || (i != S_SHARING && i != S_CLOUD_SAVES && i != S_SIGN_OUT)) rows[n++] = i;
+        if ((prof.signed_in || (i != S_SHARING && i != S_CLOUD_SAVES && i != S_SIGN_OUT))
+                && (i != S_BLUETOOTH || plat_kind() == PLAT_PC))
+            rows[n++] = i;
     return n;
 }
 
@@ -44,6 +49,26 @@ static void value_of(int i, char *out, int n)
     case S_CRASH: snprintf(out, n, st.crash_reports ? "Always" : "Ask first"); break;
     case S_SHARING: snprintf(out, n, prof.sharing ? "On" : "Off"); break;
     case S_CLOUD_SAVES: snprintf(out, n, st.cloud_saves ? "On" : "Off"); break;
+    case S_THEME: {
+        int w = wallpaper_find(st.wallpaper);
+        if (w == WALL_PLAIN) snprintf(out, n, "%s", theme_name(theme_current()));
+        else snprintf(out, n, "%s, %s", theme_name(theme_current()), wallpaper_name(w));
+        break;
+    }
+    case S_ACCESS: {
+        /* what's on, if anything */
+        const char *on[4];
+        int k = 0, b;
+        if (st.text_large) on[k++] = "Bigger text";
+        if (st.high_contrast) { on[k] = k ? "high contrast" : "High contrast"; k++; }
+        for (b = 0; b < PADB_COUNT && ui_pad_from(b) == b; b++)
+            ;
+        if (b < PADB_COUNT || st.swap_sticks) { on[k] = k ? "buttons" : "Buttons moved"; k++; }
+        if (k == 1) snprintf(out, n, "%s", on[0]);
+        else if (k == 2) snprintf(out, n, "%s and %s", on[0], on[1]);
+        else if (k == 3) snprintf(out, n, "%s, %s and %s", on[0], on[1], on[2]);
+        break;
+    }
     case S_NETWORK: snprintf(out, n, "%s", net_is_up() ? net_ip() : "Not connected"); break;
     }
 }
@@ -184,43 +209,47 @@ static void controller_test(void)
     for (;;) {
         int top = HEADER_H + 30, cx = SCR_W / 2, r = 70;
         ui_poll();
-        plat_rumble(cur.lt, cur.rt);
+        plat_rumble(ui_raw.lt, ui_raw.rt);
         if (cur.b) {
             if (!hold) hold = ui_ms();
             if (ui_ms() - hold > 1000) { plat_rumble(0, 0); sfx(SFX_BACK); while (cur.b) ui_poll(); return; }
         } else hold = 0;
 
         ui_bg();
-        ui_header("Controller test", "Triggers run the rumble motors. Hold B to leave.");
+        {
+            char sub[80];                  /* the controller as it is, whatever the buttons' jobs */
+            snprintf(sub, sizeof sub, "Triggers run the rumble motors. Hold %s to leave.", ui_pad_say("B"));
+            ui_header("Controller test", sub);
+        }
         /* Triggers and bumpers */
         gfx_fill_rrect((float)M, (float)top, 60, 170, 14, C_SURFACE2, 255);
-        if (cur.lt) gfx_fill_rrect((float)M, top + 170 - 170 * cur.lt / 255.0f, 60, 170 * cur.lt / 255.0f, 14, C_ACCENT, 255);
+        if (ui_raw.lt) gfx_fill_rrect((float)M, top + 170 - 170 * ui_raw.lt / 255.0f, 60, 170 * ui_raw.lt / 255.0f, 14, C_ACCENT, 255);
         gfx_str_c(FONT_SMALL, M + 30, top + 180, C_SUB, "LT");
         gfx_fill_rrect(SCR_W - M - 60.0f, (float)top, 60, 170, 14, C_SURFACE2, 255);
-        if (cur.rt) gfx_fill_rrect(SCR_W - M - 60.0f, top + 170 - 170 * cur.rt / 255.0f, 60, 170 * cur.rt / 255.0f, 14, C_ACCENT, 255);
+        if (ui_raw.rt) gfx_fill_rrect(SCR_W - M - 60.0f, top + 170 - 170 * ui_raw.rt / 255.0f, 60, 170 * ui_raw.rt / 255.0f, 14, C_ACCENT, 255);
         gfx_str_c(FONT_SMALL, SCR_W - M - 30, top + 180, C_SUB, "RT");
-        pill(M + 90, top, 110, "LB", cur.lb, C_ACCENT);
-        pill(SCR_W - M - 200, top, 110, "RB", cur.rb, C_ACCENT);
+        pill(M + 90, top, 110, "LB", ui_raw.lb, C_ACCENT);
+        pill(SCR_W - M - 200, top, 110, "RB", ui_raw.rb, C_ACCENT);
 
         /* Sticks */
-        stick(cx - 250, top + 160, r, cur.lx, cur.ly, cur.ls);
-        stick(cx + 250, top + 160, r, cur.rx, cur.ry, cur.rs);
+        stick(cx - 250, top + 160, r, ui_raw.lx, ui_raw.ly, ui_raw.ls);
+        stick(cx + 250, top + 160, r, ui_raw.rx, ui_raw.ry, ui_raw.rs);
 
         /* D-pad on the left, face buttons on the right, both as diamonds like the pad */
         {
             int lx = cx - 250, rx = cx + 250, vy = top + 340;
-            pill(lx - 45, vy - 75, 90, "Up", cur.up, C_ACCENT);
-            pill(lx - 140, vy - 25, 90, "Left", cur.left, C_ACCENT);
-            pill(lx + 50, vy - 25, 90, "Right", cur.right, C_ACCENT);
-            pill(lx - 45, vy + 25, 90, "Down", cur.down, C_ACCENT);
-            pill(rx - 35, vy - 75, 70, "Y", cur.y, C_BTN_Y);
-            pill(rx - 125, vy - 25, 70, "X", cur.x, C_BTN_X);
-            pill(rx + 55, vy - 25, 70, "B", cur.b, C_BTN_B);
-            pill(rx - 35, vy + 25, 70, "A", cur.a, C_BTN_A);
+            pill(lx - 45, vy - 75, 90, "Up", ui_raw.up, C_ACCENT);
+            pill(lx - 140, vy - 25, 90, "Left", ui_raw.left, C_ACCENT);
+            pill(lx + 50, vy - 25, 90, "Right", ui_raw.right, C_ACCENT);
+            pill(lx - 45, vy + 25, 90, "Down", ui_raw.down, C_ACCENT);
+            pill(rx - 35, vy - 75, 70, "Y", ui_raw.y, C_BTN_Y);
+            pill(rx - 125, vy - 25, 70, "X", ui_raw.x, C_BTN_X);
+            pill(rx + 55, vy - 25, 70, "B", ui_raw.b, C_BTN_B);
+            pill(rx - 35, vy + 25, 70, "A", ui_raw.a, C_BTN_A);
         }
-        pill(cx - 60, top + 60, 120, "Guide", cur.guide, C_ACCENT);
-        pill(cx - 140, top + 110, 110, "Back", cur.back, C_ACCENT);
-        pill(cx + 30, top + 110, 110, "Start", cur.start, C_ACCENT);
+        pill(cx - 60, top + 60, 120, "Guide", ui_raw.guide, C_ACCENT);
+        pill(cx - 140, top + 110, 110, "Back", ui_raw.back, C_ACCENT);
+        pill(cx + 30, top + 110, 110, "Start", ui_raw.start, C_ACCENT);
         if (hold) {
             float f = (ui_ms() - hold) / 1000.0f;
             gfx_arc(SCR_W - M - 30.0f, SCR_H - 34.0f, 12, 4, -1.5708f, -1.5708f + 6.2832f * f, C_BAD, 255);
@@ -363,7 +392,10 @@ void screen_settings(void)
                         cloud_sync(0);
                         ui_toast("Connected", net_ip());
                     }
-                } else if (rows[sel] == S_SYSTEM) system_info();
+                } else if (rows[sel] == S_THEME) screen_theme();
+                else if (rows[sel] == S_ACCESS) screen_access();
+                else if (rows[sel] == S_BLUETOOTH) screen_bluetooth();
+                else if (rows[sel] == S_SYSTEM) system_info();
                 else if (rows[sel] == S_CONTROLLER) controller_test();
                 else if (rows[sel] == S_ABOUT) about();
                 else if (rows[sel] == S_SIGN_OUT) {

@@ -1200,12 +1200,13 @@ static void draw_cmdbar(int x, int y, int w)
 static void draw_console(int px, int py, int pw, int ph)
 {
     int x, w, lh, y, i, clip[4], skip = console_back;
+    int sw = gfx_text_large() ? gfx_str_w(FONT_SMALL, "00:00:00") + 20 : 86;     /* the time, then the line */
     if (ui_desktop) {
         draw_cmdbar(px, py + ph - CMD_H, pw);
         ph -= CMD_H + CMD_GAP;
     }
     x = px + 24;
-    w = pw - 48 - 86;
+    w = pw - 48 - sw;
     lh = gfx_line_h(FONT_SMALL) + 3;
     y = py + ph - 18;
     ui_panel(px, py, pw, ph);
@@ -1217,10 +1218,10 @@ static void draw_console(int px, int py, int pw, int ph)
         const char *t = console_text(con[i].text, stamp);
         int lines;
         if (skip > 0) { skip--; continue; }
-        lines = wrap(FONT_SMALL, x + 86, 0, w, 3, 0, t, 6, 0);
+        lines = wrap(FONT_SMALL, x + sw, 0, w, 3, 0, t, 6, 0);
         y -= lines * lh;
         if (stamp[0]) gfx_str(FONT_SMALL, x, y, C_DIM, stamp);
-        wrap(FONT_SMALL, stamp[0] ? x + 86 : x, y, stamp[0] ? w : w + 86, 3, line_color(con[i].kind), t, 6, 1);
+        wrap(FONT_SMALL, stamp[0] ? x + sw : x, y, stamp[0] ? w : w + sw, 3, line_color(con[i].kind), t, 6, 1);
     }
     gfx_set_clip(clip[0], clip[1], clip[2], clip[3]);
     if (console_back > 0) {

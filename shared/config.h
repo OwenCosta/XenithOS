@@ -6,7 +6,7 @@
 /* Files XenithOS keeps on the USB stick, all plain key=value text:
  *
  *   xenith/config.txt    written by you or build.sh: server address, console key
- *   xenith/settings.txt  written by XenithOS: volume, sounds, inbox position
+ *   xenith/settings.txt  written by XenithOS: volume, sounds, inbox position, theme
  *   xenith/profile.txt   written by XenithOS: the signed-in account
  *   xenith/route.txt     written by XenithOS: other ways to reach XenithOS Cloud, checked at
  *                        each start (cloud_route_check): its address on this network, when
@@ -32,6 +32,14 @@ struct xenith_settings {
     char last_app[96];        /* most recently launched app */
     int crash_reports;        /* 0/1: send crash reports without asking (crash.h); off at first */
     int cloud_saves;          /* keep saves and settings in step with the profile's cloud saves */
+    char theme[16];           /* the colour theme's id (theme.h); "" is the first one */
+    char wallpaper[16];       /* the home screen's wallpaper (source/wallpaper.c); "" is none */
+    int text_large;           /* Accessibility: bigger text */
+    int high_contrast;        /* Accessibility: high contrast */
+    /* Accessibility > Buttons: for each of ui.h's PADB_* jobs, the controller's button that
+     * does it, plus one (0: its own button). Kept in settings.txt as "buttons=a:b,b:a". */
+    signed char pad_map[12];
+    int swap_sticks;          /* the left stick does the right stick's job and back */
 };
 
 struct xenith_profile {
@@ -52,8 +60,9 @@ void route_save(const char *lan, const char *id);   /* use lan from now on, and 
 void route_forget(void);                             /* back to server_https or server_main */
 void https_save(const char *addr);                   /* PCs: use this "https://" address away from home, and remember it */
 void https_forget(void);                             /* back to server_main away from home */
-void settings_load(void);
+void settings_load(void);    /* and settings_apply() */
 void settings_save(void);
+void settings_apply(void);   /* the theme, contrast and text size in st, put to use */
 void profile_load(void);
 void profile_save(void);
 void profile_clear(void);

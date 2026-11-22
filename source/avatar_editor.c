@@ -101,7 +101,12 @@ int avatar_editor(char *code)
         }
 
         ui_bg();
-        ui_header("Avatar", "Make it yours. LB and RB switch between face, hair and outfit.");
+        {
+            char sub[96];                  /* the bumpers as Accessibility > Buttons has them */
+            snprintf(sub, sizeof sub, "Make it yours. %s and %s switch between face, hair and outfit.",
+                     ui_pad_say("LB"), ui_pad_say("RB"));
+            ui_header("Avatar", sub);
+        }
         pop = ui_ease(pop, 0, 0.25f);
         avatar_draw_v(v, M, top + 10, size);                 /* fixed size, so it stays cached */
         if (pop > 0.02f) {                                   /* a ring flashes out on each change */

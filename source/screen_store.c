@@ -1654,9 +1654,13 @@ void screen_store(void)
         if (sel >= nview) sel = nview ? nview - 1 : 0;
 
         ui_bg();
-        ui_header("Store", !has_tabs ? "Apps, games and updates from XenithOS Cloud"
-                           : tab_count(TAB_STEAM) ? "Apps, Steam games and XenithOS updates. LB and RB switch sections."
-                                                  : "Apps and XenithOS updates. LB and RB switch sections.");
+        {
+            char sub[100];                 /* the bumpers as Accessibility > Buttons has them */
+            snprintf(sub, sizeof sub, "%s. %s and %s switch sections.",
+                     tab_count(TAB_STEAM) ? "Apps, Steam games and XenithOS updates" : "Apps and XenithOS updates",
+                     ui_pad_say("LB"), ui_pad_say("RB"));
+            ui_header("Store", !has_tabs ? "Apps, games and updates from XenithOS Cloud" : sub);
+        }
         list_top = top + (has_tabs ? draw_tabs(M, top, listw) : 0);
         if (tab_hl < 0) tab_hl = 0;
         visible = (SCR_H - list_top - 70) / rowh;

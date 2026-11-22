@@ -2,9 +2,11 @@
 # side panel over the game, Switch game, the controller as the pointer, then Return home, which
 # leaves a Flathub game running (its card says so), and starting another asks to close it first.
 #   XSIM_KIND=pc XSIM_GUIDE=1 XSIM_OTHER="roblox minecraft" sim/run.sh sim/scripts/guide.txt guide
+# The row is by name: DOOM, Minecraft, Music, Photos, Roblox, Tube, VOLT.
 wait 210
 press down
 wait 10
+press right
 press right
 press right
 press right

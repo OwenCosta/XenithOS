@@ -1,14 +1,20 @@
 # An app without a picture (Prism Launcher's tile): its name fits the card, big on the home row
 # and small in the Apps list.
 #   XSIM_KIND=pc XSIM_OTHER="minecraft prism-launcher:Prism_Launcher" sim/run.sh sim/scripts/placeholder.txt placeholder
+# By name: DOOM, Minecraft, Music, Photos, Prism Launcher, Tube, VOLT. The row slides to its card.
 wait 210
 press down
-wait 20
+press right
+press right
+press right
+press right
+wait 30
 shot home_cards
 press up
 wait 10
 press a
 wait 40
+press down
 press down
 press down
 press down

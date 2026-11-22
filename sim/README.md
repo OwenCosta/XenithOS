@@ -21,7 +21,8 @@ Xbox, and the server's log to see which way each request came. Screenshots go to
 
 Environment: `XSIM_KEY` (console key for the inbox), `XSIM_PROFILE` (a profile.txt to boot signed in),
 `XSIM_BIN` (`xsim` or `xvolt`), `XSIM_KEEP=1` (the stick as the last run with that name left it, like a
-console used again), `XSIM_UDA` (a folder of files to put on the stick too).
+console used again), `XSIM_UDA` (a folder of files to put on the stick too), `XSIM_SETTINGS` (settings.txt
+to start with, its lines separated by spaces: `XSIM_SETTINGS="theme=ocean wallpaper=peaks"`).
 
 Checks for things that only exist on the console:
 
@@ -53,6 +54,18 @@ More switches:
   first (`sim/scripts/minenest.txt`). It runs in real time, since MineNest and the stand-in do. MineNest's
   program stops afterwards, with any server a script left running. The stand-in answers server list pings on
   its port (on `server-ip`, or 127.0.0.1).
+- `XSIM_BIN=xmusic XSIM_MUSIC=<folder>` runs Music with that folder as the stick's `music` folder
+  (`sim/scripts/music.txt`). `sim/music/make-music.sh <folder>` makes a library to try it with, all synthesized
+  here (MP3, FLAC, Ogg and WAV at different rates, tags, covers inside the songs and beside them, accented
+  names, a compilation, a broken file); it needs ffmpeg with lame and vorbis. `sim/music/test-tones.sh` plays an
+  album of four steady tones, one per format, and checks what was heard: each at its pitch, in order, with no
+  gap or click between them.
+- Bluetooth (`XSIM_KIND=pc`, Settings > Bluetooth controllers) runs the PC's own code
+  (`linux/bluetooth_linux.c`) against a stand-in for BlueZ's `bluetoothctl` (`sim/bluetooth/bluetoothctl`),
+  never this PC's Bluetooth: an 8BitDo controller already paired but asleep, an Xbox controller, a DualSense
+  that turns the first pairing down, a TV and a device with no name. `XSIM_BT=none` has no adapter,
+  `XSIM_BT=blocked` has Bluetooth switched off, and `XSIM_BLUETOOTHCTL=/nowhere` has no BlueZ. Use
+  `XSIM_THREAD=1`, since the stand-in runs in real time (`sim/scripts/bluetooth.txt`, `bluetooth_off.txt`).
 - `XSIM_STORE_KEY=<public key in hex>` makes the Store trust that key instead of `source/store_key.h`'s, so a
   local XenithOS Cloud can sign with a key made for a test (`xenith_cloud.py store-key new`), and
   `XSIM_STORE_KEY=none` acts as a build without one. The Store's checks go to the log as `store: <reply>:

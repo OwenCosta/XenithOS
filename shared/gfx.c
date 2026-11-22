@@ -494,6 +494,25 @@ static const struct font *F(int font)
     return &font_table[font];
 }
 
+static int text_large;
+
+void gfx_text_size(int large)
+{
+    text_large = large != 0;
+    memcpy(font_table, font_sizes[text_large], sizeof font_table);
+}
+
+int gfx_text_large(void)
+{
+    return text_large;
+}
+
+int gfx_line_grow(int font)
+{
+    const struct font *f = &font_sizes[0][font];
+    return gfx_line_h(font) - (f->ascent + f->descent);
+}
+
 static const struct font_glyph *G(const struct font *f, char ch)
 {
     unsigned char c = (unsigned char)ch;
@@ -609,6 +628,11 @@ int gfx_wrap_a(int font, int x, int y, int w, int gap, uint32_t c, int a, const 
         lines++;
     }
     return lines;
+}
+
+int gfx_wrap_lines(int font, int w, const char *s, int max_lines)
+{
+    return gfx_wrap_a(font, 0, 0, w, 0, 0, 0, s, max_lines);     /* at alpha 0 nothing is drawn */
 }
 
 /* --------------------------------------------- 5x7 pixel font (brand wordmark) */

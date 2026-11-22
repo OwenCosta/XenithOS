@@ -10,6 +10,9 @@ void screen_cloud(void);
 void screen_profile(void);
 void screen_settings(void);
 void screen_feedback(void);                 /* bugs and ideas, sent to XenithOS Cloud */
+void screen_theme(void);                    /* Settings > Theme: colours and the wallpaper */
+void screen_access(void);                   /* Settings > Accessibility */
+void screen_bluetooth(void);                /* Settings > Bluetooth controllers (PCs and Pis) */
 void screen_friends(void);                  /* friends: who's on, what they play, requests */
 
 /* screen_friends.c: the friends list from XenithOS Cloud, which the Cloud screen shows too */

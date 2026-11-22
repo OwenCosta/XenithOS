@@ -15,5 +15,7 @@
  {"id": "xenith", "kind": "system", "name": "XenithOS update", "version": "0.5.7", "file": "xenith.elf32",
   "description": "Updates XenithOS itself on your USB stick."},
  {"id": "xenithos-pc", "kind": "pc", "name": "XenithOS update", "version": "0.5.7", "file": "xenithos-pc.tar.gz",
-  "description": "XenithOS for PCs and Raspberry Pis. It builds itself on your machine from its source."}
+  "description": "XenithOS for PCs and Raspberry Pis. It builds itself on your machine from its source."},
+ {"id": "music", "kind": "app", "name": "Music", "version": "1.0", "file": "music.elf32",
+  "description": "Your own MP3, OGG, FLAC and WAV songs from a music folder, by album, artist or song."}
 ]

@@ -30,6 +30,9 @@ press down
 press down
 press down
 press down
+press down
+press down
+press down
 wait 10
 press a
 wait 30

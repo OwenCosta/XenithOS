@@ -1,0 +1,79 @@
+# Settings > Bluetooth controllers on a PC, against the stand-in bluetoothctl (sim/bluetooth): the
+# controllers it hears, pairing the Xbox one (pair, trust, connect), the DualSense turning the first
+# try down and pairing on the second, the 8BitDo that's paired but asleep (connecting fails, then
+# works), every device with Y, and forgetting one with X. Real time, since the stand-in is:
+#   XSIM_KIND=pc XSIM_THREAD=1 sim/run.sh sim/scripts/bluetooth.txt bluetooth
+# The list starts 8BitDo Pro 2 (paired), DualSense, Xbox (both heard as loud: by name). Connected
+# ones go to the top, and what's chosen stays chosen as the list moves.
+wait 240
+press right
+press right
+press right
+press right
+press right
+wait 5
+press a
+wait 30
+press down
+press down
+press down
+press down
+press down
+press down
+press down
+press down
+wait 10
+shot settings_bluetooth_row
+press a
+wait 20
+shot starting
+wait 180
+shot heard
+press down
+press down
+wait 10
+shot xbox_chosen
+press a
+wait 30
+shot xbox_pairing
+wait 150
+shot xbox_connected
+press down
+press down
+wait 10
+press a
+wait 150
+shot dualsense_said_no
+press a
+wait 20
+press a
+wait 60
+shot dualsense_pairing_again
+wait 100
+shot dualsense_connected
+press down
+press down
+wait 10
+press a
+wait 100
+shot eightbitdo_asleep
+press a
+wait 20
+press a
+wait 100
+shot eightbitdo_connected
+press y
+wait 20
+shot every_device
+press y
+wait 10
+press x
+wait 20
+shot forget_asking
+press a
+wait 60
+shot forgotten
+press b
+wait 30
+shot settings_after
+quit

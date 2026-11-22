@@ -325,7 +325,10 @@ static int viewer(int i, int slideshow)
             slideshow = !slideshow;
             slide_at = ui_ms();
             sfx(SFX_SELECT);
-            if (slideshow) ui_toast("Slideshow", "A new picture every 5 seconds. X stops it.");
+            if (slideshow) {
+                snprintf(label, sizeof label, "A new picture every 5 seconds. %s stops it.", ui_pad_say("X"));
+                ui_toast("Slideshow", label);
+            }
         }
         if (PRESSED(right) || PRESSED(rb)) step = 1;
         if (PRESSED(left) || PRESSED(lb)) step = -1;

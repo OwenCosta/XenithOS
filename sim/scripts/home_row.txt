@@ -1,5 +1,6 @@
 # "Jump back in" with more apps than fit: it slides to keep the selected one in view.
 #   XSIM_APPS=8 sim/run.sh sim/scripts/home_row.txt home_row
+# The row is by name: DOOM, Game 1 to 8, Music, Photos, Tube, VOLT (13).
 wait 200
 press down
 wait 20
@@ -17,8 +18,10 @@ press right
 press right
 press right
 press right
+press right
 wait 30
 shot row_last
+press left
 press left
 press left
 press left
