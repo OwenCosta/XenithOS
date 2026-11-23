@@ -101,7 +101,7 @@ menu. All of them keep XenithOS Console's data, so scores, saves and HostMC's se
   click) changes it, and text (the server's message, names, a VPS's address) is typed into a text box
   with Ctrl+V to paste. The console page has a command line of its own: what's typed goes to the server,
   Tab switches to saying it to everyone, F2 has the quick commands. Links (the EULA, playit.gg's claim,
-  Patreon and OCAccounts for the supporter relay) open in the browser, and the command for a VPS can be
+  OCAccounts) open in the browser, and the command for a VPS can be
   copied. The server keeps running when HostMC's window is closed, as it does when you leave it on the
   console. This needs a XenithOS Console with desktop mode for them; an older one opens them in a window
   as they are.

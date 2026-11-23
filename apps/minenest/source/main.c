@@ -2,8 +2,8 @@
  *
  * The servers themselves are run by MineNest (github.com/OwenCosta/minenest), its own project for
  * Windows and Linux: a background service that downloads the server and Java, runs it, installs
- * mods and plugins from Modrinth, keeps backups, and connects playit.gg, a VPS or the supporter
- * relay. This app is its screen on XenithOS, in XenithOS's own look, for a controller or a mouse
+ * mods and plugins from Modrinth, keeps backups, and connects playit.gg or a VPS. This app is its
+ * screen on XenithOS, in XenithOS's own look, for a controller or a mouse
  * (api.c talks to the service). The pages, down the left:
  *   Server    which server, its state, where to join, start and stop, a new one
  *   Console   what the server says, and commands typed to it
@@ -12,11 +12,11 @@
  *   Settings  the game's settings, memory, starting with MineNest
  *   Version   the server type, Minecraft version and loader
  *   World     backups, putting one back, a new world
- *   Internet  playit.gg, the supporter relay, Bedrock players
+ *   Internet  playit.gg, Bedrock players
  *
  * Servers keep running after the app closes: the service runs them. Before a server's first start
  * the user agrees to Minecraft's EULA themselves; MineNest never agrees for them. The XenithOS
- * profile that's signed in is handed to MineNest for the supporter relay. A server HostMC made is
+ * profile that's signed in is handed to MineNest, for its OCAccount sign-in. A server HostMC made is
  * offered for bringing in (MineNest copies it). On XenithOS Desktop, MineNest's own window can be
  * opened from the Server page. PCs only: an Xbox can't run the server.
  */
@@ -239,7 +239,7 @@ enum {
     S_MODE, S_DIFF, S_MAX, S_MOTD, S_ONLINE, S_RAM, S_AUTOSTART, S_RESTART, S_PORT, S_RENAME, S_DELETE,
     V_TYPE, V_VERSION, V_BUILD, V_CHANGE, V_REPAIR,
     W_BACKUP, W_RESET,
-    N_WAY, N_CHECK, N_FORGET, N_RELAY_NAME, N_RELAY_STATUS, N_BEDROCK, N_GEYSER, N_REALIP,
+    N_WAY, N_CHECK, N_FORGET, N_BEDROCK, N_GEYSER,
     ID_ADDON = 100, ID_PLAYER = 200, ID_WL = 300, ID_OP = 400, ID_BACKUP = 500,
 };
 
@@ -259,8 +259,8 @@ static const int ram_steps[] = {1024, 1536, 2048, 3072, 4096, 5120, 6144, 8192, 
 #define NRAM ((int)(sizeof ram_steps / sizeof ram_steps[0]))
 static const char *const flavor_ids[6] = {"paper", "vanilla", "fabric", "neoforge", "forge", "purpur"};
 static const char *const flavor_names[6] = {"Paper", "Vanilla", "Fabric", "NeoForge", "Forge", "Purpur"};
-static const char *const ways[3] = {"", "playit", "relay"};
-static const char *const way_names[3] = {"Only at home", "playit.gg", "Supporter relay"};
+static const char *const ways[2] = {"", "playit"};
+static const char *const way_names[2] = {"Only at home", "playit.gg"};
 
 static int index_of(const char *const *list, int n, const char *v, int fallback)
 {
@@ -274,7 +274,7 @@ static int index_of(const char *const *list, int n, const char *v, int fallback)
 
 /* What a page shows besides the server list, fetched when the page opens and every few seconds. */
 static char *props;                        /* server.properties as JSON */
-static char *addons, *players_json, *backups_json, *relay_json;
+static char *addons, *players_json, *backups_json;
 static uint64_t data_at;
 static char data_for[40];
 static int data_page = -1;
@@ -304,7 +304,6 @@ static void load_page_data(int force)
     case P_MODS: replace(&addons, fetch(sp("/addons"))); break;
     case P_PLAYERS: replace(&players_json, fetch(sp("/players"))); break;
     case P_WORLD: replace(&backups_json, fetch(sp("/backups"))); break;
-    case P_INTERNET: replace(&relay_json, fetch("/api/account")); break;
     }
 }
 
@@ -758,8 +757,8 @@ static void build_world(void)
 
 static void build_internet(void)
 {
-    char v[300], name[40] = "", msgtxt[260] = "", address[128] = "", step[16] = "", patreon[160] = "";
-    int w = index_of(ways, 3, S->way.kind, 0);
+    char v[300];
+    int w = index_of(ways, 2, S->way.kind, 0);
     if (!strcmp(S->way.kind, "vps")) {
         add(R_INFO, 0, "Way in", "Your own VPS");
         add(R_TEXT, 0, NULL, "Set up in MineNest's window (Open MineNest's window on the Server page).")->color = C_DIM;
@@ -779,27 +778,12 @@ static void build_internet(void)
         if (strcmp(S->way.kind, "playit") && running()) add(R_BUTTON, N_CHECK, "Check from the internet", NULL);
         if (!strcmp(S->way.kind, "playit")) add(R_BUTTON, N_FORGET, "Forget playit.gg on this PC", NULL);
     }
-    if (!strcmp(S->way.kind, "relay") || w == 2) {
-        str_of(relay_json, "name", name, sizeof name);
-        str_of(relay_json, "message", msgtxt, sizeof msgtxt);
-        str_of(relay_json, "address", address, sizeof address);
-        str_of(relay_json, "step", step, sizeof step);
-        str_of(relay_json, "patreon", patreon, sizeof patreon);
-        add(R_HEAD, 0, "Supporter relay", "for supporters on Patreon");
-        if (msgtxt[0]) add(R_TEXT, 0, NULL, msgtxt);
-        if (name[0]) add(R_INFO, 0, "Your address", address)->color = C_OK;
-        if ((!strcmp(step, "patreon") || !strcmp(step, "tier")) && patreon[0]) add(R_QR, 0, "Become a supporter on Patreon: scan this with your phone.", patreon);
-        if (!strcmp(step, "ok")) add(R_BUTTON, N_RELAY_NAME, name[0] ? "Change the name" : "Pick a name", NULL);
-        add(R_BUTTON, N_RELAY_STATUS, "Check my membership", NULL);
-        if (!strcmp(S->flavor, "paper") || !strcmp(S->flavor, "purpur"))
-            add(R_ITEM, N_REALIP, "Players' real addresses", js_bool(js_key(relay_json, "proxy_able")) ? (S->bedrock_on ? "Off with Bedrock" : "On") : "Not yet")->cycle = 0;
-    }
     if (!strcmp(S->flavor, "paper") || !strcmp(S->flavor, "purpur")) {
         add(R_HEAD, 0, "Bedrock players", "phones, consoles, Windows");
         add(R_ITEM, N_BEDROCK, "Let Bedrock players join", S->bedrock_on ? "On" : "Off")->cycle = 1;
         if (S->bedrock_on) add(R_BUTTON, N_GEYSER, "Update Geyser", NULL);
     }
-    snprintf(footer, sizeof footer, "Players at home and on this PC always join directly. Your OCAccount's XenithOS profile is the one the relay knows.");
+    snprintf(footer, sizeof footer, "Players at home and on this PC always join directly.");
 }
 
 static void build(void)
@@ -903,20 +887,6 @@ static void ask_player(const char *action, const char *title)
     char name[20] = "";
     if (!ask_text(title, "Their Minecraft name", name, 16) || !name[0]) return;
     player_act(action, name);
-}
-
-static void relay_name(void)
-{
-    char name[24] = "", suggest[24] = "", json[100];
-    str_of(relay_json, "name", name, sizeof name);
-    str_of(relay_json, "suggest", suggest, sizeof suggest);
-    if (!name[0]) snprintf(name, sizeof name, "%s", suggest);
-    if (!ask_text("Your server's name", "3 to 20 small letters, numbers and hyphens", name, 20) || !name[0]) return;
-    snprintf(json, sizeof json, "{\"name\":\"%s\"}", name);
-    if (call("POST", "/api/relay/claim", json, "That name didn't work")) {
-        ui_toast_icon(ICON_NETWORK);
-        ui_toast("It's yours", "Friends can use it once the server is on.");
-    }
 }
 
 static void choose_build(void)
@@ -1062,17 +1032,15 @@ static void act(int id, int dir)
             call("POST", sp("/world/reset"), "{}", "It didn't work");
         return;
     case N_WAY:
-        i = (index_of(ways, 3, S->way.kind, 0) + d + 3) % 3;
+        i = (index_of(ways, 2, S->way.kind, 0) + d + 2) % 2;
         snprintf(json, sizeof json, "{\"kind\":\"%s\"}", ways[i]);
-        call("POST", sp("/way"), json, i == 2 ? "The supporter relay isn't ready" : "That didn't work");
+        call("POST", sp("/way"), json, "That didn't work");
         return;
     case N_CHECK: call("POST", sp("/recheck"), NULL, "The check didn't start"); return;
     case N_FORGET:
         if (ui_confirm("Forget playit.gg?", "This PC is disconnected from your playit.gg account. You can connect it again.", "Forget", "Cancel"))
             call("POST", "/api/playit/forget", NULL, "It couldn't be forgotten");
         return;
-    case N_RELAY_NAME: relay_name(); return;
-    case N_RELAY_STATUS: call("POST", "/api/relay/status", "{}", "XenithOS Cloud didn't answer"); return;
     case N_BEDROCK:
         call("POST", sp("/bedrock"), S->bedrock_on ? "{\"on\":false}" : "{\"on\":true}", "Bedrock players couldn't be turned on");
         return;
@@ -1540,7 +1508,7 @@ static void share_poll(void)
     if (any) social_flush();
 }
 
-/* The XenithOS profile that's signed in goes to MineNest, for the supporter relay. */
+/* The XenithOS profile that's signed in goes to MineNest, for its OCAccount sign-in. */
 static void hand_over_profile(void)
 {
     struct mn_resp r;
@@ -1598,12 +1566,6 @@ static int enter_page(void)
     sel_id = first_selectable();
     sel_y_hl = -1;
     reveal = 1;
-    if (page == P_INTERNET && nsrv && !strcmp(S->way.kind, "relay")) {
-        struct mn_resp r;
-        mn_call("POST", "/api/relay/status", "{}", &r);       /* as it is now */
-        mn_free(&r);
-        load_page_data(1);
-    }
     return 1;
 }
 

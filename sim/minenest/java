@@ -18,7 +18,7 @@ Paper would (their log lines, Geyser's plugins/Geyser-Spigot/config.yml made the
 then takes Floodgate's "fwhitelist add NAME" (the player goes in whitelist.json as .NAME).
 
 Like Paper with proxies.proxy-protocol on in config/paper-global.yml (which HostMC turns on for
-players' real addresses through its supporter relay), it then wants a PROXY protocol header, v2 or
+players' real addresses through a proxy), it then wants a PROXY protocol header, v2 or
 v1, at the start of every connection, takes the player's address from it, and closes a connection
 without one. Who each connection was from goes in connections.log ("status 203.0.113.7",
 "join ...", "no PROXY header from ..."), for tests.

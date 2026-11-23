@@ -114,13 +114,6 @@ jobs:
         run: python3 server/xenith_cloud.py --selftest
       - name: XenithOS Cloud's relay
         run: python3 server/xenith-relay.py --selftest
-      - name: The supporter relay (server/mcrelay)
-        run: |
-          if [ ! -f server/mcrelay/mcrelay.py ]; then
-            echo "::notice::server/mcrelay isn't on this branch yet: it comes with hostmc-relay"
-            exit 0
-          fi
-          python3 server/mcrelay/mcrelay.py --selftest
 
   minenest:
     name: MineNest, ${{ matrix.test }}

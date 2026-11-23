@@ -177,11 +177,11 @@ app is its screen, in XenithOS's look, for a controller or the mouse.
   it's needed, and talks to it on the loopback with the key in its folder. Servers keep running after
   the app closes. `minenest help` in a terminal does everything the app does.
 - Paper, Purpur, Fabric, NeoForge, Forge or Minecraft's own, any version and loader; mods, plugins
-  and modpacks from Modrinth; backups; players; settings; playit.gg, a VPS of your own or the
-  supporter relay; Bedrock players through Geyser. MineNest's README says how each works.
+  and modpacks from Modrinth; backups; players; settings; playit.gg or a VPS of your own;
+  Bedrock players through Geyser. MineNest's README says how each works.
 - Before a server's first start the app shows Minecraft's EULA (https://aka.ms/MinecraftEULA) and
   starts it only once you've agreed.
-- The XenithOS profile you're signed in with is handed to MineNest, for the supporter relay. On a
+- The XenithOS profile you're signed in with is handed to MineNest, for its OCAccount sign-in. On a
   PC without XenithOS, MineNest signs in with your OCAccount instead.
 - A server HostMC made (`~/.local/share/xenithos/hostmc/server`) is offered for bringing in on the
   Server page: MineNest copies it, world and all, and leaves HostMC's folder as it was.
